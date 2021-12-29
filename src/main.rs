@@ -124,13 +124,10 @@ impl Background {
                     info!("Image dimensions are identical to output's. Skipped resize!!");
                     img
                 };
-                // The ARGB is 'little endian', so here we must do a slight adaptation
-                // Specifically, we must put the order of bytes 'in reverse', so it needs to be
-                // BGRA, which we achieve by swaping the R and B on our original vector
-                let mut img = resized_img.to_rgba8().to_vec();
-                for pixel in img.chunks_exact_mut(4) {
-                    pixel.swap(0, 2);
-                }
+
+                // The ARGB is 'little endian', so here we must  put the order
+                // of bytes 'in reverse', so it needs to be BGRA.
+                let img = resized_img.to_bgra8().to_vec();
                 info!("Img is ready!");
 
                 self.img = Some(img);
