@@ -111,9 +111,17 @@ impl Background {
             Some(RenderEvent::Configure { width, height }) => {
                 self.dimensions = (width, height);
                 let img = image::open(&self.img_path).unwrap();
-                let resized_img = if img.dimensions() != self.dimensions {
+                let img_dimensions = img.dimensions();
+                info!("Output dimensions: width: {} height: {}", width, height);
+                info!(
+                    "Image dimensions:  width: {} height: {}",
+                    img_dimensions.0, img_dimensions.1
+                );
+                let resized_img = if img_dimensions != self.dimensions {
+                    info!("Image dimensions are different from output's. Resizing...");
                     img.resize_to_fill(width, height, imageops::FilterType::Lanczos3)
                 } else {
+                    info!("Image dimensions are identical to output's. Skipped resize!!");
                     img
                 };
                 // The ARGB is 'little endian', so here we must do a slight adaptation
