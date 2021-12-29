@@ -17,13 +17,12 @@ use smithay_client_toolkit::{
 
 use std::{
     cell::{Cell, RefCell},
-    path::Path,
     rc::Rc,
 };
 
 use log::{debug, error, info, warn};
 
-use image;
+use image::{self, imageops};
 
 default_environment!(Env,
     fields = [
@@ -46,7 +45,8 @@ struct Background {
     next_render_event: Rc<Cell<Option<RenderEvent>>>,
     pool: AutoMemPool,
     dimensions: (u32, u32),
-    img: Vec<u8>,
+    img_path: String,
+    img: Option<Vec<u8>>,
 }
 
 impl Background {
@@ -55,19 +55,8 @@ impl Background {
         surface: wl_surface::WlSurface,
         layer_shell: &Attached<zwlr_layer_shell_v1::ZwlrLayerShellV1>,
         pool: AutoMemPool,
-        img_path: &Path,
+        img_path: String,
     ) -> Option<Self> {
-        let img = image::open(img_path).unwrap();
-        let mut img = img.to_rgba8().to_vec();
-
-        // The ARGB is 'little endian', so here we must do a slight adaptation
-        // Specifically, we must put the order of bytes 'in reverse', so it needs to be
-        // BGRA, which we achieve by swaping the R and B on our original vector
-        for pixel in img.chunks_exact_mut(4) {
-            pixel.swap(0, 2);
-        }
-        info!("Img is ready!");
-
         let layer_surface = layer_shell.get_layer_surface(
             &surface,
             Some(output),
@@ -108,7 +97,8 @@ impl Background {
             layer_surface,
             next_render_event,
             pool,
-            img,
+            img_path,
+            img: None,
             dimensions: (0, 0),
         })
     }
@@ -120,6 +110,21 @@ impl Background {
             Some(RenderEvent::Closed) => true,
             Some(RenderEvent::Configure { width, height }) => {
                 self.dimensions = (width, height);
+                let img = image::open(&self.img_path).unwrap();
+                let mut img = img
+                    .resize_to_fill(width, height, imageops::FilterType::Lanczos3)
+                    .to_rgba8()
+                    .to_vec();
+
+                // The ARGB is 'little endian', so here we must do a slight adaptation
+                // Specifically, we must put the order of bytes 'in reverse', so it needs to be
+                // BGRA, which we achieve by swaping the R and B on our original vector
+                for pixel in img.chunks_exact_mut(4) {
+                    pixel.swap(0, 2);
+                }
+                info!("Img is ready!");
+
+                self.img = Some(img);
                 self.draw();
                 false
             }
@@ -128,28 +133,30 @@ impl Background {
     }
 
     fn draw(&mut self) {
-        let stride = 4 * self.dimensions.0 as i32;
-        let width = self.dimensions.0 as i32;
-        let height = self.dimensions.1 as i32;
+        if let Some(img) = &self.img {
+            let stride = 4 * self.dimensions.0 as i32;
+            let width = self.dimensions.0 as i32;
+            let height = self.dimensions.1 as i32;
 
-        // Note: unwrap() is only used here in the interest of simplicity of the example.
-        // A "real" application should handle the case where both pools are still in use by the
-        // compositor.
-        let (canvas, buffer) = self
-            .pool
-            .buffer(width, height, stride, wl_shm::Format::Argb8888)
-            .unwrap();
+            // Note: unwrap() is only used here in the interest of simplicity of the example.
+            // A "real" application should handle the case where both pools are still in use by the
+            // compositor.
+            let (canvas, buffer) = self
+                .pool
+                .buffer(width, height, stride, wl_shm::Format::Argb8888)
+                .unwrap();
 
-        canvas.copy_from_slice(self.img.as_slice());
-        info!("Copied bytes to canvas.");
+            canvas.copy_from_slice(img.as_slice());
+            info!("Copied bytes to canvas.");
 
-        // Attach the buffer to the surface and mark the entire surface as damaged
-        self.surface.attach(Some(&buffer), 0, 0);
-        self.surface
-            .damage_buffer(0, 0, width as i32, height as i32);
+            // Attach the buffer to the surface and mark the entire surface as damaged
+            self.surface.attach(Some(&buffer), 0, 0);
+            self.surface
+                .damage_buffer(0, 0, width as i32, height as i32);
 
-        // Finally, commit the surface
-        self.surface.commit();
+            // Finally, commit the surface
+            self.surface.commit();
+        }
     }
 }
 
@@ -200,7 +207,7 @@ fn main() {
                 surface,
                 &layer_shell.clone(),
                 pool,
-                Path::new(&img_path),
+                img_path.clone(),
             ) {
                 (*surfaces_handle.borrow_mut()).push((info.id, s));
             }
