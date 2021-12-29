@@ -161,7 +161,17 @@ impl Drop for Background {
 }
 
 fn main() {
+    //If using a debug build, we generaly want to see all the logging
+    #[cfg(debug_assertions)]
+    env_logger::Builder::new()
+        .filter_level(log::LevelFilter::Debug)
+        .init();
+
+    //If using a release build, we let the user decide
+    #[cfg(not(debug_assertions))]
     env_logger::init();
+
+    info!("Starting...");
     let img_path = std::env::args().last().unwrap();
     let (env, display, queue) =
         new_default_environment!(Env, fields = [layer_shell: SimpleGlobal::new(),])
