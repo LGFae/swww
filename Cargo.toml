@@ -8,3 +8,5 @@ edition = "2018"
 [dependencies]
 smithay-client-toolkit = "0.15"
 image = "0.23"
+log = "0.4"
+env_logger = "0.9"

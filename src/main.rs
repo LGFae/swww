@@ -18,8 +18,10 @@ use smithay_client_toolkit::{
 use std::{
     cell::{Cell, RefCell},
     path::Path,
+    rc::Rc,
 };
-use std::{ptr::swap, rc::Rc};
+
+use log::{debug, error, info, warn};
 
 use image;
 
@@ -64,6 +66,7 @@ impl Background {
         for pixel in img.chunks_exact_mut(4) {
             pixel.swap(0, 2);
         }
+        info!("Img is ready!");
 
         let layer_surface = layer_shell.get_layer_surface(
             &surface,
@@ -138,11 +141,7 @@ impl Background {
             .unwrap();
 
         canvas.copy_from_slice(self.img.as_slice());
-        //for (i, pixel) in canvas.iter_mut().enumerate() {
-        //    *pixel = self.img[i];
-        //}
-
-        println!("Done copying");
+        info!("Copied bytes to canvas.");
 
         // Attach the buffer to the surface and mark the entire surface as damaged
         self.surface.attach(Some(&buffer), 0, 0);
@@ -162,6 +161,7 @@ impl Drop for Background {
 }
 
 fn main() {
+    env_logger::init();
     let img_path = std::env::args().last().unwrap();
     let (env, display, queue) =
         new_default_environment!(Env, fields = [layer_shell: SimpleGlobal::new(),])
