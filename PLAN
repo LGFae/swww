@@ -4,9 +4,11 @@ These are the steps we will take while developing this program:
 
 	Put a png file instead (zigimg has a png reader). DONE
 
-	Scale the png before printing.
+	Scale the png before printing. DONE
 
 	Put a different png in every monitor.
+
+	If the same png are sent to different monitors, scale them only once.
 
 	Make a simple custom wayland protocol to talk to the program while it runs:
 		In the beginning, it will only have a message to change the file being rendered.
