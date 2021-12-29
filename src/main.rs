@@ -15,8 +15,13 @@ use smithay_client_toolkit::{
     WaylandSource,
 };
 
-use std::cell::{Cell, RefCell};
-use std::rc::Rc;
+use std::{
+    cell::{Cell, RefCell},
+    path::Path,
+};
+use std::{ptr::swap, rc::Rc};
+
+use image;
 
 default_environment!(Env,
     fields = [
@@ -33,26 +38,38 @@ enum RenderEvent {
     Closed,
 }
 
-struct Surface {
+struct Background {
     surface: wl_surface::WlSurface,
     layer_surface: Main<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1>,
     next_render_event: Rc<Cell<Option<RenderEvent>>>,
     pool: AutoMemPool,
     dimensions: (u32, u32),
+    img: Vec<u8>,
 }
 
-impl Surface {
+impl Background {
     fn new(
         output: &wl_output::WlOutput,
         surface: wl_surface::WlSurface,
         layer_shell: &Attached<zwlr_layer_shell_v1::ZwlrLayerShellV1>,
         pool: AutoMemPool,
+        img_path: &Path,
     ) -> Option<Self> {
+        let img = image::open(img_path).unwrap();
+        let mut img = img.to_rgba8().to_vec();
+
+        // The ARGB is 'little endian', so here we must do a slight adaptation
+        // Specifically, we must put the order of bytes 'in reverse', so it needs to be
+        // BGRA, which we achieve by swaping the R and B on our original vector
+        for pixel in img.chunks_exact_mut(4) {
+            pixel.swap(0, 2);
+        }
+
         let layer_surface = layer_shell.get_layer_surface(
             &surface,
             Some(output),
             zwlr_layer_shell_v1::Layer::Background,
-            "example".to_owned(),
+            "fswww".to_owned(),
         );
 
         layer_surface.set_anchor(zwlr_layer_surface_v1::Anchor::all());
@@ -88,6 +105,7 @@ impl Surface {
             layer_surface,
             next_render_event,
             pool,
+            img,
             dimensions: (0, 0),
         })
     }
@@ -119,13 +137,12 @@ impl Surface {
             .buffer(width, height, stride, wl_shm::Format::Argb8888)
             .unwrap();
 
-        for dst_pixel in canvas.chunks_exact_mut(4) {
-            let pixel = 0xff00ff00u32.to_ne_bytes();
-            dst_pixel[0] = pixel[0];
-            dst_pixel[1] = pixel[1];
-            dst_pixel[2] = pixel[2];
-            dst_pixel[3] = pixel[3];
-        }
+        canvas.copy_from_slice(self.img.as_slice());
+        //for (i, pixel) in canvas.iter_mut().enumerate() {
+        //    *pixel = self.img[i];
+        //}
+
+        println!("Done copying");
 
         // Attach the buffer to the surface and mark the entire surface as damaged
         self.surface.attach(Some(&buffer), 0, 0);
@@ -137,7 +154,7 @@ impl Surface {
     }
 }
 
-impl Drop for Surface {
+impl Drop for Background {
     fn drop(&mut self) {
         self.layer_surface.destroy();
         self.surface.destroy();
@@ -145,6 +162,7 @@ impl Drop for Surface {
 }
 
 fn main() {
+    let img_path = std::env::args().last().unwrap();
     let (env, display, queue) =
         new_default_environment!(Env, fields = [layer_shell: SimpleGlobal::new(),])
             .expect("Initial roundtrip failed!");
@@ -167,7 +185,13 @@ fn main() {
                 .create_auto_pool()
                 .expect("Failed to create a memory pool!");
 
-            if let Some(s) = Surface::new(&output, surface, &layer_shell.clone(), pool) {
+            if let Some(s) = Background::new(
+                &output,
+                surface,
+                &layer_shell.clone(),
+                pool,
+                Path::new(&img_path),
+            ) {
                 (*surfaces_handle.borrow_mut()).push((info.id, s));
             }
         }
