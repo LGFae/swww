@@ -2,10 +2,11 @@ These are the steps we will take while developing this program:
 
 	Put a simple white sheet to the background. DONE
 
-	Put a png file instead (zigimg has a png reader).
+	Put a png file instead (zigimg has a png reader). DONE
 
-	Scale the png file with pixman before putting it in the background.
-		For this, make sure the implementation allows for multiple filters to be chosen.
+	Scale the png before printing.
+
+	Put a different png in every monitor.
 
 	Make a simple custom wayland protocol to talk to the program while it runs:
 		In the beginning, it will only have a message to change the file being rendered.
