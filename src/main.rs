@@ -158,6 +158,9 @@ impl Background {
             canvas.copy_from_slice(img.as_slice());
             info!("Copied bytes to canvas.");
 
+            std::mem::drop(img);
+            self.img = None;
+
             // Attach the buffer to the surface and mark the entire surface as damaged
             self.surface.attach(Some(&buffer), 0, 0);
             self.surface
