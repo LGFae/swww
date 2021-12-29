@@ -55,9 +55,6 @@ impl Surface {
             "example".to_owned(),
         );
 
-        let dimensions = with_output_info(&output, Clone::clone)?.physical_size;
-        layer_surface.set_size(dimensions.0 as u32, dimensions.1 as u32);
-        // Anchor to the top left corner of the output
         layer_surface.set_anchor(zwlr_layer_surface_v1::Anchor::all());
         layer_surface.set_exclusive_zone(-1);
 
