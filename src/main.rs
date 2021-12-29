@@ -22,7 +22,7 @@ use std::{
 
 use log::{debug, error, info, warn};
 
-use image::{self, imageops};
+use image::{self, imageops, GenericImageView};
 
 default_environment!(Env,
     fields = [
@@ -111,14 +111,15 @@ impl Background {
             Some(RenderEvent::Configure { width, height }) => {
                 self.dimensions = (width, height);
                 let img = image::open(&self.img_path).unwrap();
-                let mut img = img
-                    .resize_to_fill(width, height, imageops::FilterType::Lanczos3)
-                    .to_rgba8()
-                    .to_vec();
-
+                let resized_img = if img.dimensions() != self.dimensions {
+                    img.resize_to_fill(width, height, imageops::FilterType::Lanczos3)
+                } else {
+                    img
+                };
                 // The ARGB is 'little endian', so here we must do a slight adaptation
                 // Specifically, we must put the order of bytes 'in reverse', so it needs to be
                 // BGRA, which we achieve by swaping the R and B on our original vector
+                let mut img = resized_img.to_rgba8().to_vec();
                 for pixel in img.chunks_exact_mut(4) {
                     pixel.swap(0, 2);
                 }
