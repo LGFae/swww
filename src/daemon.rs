@@ -284,11 +284,17 @@ fn handle_usr1(mut surfaces: RefMut<Vec<(u32, Background)>>) {
     match fs::read_to_string(Path::new(TMP_DIR).join(TMP_IN)) {
         Ok(mut content) => {
             content.pop();
+            let mut imgs = Vec::with_capacity(surfaces.len());
             for (_, bg) in surfaces.iter_mut() {
-                if let Some(img) =
-                    img_try_open_and_resize(&content, bg.dimensions.0, bg.dimensions.1)
-                {
-                    bg.draw(&img);
+                imgs.push(img_try_open_and_resize(
+                    &content,
+                    bg.dimensions.0,
+                    bg.dimensions.1,
+                ));
+            }
+            for i in 0..surfaces.len() {
+                if let Some(img) = &imgs[i] {
+                    surfaces[i].1.draw(&img);
                 }
             }
         }
