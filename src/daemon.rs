@@ -1,5 +1,5 @@
 use image::{self, imageops, GenericImageView};
-use log::{debug, error, info, warn};
+use log::{debug, info, warn};
 
 use smithay_client_toolkit::{
     default_environment,
@@ -50,6 +50,7 @@ enum RenderEvent {
 }
 
 struct Background {
+    output_name: String,
     surface: wl_surface::WlSurface,
     layer_surface: Main<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1>,
     next_render_event: Rc<Cell<Option<RenderEvent>>>,
@@ -60,6 +61,7 @@ struct Background {
 impl Background {
     fn new(
         output: &wl_output::WlOutput,
+        output_name: String,
         surface: wl_surface::WlSurface,
         layer_shell: &Attached<zwlr_layer_shell_v1::ZwlrLayerShellV1>,
         pool: AutoMemPool,
@@ -104,6 +106,7 @@ impl Background {
             layer_surface,
             next_render_event,
             pool,
+            output_name,
             dimensions: (0, 0),
         })
     }
@@ -178,20 +181,14 @@ pub fn main() {
         new_default_environment!(Env, fields = [layer_shell: SimpleGlobal::new(),])
             .expect("Initial roundtrip failed!");
 
-    let surfaces = Rc::new(RefCell::new(Vec::new()));
+    let bgs = Rc::new(RefCell::new(Vec::new()));
 
     let layer_shell = env.require_global::<zwlr_layer_shell_v1::ZwlrLayerShellV1>();
 
     let env_handle = env.clone();
-    let surfaces_handle = Rc::clone(&surfaces);
+    let bgs_handle = Rc::clone(&bgs);
     let output_handler = move |output: wl_output::WlOutput, info: &OutputInfo| {
-        create_backgrounds(
-            output,
-            info,
-            &env_handle,
-            &surfaces_handle,
-            &layer_shell.clone(),
-        )
+        create_backgrounds(output, info, &env_handle, &bgs_handle, &layer_shell.clone())
     };
 
     // Process currently existing outputs
@@ -211,7 +208,7 @@ pub fn main() {
     let usr1 = Signals::new(&[Signal::SIGUSR1]).unwrap();
     let event_handle = event_loop.handle();
     event_handle
-        .insert_source(usr1, |_, _, _| handle_usr1(surfaces.borrow_mut()))
+        .insert_source(usr1, |_, _, _| handle_usr1(bgs.borrow_mut()))
         .unwrap();
 
     WaylandSource::new(queue)
@@ -222,11 +219,11 @@ pub fn main() {
         // This is ugly, let's hope that some version of drain_filter() gets stabilized soon
         // https://github.com/rust-lang/rust/issues/43244
         {
-            let mut surfaces = surfaces.borrow_mut();
+            let mut bgs = bgs.borrow_mut();
             let mut i = 0;
-            while i != surfaces.len() {
-                if surfaces[i].1.handle_events() {
-                    surfaces.remove(i);
+            while i != bgs.len() {
+                if bgs[i].handle_events() {
+                    bgs.remove(i);
                 } else {
                     i += 1;
                 }
@@ -242,12 +239,12 @@ fn create_backgrounds(
     output: wl_output::WlOutput,
     info: &OutputInfo,
     env: &Environment<Env>,
-    surfaces: &Rc<RefCell<Vec<(u32, Background)>>>,
+    bgs: &Rc<RefCell<Vec<Background>>>,
     layer_shell: &Attached<zwlr_layer_shell_v1::ZwlrLayerShellV1>,
 ) {
     if info.obsolete {
         // an output has been removed, release it
-        surfaces.borrow_mut().retain(|(i, _)| *i != info.id);
+        bgs.borrow_mut().retain(|bg| bg.output_name != info.name);
         output.release();
     } else {
         // an output has been created, construct a surface for it
@@ -256,8 +253,8 @@ fn create_backgrounds(
             .create_auto_pool()
             .expect("Failed to create a memory pool!");
 
-        if let Some(s) = Background::new(&output, surface, layer_shell, pool) {
-            (*surfaces.borrow_mut()).push((info.id, s));
+        if let Some(bg) = Background::new(&output, info.name.clone(), surface, layer_shell, pool) {
+            (*bgs.borrow_mut()).push(bg);
         }
     }
 }
@@ -280,21 +277,21 @@ fn make_tmp_files() {
     fs::File::create(out_path).unwrap();
 }
 
-fn handle_usr1(mut surfaces: RefMut<Vec<(u32, Background)>>) {
+fn handle_usr1(mut bgs: RefMut<Vec<Background>>) {
     match fs::read_to_string(Path::new(TMP_DIR).join(TMP_IN)) {
         Ok(mut content) => {
             content.pop();
-            let mut imgs = Vec::with_capacity(surfaces.len());
-            for (_, bg) in surfaces.iter_mut() {
+            let mut imgs = Vec::with_capacity(bgs.len());
+            for bg in bgs.iter_mut() {
                 imgs.push(img_try_open_and_resize(
                     &content,
                     bg.dimensions.0,
                     bg.dimensions.1,
                 ));
             }
-            for i in 0..surfaces.len() {
+            for i in 0..bgs.len() {
                 if let Some(img) = &imgs[i] {
-                    surfaces[i].1.draw(&img);
+                    bgs[i].draw(&img);
                 }
             }
         }
