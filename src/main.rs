@@ -127,7 +127,7 @@ impl Background {
 
                 // The ARGB is 'little endian', so here we must  put the order
                 // of bytes 'in reverse', so it needs to be BGRA.
-                let img = resized_img.to_bgra8().to_vec();
+                let img = resized_img.into_bgra8().into_raw();
                 info!("Img is ready!");
 
                 self.img = Some(img);
