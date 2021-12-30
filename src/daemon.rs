@@ -56,7 +56,6 @@ struct Background {
     pool: AutoMemPool,
     dimensions: (u32, u32),
     img_path: String,
-    img: Option<Vec<u8>>,
 }
 
 impl Background {
@@ -107,7 +106,6 @@ impl Background {
             next_render_event,
             pool,
             img_path: "".to_string(),
-            img: None,
             dimensions: (0, 0),
         })
     }
@@ -158,44 +156,38 @@ impl Background {
         None
     }
 
-    fn draw(&mut self) {
-        if let Some(img) = &self.img {
-            let stride = 4 * self.dimensions.0 as i32;
-            let width = self.dimensions.0 as i32;
-            let height = self.dimensions.1 as i32;
+    fn draw(&mut self, img: &[u8]) {
+        let stride = 4 * self.dimensions.0 as i32;
+        let width = self.dimensions.0 as i32;
+        let height = self.dimensions.1 as i32;
 
-            match self
-                .pool
-                .buffer(width, height, stride, wl_shm::Format::Argb8888)
-            {
-                Ok((canvas, buffer)) => {
-                    canvas.copy_from_slice(img.as_slice());
-                    info!("Copied bytes to canvas.");
+        match self
+            .pool
+            .buffer(width, height, stride, wl_shm::Format::Argb8888)
+        {
+            Ok((canvas, buffer)) => {
+                canvas.copy_from_slice(img);
+                info!("Copied bytes to canvas.");
 
-                    std::mem::drop(img);
-                    self.img = None;
+                // Attach the buffer to the surface and mark the entire surface as damaged
+                self.surface.attach(Some(&buffer), 0, 0);
+                self.surface
+                    .damage_buffer(0, 0, width as i32, height as i32);
 
-                    // Attach the buffer to the surface and mark the entire surface as damaged
-                    self.surface.attach(Some(&buffer), 0, 0);
-                    self.surface
-                        .damage_buffer(0, 0, width as i32, height as i32);
-
-                    // Finally, commit the surface
-                    self.surface.commit();
-                }
-                Err(e) => warn!(
-                    "Failed to create buffer from mempoll: {}. Image won't be drawn...",
-                    e
-                ),
+                // Finally, commit the surface
+                self.surface.commit();
             }
+            Err(e) => warn!(
+                "Failed to create buffer from mempoll: {}. Image won't be drawn...",
+                e
+            ),
         }
     }
 
     fn update_img(&mut self, new_img: String) {
         self.img_path = new_img;
         if let Some(img) = self.img_try_open_and_resize() {
-            self.img = Some(img);
-            self.draw();
+            self.draw(&img);
         }
     }
 }
