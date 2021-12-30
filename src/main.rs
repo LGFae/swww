@@ -1,6 +1,7 @@
 use image::{self, imageops, GenericImageView};
 use log::{debug, error, info, warn};
 use nix::{sys::stat, unistd::mkfifo};
+use tempfile::tempdir;
 
 use smithay_client_toolkit::{
     default_environment,
@@ -219,12 +220,11 @@ fn main() {
 
     info!("Starting...");
     let signal = Signals::new(&[Signal::SIGUSR1]).unwrap();
-    let mut curr_dir = std::env::current_dir().unwrap();
-    curr_dir.push("fifo");
-    let fifo_path = curr_dir.as_path();
+    let tmp_dir = tempdir().unwrap();
+    let fifo_path = tmp_dir.path().join("fswww.fifo");
 
     if !fifo_path.exists() {
-        mkfifo(fifo_path, stat::Mode::S_IRWXU).expect("Failed to create fifo file");
+        mkfifo(&fifo_path, stat::Mode::S_IRWXU).expect("Failed to create fifo file");
     }
 
     let img_path = std::env::args().last().unwrap();
