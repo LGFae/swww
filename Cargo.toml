@@ -13,3 +13,4 @@ log = "0.4"
 env_logger = "0.9"
 fork = "0.1"
 structopt = {version = "0.3", default-features = true}
+nix = "0.23"
