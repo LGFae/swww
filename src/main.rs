@@ -1,10 +1,17 @@
+use image::{self, imageops, GenericImageView};
+use log::{debug, error, info, warn};
+use nix::{sys::stat, unistd::mkfifo};
+
 use smithay_client_toolkit::{
     default_environment,
     environment::SimpleGlobal,
     new_default_environment,
     output::{with_output_info, OutputInfo},
     reexports::{
-        calloop,
+        calloop::{
+            self,
+            signals::{Signal, Signals},
+        },
         client::protocol::{wl_output, wl_shm, wl_surface},
         client::{Attached, Main},
         protocols::wlr::unstable::layer_shell::v1::client::{
@@ -17,12 +24,9 @@ use smithay_client_toolkit::{
 
 use std::{
     cell::{Cell, RefCell},
+    io::Read,
     rc::Rc,
 };
-
-use log::{debug, error, info, warn};
-
-use image::{self, imageops, GenericImageView};
 
 default_environment!(Env,
     fields = [
@@ -110,7 +114,25 @@ impl Background {
             Some(RenderEvent::Closed) => true,
             Some(RenderEvent::Configure { width, height }) => {
                 self.dimensions = (width, height);
-                let img = image::open(&self.img_path).unwrap();
+                if let Some(img) = self.img_try_open_and_resize() {
+                    self.img = Some(img);
+                    self.draw();
+                }
+                false
+            }
+            None => false,
+        }
+    }
+
+    fn img_try_open_and_resize(&self) -> Option<Vec<u8>> {
+        match image::open(&self.img_path) {
+            Ok(img) => {
+                let (width, height) = self.dimensions;
+                if width == 0 || height == 0 {
+                    warn!("Surface dimensions are set to 0. Can't resize image...");
+                    return None;
+                }
+
                 let img_dimensions = img.dimensions();
                 info!("Output dimensions: width: {} height: {}", width, height);
                 info!(
@@ -127,15 +149,12 @@ impl Background {
 
                 // The ARGB is 'little endian', so here we must  put the order
                 // of bytes 'in reverse', so it needs to be BGRA.
-                let img = resized_img.into_bgra8().into_raw();
                 info!("Img is ready!");
-
-                self.img = Some(img);
-                self.draw();
-                false
+                return Some(resized_img.into_bgra8().into_raw());
             }
-            None => false,
+            Err(e) => warn!("Couldn't open image: {}", e),
         }
+        None
     }
 
     fn draw(&mut self) {
@@ -167,6 +186,14 @@ impl Background {
             self.surface.commit();
         }
     }
+
+    fn update_img(&mut self, new_img: String) {
+        self.img_path = new_img;
+        if let Some(img) = self.img_try_open_and_resize() {
+            self.img = Some(img);
+            self.draw();
+        }
+    }
 }
 
 impl Drop for Background {
@@ -188,6 +215,15 @@ fn main() {
     env_logger::init();
 
     info!("Starting...");
+    let signal = Signals::new(&[Signal::SIGUSR1]).unwrap();
+    let mut curr_dir = std::env::current_dir().unwrap();
+    curr_dir.push("fifo");
+    let fifo_path = curr_dir.as_path();
+
+    if !fifo_path.exists() {
+        mkfifo(fifo_path, stat::Mode::S_IRWXU).expect("Failed to create fifo file");
+    }
+
     let img_path = std::env::args().last().unwrap();
     let (env, display, queue) =
         new_default_environment!(Env, fields = [layer_shell: SimpleGlobal::new(),])
@@ -237,8 +273,25 @@ fn main() {
 
     let mut event_loop = calloop::EventLoop::<()>::try_new().unwrap();
 
+    let event_handle = event_loop.handle();
+    event_handle
+        .insert_source(signal, |_, _, _| {
+            match std::fs::read_to_string(&fifo_path) {
+                Ok(mut fifo_content) => {
+                    fifo_content.pop();
+                    let mut surfaces = surfaces.borrow_mut();
+                    let mut i = 0;
+                    while i != surfaces.len() {
+                        surfaces[i].1.update_img(fifo_content.clone());
+                        i += 1;
+                    }
+                }
+                Err(e) => warn!("Error reading fifo file: {}", e),
+            }
+        })
+        .unwrap();
     WaylandSource::new(queue)
-        .quick_insert(event_loop.handle())
+        .quick_insert(event_handle)
         .unwrap();
 
     loop {
