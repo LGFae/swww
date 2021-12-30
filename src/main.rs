@@ -1,6 +1,5 @@
 use image::{self, imageops, GenericImageView};
 use log::{debug, error, info, warn};
-use nix::{sys::stat, unistd::mkfifo};
 
 use smithay_client_toolkit::{
     default_environment,
@@ -24,8 +23,16 @@ use smithay_client_toolkit::{
 
 use std::{
     cell::{Cell, RefCell},
+    fs,
+    io::Write,
+    path::Path,
     rc::Rc,
 };
+
+const TMP_DIR: &str = "/tmp/fswww";
+const TMP_PID: &str = "pid";
+const TMP_IN: &str = "in";
+const TMP_OUT: &str = "out";
 
 default_environment!(Env,
     fields = [
@@ -133,8 +140,8 @@ impl Background {
                 }
 
                 let img_dimensions = img.dimensions();
-                info!("Output dimensions: width: {} height: {}", width, height);
-                info!(
+                debug!("Output dimensions: width: {} height: {}", width, height);
+                debug!(
                     "Image dimensions:  width: {} height: {}",
                     img_dimensions.0, img_dimensions.1
                 );
@@ -214,14 +221,13 @@ fn main() {
 
     //If using a release build, we let the user decide
     #[cfg(not(debug_assertions))]
-    env_logger::init();
+    env_logger::Builder::new()
+        .filter_level(log::LevelFilter::Info)
+        .init();
 
     info!("Starting...");
-
-    let fifo_path = std::path::Path::new("/tmp/fswww.fifo");
-    if !fifo_path.exists() {
-        mkfifo(fifo_path, stat::Mode::S_IRWXU).expect("Failed to create fifo file");
-    }
+    make_tmp_files();
+    info!("Created temporary files in {}.", TMP_DIR);
 
     let img_path = std::env::args().last().unwrap();
     let (env, display, queue) =
@@ -275,17 +281,19 @@ fn main() {
     let usr1 = Signals::new(&[Signal::SIGUSR1]).unwrap();
     let event_handle = event_loop.handle();
     event_handle
-        .insert_source(usr1, |_, _, _| match std::fs::read_to_string(&fifo_path) {
-            Ok(mut fifo_content) => {
-                fifo_content.pop();
-                let mut surfaces = surfaces.borrow_mut();
-                let mut i = 0;
-                while i != surfaces.len() {
-                    surfaces[i].1.update_img(fifo_content.clone());
-                    i += 1;
+        .insert_source(usr1, |_, _, _| {
+            match fs::read_to_string(Path::new(TMP_DIR).join(TMP_IN)) {
+                Ok(mut content) => {
+                    content.pop();
+                    let mut surfaces = surfaces.borrow_mut();
+                    let mut i = 0;
+                    while i != surfaces.len() {
+                        surfaces[i].1.update_img(content.clone());
+                        i += 1;
+                    }
                 }
+                Err(e) => warn!("Error reading {}/{} file: {}", TMP_DIR, TMP_IN, e),
             }
-            Err(e) => warn!("Error reading fifo file: {}", e),
         })
         .unwrap();
 
@@ -311,4 +319,22 @@ fn main() {
         display.flush().unwrap();
         event_loop.dispatch(None, &mut ()).unwrap();
     }
+}
+
+///Returns the log file. If anything fails, we panic, since the normal functions
+///of the program depend on these files
+fn make_tmp_files() {
+    let dir_path = Path::new(TMP_DIR);
+    if !dir_path.exists() {
+        fs::create_dir(dir_path).unwrap();
+    }
+    let pid_path = dir_path.join(TMP_PID);
+    let mut pid_file = fs::File::create(pid_path).unwrap();
+    let pid = std::process::id();
+    pid_file.write_all(pid.to_string().as_bytes()).unwrap();
+
+    let in_path = dir_path.join(TMP_IN);
+    fs::File::create(in_path).unwrap();
+    let out_path = dir_path.join(TMP_OUT);
+    fs::File::create(out_path).unwrap();
 }
