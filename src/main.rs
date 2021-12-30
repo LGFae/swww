@@ -25,7 +25,6 @@ use smithay_client_toolkit::{
 
 use std::{
     cell::{Cell, RefCell},
-    io::Read,
     rc::Rc,
 };
 
@@ -219,7 +218,6 @@ fn main() {
     env_logger::init();
 
     info!("Starting...");
-    let signal = Signals::new(&[Signal::SIGUSR1]).unwrap();
     let tmp_dir = tempdir().unwrap();
     let fifo_path = tmp_dir.path().join("fswww.fifo");
 
@@ -276,23 +274,23 @@ fn main() {
 
     let mut event_loop = calloop::EventLoop::<()>::try_new().unwrap();
 
+    let usr1 = Signals::new(&[Signal::SIGUSR1]).unwrap();
     let event_handle = event_loop.handle();
     event_handle
-        .insert_source(signal, |_, _, _| {
-            match std::fs::read_to_string(&fifo_path) {
-                Ok(mut fifo_content) => {
-                    fifo_content.pop();
-                    let mut surfaces = surfaces.borrow_mut();
-                    let mut i = 0;
-                    while i != surfaces.len() {
-                        surfaces[i].1.update_img(fifo_content.clone());
-                        i += 1;
-                    }
+        .insert_source(usr1, |_, _, _| match std::fs::read_to_string(&fifo_path) {
+            Ok(mut fifo_content) => {
+                fifo_content.pop();
+                let mut surfaces = surfaces.borrow_mut();
+                let mut i = 0;
+                while i != surfaces.len() {
+                    surfaces[i].1.update_img(fifo_content.clone());
+                    i += 1;
                 }
-                Err(e) => warn!("Error reading fifo file: {}", e),
             }
+            Err(e) => warn!("Error reading fifo file: {}", e),
         })
         .unwrap();
+
     WaylandSource::new(queue)
         .quick_insert(event_handle)
         .unwrap();
