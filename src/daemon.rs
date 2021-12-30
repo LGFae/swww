@@ -148,12 +148,6 @@ impl Background {
             ),
         }
     }
-
-    fn update_img(&mut self, img_path: &str) {
-        if let Some(img) = img_try_open_and_resize(img_path, self.dimensions.0, self.dimensions.1) {
-            self.draw(&img);
-        }
-    }
 }
 
 impl Drop for Background {
@@ -217,9 +211,7 @@ pub fn main() {
     let usr1 = Signals::new(&[Signal::SIGUSR1]).unwrap();
     let event_handle = event_loop.handle();
     event_handle
-        .insert_source(usr1, |_, _, _| {
-            handle_usr1(surfaces.borrow_mut());
-        })
+        .insert_source(usr1, |_, _, _| handle_usr1(surfaces.borrow_mut()))
         .unwrap();
 
     WaylandSource::new(queue)
@@ -293,7 +285,11 @@ fn handle_usr1(mut surfaces: RefMut<Vec<(u32, Background)>>) {
         Ok(mut content) => {
             content.pop();
             for (_, bg) in surfaces.iter_mut() {
-                bg.update_img(&content);
+                if let Some(img) =
+                    img_try_open_and_resize(&content, bg.dimensions.0, bg.dimensions.1)
+                {
+                    bg.draw(&img);
+                }
             }
         }
         Err(e) => warn!("Error reading {}/{} file: {}", TMP_DIR, TMP_IN, e),
