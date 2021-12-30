@@ -211,7 +211,7 @@ pub fn main() {
     //If using a release build, we let the user decide
     #[cfg(not(debug_assertions))]
     env_logger::Builder::new()
-        .filter_level(log::LevelFilter::Info)
+        .filter_level(log::LevelFilter::Warn)
         .init();
 
     info!("Starting...");
