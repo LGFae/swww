@@ -163,27 +163,30 @@ impl Background {
             let width = self.dimensions.0 as i32;
             let height = self.dimensions.1 as i32;
 
-            // Note: unwrap() is only used here in the interest of simplicity of the example.
-            // A "real" application should handle the case where both pools are still in use by the
-            // compositor.
-            let (canvas, buffer) = self
+            match self
                 .pool
                 .buffer(width, height, stride, wl_shm::Format::Argb8888)
-                .unwrap();
+            {
+                Ok((canvas, buffer)) => {
+                    canvas.copy_from_slice(img.as_slice());
+                    info!("Copied bytes to canvas.");
 
-            canvas.copy_from_slice(img.as_slice());
-            info!("Copied bytes to canvas.");
+                    std::mem::drop(img);
+                    self.img = None;
 
-            std::mem::drop(img);
-            self.img = None;
+                    // Attach the buffer to the surface and mark the entire surface as damaged
+                    self.surface.attach(Some(&buffer), 0, 0);
+                    self.surface
+                        .damage_buffer(0, 0, width as i32, height as i32);
 
-            // Attach the buffer to the surface and mark the entire surface as damaged
-            self.surface.attach(Some(&buffer), 0, 0);
-            self.surface
-                .damage_buffer(0, 0, width as i32, height as i32);
-
-            // Finally, commit the surface
-            self.surface.commit();
+                    // Finally, commit the surface
+                    self.surface.commit();
+                }
+                Err(e) => warn!(
+                    "Failed to create buffer from mempoll: {}. Image won't be drawn...",
+                    e
+                ),
+            }
         }
     }
 
