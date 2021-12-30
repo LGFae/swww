@@ -105,7 +105,7 @@ impl Background {
             layer_surface,
             next_render_event,
             pool,
-            img_path: "".to_string(),
+            img_path: String::new(),
             dimensions: (0, 0),
         })
     }
