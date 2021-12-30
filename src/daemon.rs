@@ -55,7 +55,6 @@ struct Background {
     next_render_event: Rc<Cell<Option<RenderEvent>>>,
     pool: AutoMemPool,
     dimensions: (u32, u32),
-    img_path: String,
 }
 
 impl Background {
@@ -105,7 +104,6 @@ impl Background {
             layer_surface,
             next_render_event,
             pool,
-            img_path: String::new(),
             dimensions: (0, 0),
         })
     }
@@ -120,41 +118,6 @@ impl Background {
                 false
             }
             None => false,
-        }
-    }
-
-    fn img_try_open_and_resize(&self) -> Option<Vec<u8>> {
-        match image::open(&self.img_path) {
-            Ok(img) => {
-                let (width, height) = self.dimensions;
-                if width == 0 || height == 0 {
-                    warn!("Surface dimensions are set to 0. Can't resize image...");
-                    return None;
-                }
-
-                let img_dimensions = img.dimensions();
-                debug!("Output dimensions: width: {} height: {}", width, height);
-                debug!(
-                    "Image dimensions:  width: {} height: {}",
-                    img_dimensions.0, img_dimensions.1
-                );
-                let resized_img = if img_dimensions != self.dimensions {
-                    info!("Image dimensions are different from output's. Resizing...");
-                    img.resize_to_fill(width, height, imageops::FilterType::Lanczos3)
-                } else {
-                    info!("Image dimensions are identical to output's. Skipped resize!!");
-                    img
-                };
-
-                // The ARGB is 'little endian', so here we must  put the order
-                // of bytes 'in reverse', so it needs to be BGRA.
-                info!("Img is ready!");
-                Some(resized_img.into_bgra8().into_raw())
-            }
-            Err(e) => {
-                warn!("Couldn't open image: {}", e);
-                None
-            }
         }
     }
 
@@ -186,9 +149,8 @@ impl Background {
         }
     }
 
-    fn update_img(&mut self, new_img: String) {
-        self.img_path = new_img;
-        if let Some(img) = self.img_try_open_and_resize() {
+    fn update_img(&mut self, img_path: &str) {
+        if let Some(img) = img_try_open_and_resize(img_path, self.dimensions.0, self.dimensions.1) {
             self.draw(&img);
         }
     }
@@ -262,7 +224,7 @@ pub fn main() {
                     let mut surfaces = surfaces.borrow_mut();
                     let mut i = 0;
                     while i != surfaces.len() {
-                        surfaces[i].1.update_img(content.clone());
+                        surfaces[i].1.update_img(&content);
                         i += 1;
                     }
                 }
@@ -335,4 +297,38 @@ fn make_tmp_files() {
     fs::File::create(in_path).unwrap();
     let out_path = dir_path.join(TMP_OUT);
     fs::File::create(out_path).unwrap();
+}
+
+fn img_try_open_and_resize(img_path: &str, width: u32, height: u32) -> Option<Vec<u8>> {
+    match image::open(img_path) {
+        Ok(img) => {
+            if width == 0 || height == 0 {
+                warn!("Surface dimensions are set to 0. Can't resize image...");
+                return None;
+            }
+
+            let img_dimensions = img.dimensions();
+            debug!("Output dimensions: width: {} height: {}", width, height);
+            debug!(
+                "Image dimensions:  width: {} height: {}",
+                img_dimensions.0, img_dimensions.1
+            );
+            let resized_img = if img_dimensions != (width, height) {
+                info!("Image dimensions are different from output's. Resizing...");
+                img.resize_to_fill(width, height, imageops::FilterType::Lanczos3)
+            } else {
+                info!("Image dimensions are identical to output's. Skipped resize!!");
+                img
+            };
+
+            // The ARGB is 'little endian', so here we must  put the order
+            // of bytes 'in reverse', so it needs to be BGRA.
+            info!("Img is ready!");
+            Some(resized_img.into_bgra8().into_raw())
+        }
+        Err(e) => {
+            warn!("Couldn't open image: {}", e);
+            None
+        }
+    }
 }
