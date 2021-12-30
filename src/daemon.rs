@@ -27,6 +27,7 @@ use std::{
     io::Write,
     path::Path,
     rc::Rc,
+    sync::mpsc::{channel, Sender},
 };
 
 const TMP_DIR: &str = "/tmp/fswww";
@@ -281,30 +282,38 @@ fn handle_usr1(mut bgs: RefMut<Vec<Background>>) {
     match fs::read_to_string(Path::new(TMP_DIR).join(TMP_IN)) {
         Ok(mut content) => {
             content.pop();
-            let mut imgs = Vec::with_capacity(bgs.len());
-            for bg in bgs.iter_mut() {
-                imgs.push(img_try_open_and_resize(
-                    &content,
-                    bg.dimensions.0,
-                    bg.dimensions.1,
-                ));
+
+            let (send, recv) = channel();
+            for (i, bg) in bgs.iter().enumerate() {
+                let dim = bg.dimensions;
+                let send = send.clone();
+                let content = content.clone();
+                std::thread::spawn(move || {
+                    debug!("Starting thread to open and resize image...");
+                    img_try_open_and_resize(&content, dim.0, dim.1, send, i)
+                });
             }
-            for i in 0..bgs.len() {
-                if let Some(img) = &imgs[i] {
-                    bgs[i].draw(&img);
-                }
+            drop(send);
+            while let Ok((i, img)) = recv.recv() {
+                bgs[i].draw(&img);
             }
         }
         Err(e) => warn!("Error reading {}/{} file: {}", TMP_DIR, TMP_IN, e),
     }
 }
 
-fn img_try_open_and_resize(img_path: &str, width: u32, height: u32) -> Option<Vec<u8>> {
+fn img_try_open_and_resize(
+    img_path: &str,
+    width: u32,
+    height: u32,
+    send: Sender<(usize, Vec<u8>)>,
+    i: usize,
+) {
     match image::open(img_path) {
         Ok(img) => {
             if width == 0 || height == 0 {
                 warn!("Surface dimensions are set to 0. Can't resize image...");
-                return None;
+                return;
             }
 
             let img_dimensions = img.dimensions();
@@ -324,11 +333,10 @@ fn img_try_open_and_resize(img_path: &str, width: u32, height: u32) -> Option<Ve
             // The ARGB is 'little endian', so here we must  put the order
             // of bytes 'in reverse', so it needs to be BGRA.
             info!("Img is ready!");
-            Some(resized_img.into_bgra8().into_raw())
+            send.send((i, resized_img.into_bgra8().into_raw()));
         }
         Err(e) => {
             warn!("Couldn't open image: {}", e);
-            None
         }
     }
 }
