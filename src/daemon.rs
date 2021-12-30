@@ -22,7 +22,7 @@ use smithay_client_toolkit::{
 };
 
 use std::{
-    cell::{Cell, RefCell},
+    cell::{Cell, RefCell, RefMut},
     fs,
     io::Write,
     path::Path,
@@ -218,18 +218,7 @@ pub fn main() {
     let event_handle = event_loop.handle();
     event_handle
         .insert_source(usr1, |_, _, _| {
-            match fs::read_to_string(Path::new(TMP_DIR).join(TMP_IN)) {
-                Ok(mut content) => {
-                    content.pop();
-                    let mut surfaces = surfaces.borrow_mut();
-                    let mut i = 0;
-                    while i != surfaces.len() {
-                        surfaces[i].1.update_img(&content);
-                        i += 1;
-                    }
-                }
-                Err(e) => warn!("Error reading {}/{} file: {}", TMP_DIR, TMP_IN, e),
-            }
+            handle_usr1(surfaces.borrow_mut());
         })
         .unwrap();
 
@@ -297,6 +286,18 @@ fn make_tmp_files() {
     fs::File::create(in_path).unwrap();
     let out_path = dir_path.join(TMP_OUT);
     fs::File::create(out_path).unwrap();
+}
+
+fn handle_usr1(mut surfaces: RefMut<Vec<(u32, Background)>>) {
+    match fs::read_to_string(Path::new(TMP_DIR).join(TMP_IN)) {
+        Ok(mut content) => {
+            content.pop();
+            for (_, bg) in surfaces.iter_mut() {
+                bg.update_img(&content);
+            }
+        }
+        Err(e) => warn!("Error reading {}/{} file: {}", TMP_DIR, TMP_IN, e),
+    }
 }
 
 fn img_try_open_and_resize(img_path: &str, width: u32, height: u32) -> Option<Vec<u8>> {
