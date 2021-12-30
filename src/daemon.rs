@@ -119,10 +119,6 @@ impl Background {
             Some(RenderEvent::Closed) => true,
             Some(RenderEvent::Configure { width, height }) => {
                 self.dimensions = (width, height);
-                if let Some(img) = self.img_try_open_and_resize() {
-                    self.img = Some(img);
-                    self.draw();
-                }
                 false
             }
             None => false,
