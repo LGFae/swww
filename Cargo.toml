@@ -1,10 +1,18 @@
 [package]
 name = "fswww"
 version = "0.1.0"
-author = "Horus645"
+authors = ["Leonardo Gibrowski Faé <leonardo.fae44@gmail.com>"]
 edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[profile.release]
+debug = 0
+lto = true
+opt-level = 3
+codegen-units = 1
+panic = "abort"
+#strip = true #enable this once it gets stabilized -- literally next cargo version
 
 [dependencies]
 smithay-client-toolkit = "0.15"
