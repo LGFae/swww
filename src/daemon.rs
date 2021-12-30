@@ -3,7 +3,7 @@ use log::{debug, error, info, warn};
 
 use smithay_client_toolkit::{
     default_environment,
-    environment::SimpleGlobal,
+    environment::{Environment, SimpleGlobal},
     new_default_environment,
     output::{with_output_info, OutputInfo},
     reexports::{
@@ -229,21 +229,13 @@ pub fn main() {
     let env_handle = env.clone();
     let surfaces_handle = Rc::clone(&surfaces);
     let output_handler = move |output: wl_output::WlOutput, info: &OutputInfo| {
-        if info.obsolete {
-            // an output has been removed, release it
-            surfaces_handle.borrow_mut().retain(|(i, _)| *i != info.id);
-            output.release();
-        } else {
-            // an output has been created, construct a surface for it
-            let surface = env_handle.create_surface().detach();
-            let pool = env_handle
-                .create_auto_pool()
-                .expect("Failed to create a memory pool!");
-
-            if let Some(s) = Background::new(&output, surface, &layer_shell.clone(), pool) {
-                (*surfaces_handle.borrow_mut()).push((info.id, s));
-            }
-        }
+        create_backgrounds(
+            output,
+            info,
+            &env_handle,
+            &surfaces_handle,
+            &layer_shell.clone(),
+        )
     };
 
     // Process currently existing outputs
@@ -300,6 +292,30 @@ pub fn main() {
 
         display.flush().unwrap();
         event_loop.dispatch(None, &mut ()).unwrap();
+    }
+}
+
+fn create_backgrounds(
+    output: wl_output::WlOutput,
+    info: &OutputInfo,
+    env: &Environment<Env>,
+    surfaces: &Rc<RefCell<Vec<(u32, Background)>>>,
+    layer_shell: &Attached<zwlr_layer_shell_v1::ZwlrLayerShellV1>,
+) {
+    if info.obsolete {
+        // an output has been removed, release it
+        surfaces.borrow_mut().retain(|(i, _)| *i != info.id);
+        output.release();
+    } else {
+        // an output has been created, construct a surface for it
+        let surface = env.create_surface().detach();
+        let pool = env
+            .create_auto_pool()
+            .expect("Failed to create a memory pool!");
+
+        if let Some(s) = Background::new(&output, surface, layer_shell, pool) {
+            (*surfaces.borrow_mut()).push((info.id, s));
+        }
     }
 }
 
