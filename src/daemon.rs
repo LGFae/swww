@@ -149,11 +149,13 @@ impl Background {
                 // The ARGB is 'little endian', so here we must  put the order
                 // of bytes 'in reverse', so it needs to be BGRA.
                 info!("Img is ready!");
-                return Some(resized_img.into_bgra8().into_raw());
+                Some(resized_img.into_bgra8().into_raw())
             }
-            Err(e) => warn!("Couldn't open image: {}", e),
+            Err(e) => {
+                warn!("Couldn't open image: {}", e);
+                None
+            }
         }
-        None
     }
 
     fn draw(&mut self, img: &[u8]) {
