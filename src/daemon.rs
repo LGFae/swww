@@ -162,7 +162,7 @@ impl Drop for Background {
     }
 }
 
-pub fn main(/*original_pid: Option<i32>*/) {
+pub fn main(origin_pid: Option<i32>) {
     make_logger();
     info!("Starting...");
     make_tmp_files();
@@ -211,9 +211,9 @@ pub fn main(/*original_pid: Option<i32>*/) {
         .quick_insert(event_handle)
         .unwrap();
 
-    //if let Some(pid) = original_pid {
-    //    send_answer(true, pid);
-    //}
+    if let Some(pid) = origin_pid {
+        send_answer(true, pid);
+    }
     while running {
         // This is ugly, let's hope that some version of drain_filter() gets stabilized soon
         // https://github.com/rust-lang/rust/issues/43244

@@ -36,18 +36,28 @@ fn main() {
     match opts {
         Fswww::Init { no_daemon } => {
             if get_daemon_pid().is_err() {
-                if !no_daemon {
-                    if let Ok(fork::Fork::Child) = fork::daemon(false, false) {
-                        //daemon::main(Some(std::process::id() as i32));
-                        daemon::main();
-                    } else {
-                        eprintln!("Couldn't fork process!");
+                if no_daemon {
+                    daemon::main(None);
+                    return;
+                }
+                let this_pid = std::process::id() as i32;
+                match fork::fork() {
+                    Ok(fork::Fork::Child) => {
+                        if let Ok(fork::Fork::Child) = fork::daemon(false, false) {
+                            daemon::main(Some(this_pid));
+                        } else {
+                            eprintln!("Couldn't daemonize forked process!");
+                            exit(1);
+                        }
+                    }
+                    Ok(fork::Fork::Parent(pid)) => {
+                        println!("Daemon pid = {}", pid);
+                        wait_for_response(); //remove later!
+                    }
+                    Err(_) => {
+                        eprintln!("Coulnd't fork process!");
                         exit(1);
                     }
-                    //wait_for_response(); //remove later!
-                } else {
-                    //daemon::main(None);
-                    daemon::main();
                 }
             } else {
                 eprintln!("There seems to already be another instance running...");
