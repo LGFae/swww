@@ -1,5 +1,6 @@
 use fork;
 use nix::{sys::signal, unistd::Pid};
+use std::process::exit;
 use structopt::StructOpt;
 mod daemon;
 
@@ -30,14 +31,20 @@ fn main() {
     let opts = Fswww::from_args();
     match opts {
         Fswww::Init { no_daemon } => {
-            if !no_daemon {
-                if let Ok(fork::Fork::Child) = fork::daemon(false, false) {
-                    daemon::main();
+            if !already_running() {
+                if !no_daemon {
+                    if let Ok(fork::Fork::Child) = fork::daemon(false, false) {
+                        daemon::main();
+                    } else {
+                        eprintln!("Couldn't fork process!");
+                        exit(1);
+                    }
                 } else {
-                    eprintln!("Couldn't fork process!");
+                    daemon::main();
                 }
             } else {
-                daemon::main();
+                eprintln!("There seems to already be another instance running...");
+                exit(1);
             }
         }
         Fswww::Kill => kill(),
@@ -68,13 +75,18 @@ fn kill() {
 fn get_daemon_pid() -> i32 {
     let pid_file_path = std::path::Path::new(PID_FILE);
     if !pid_file_path.exists() {
-        panic!(
+        eprintln!(
             "pid file {} doesn't exist. Are you sure the daemon is running?",
             PID_FILE
         );
+        exit(1);
     }
     std::fs::read_to_string(pid_file_path)
         .expect("Failed to read pid file")
         .parse()
         .unwrap()
+}
+
+fn already_running() -> bool {
+    std::path::Path::new("/tmp/fswww").exists()
 }
