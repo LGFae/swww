@@ -163,18 +163,7 @@ impl Drop for Background {
 }
 
 pub fn main(/*original_pid: Option<i32>*/) {
-    //If using a debug build, we generaly want to see all the logging
-    #[cfg(debug_assertions)]
-    env_logger::Builder::new()
-        .filter_level(log::LevelFilter::Debug)
-        .init();
-
-    //If using a release build, we let the user decide
-    #[cfg(not(debug_assertions))]
-    env_logger::Builder::new()
-        .filter_level(log::LevelFilter::Warn)
-        .init();
-
+    make_logger();
     info!("Starting...");
     make_tmp_files();
     info!("Created temporary files in {}.", TMP_DIR);
@@ -240,6 +229,20 @@ pub fn main(/*original_pid: Option<i32>*/) {
         }
         event_loop.dispatch(None, &mut ()).unwrap();
     }
+}
+
+fn make_logger() {
+    //If using a debug build, we generaly want to see all the logging
+    #[cfg(debug_assertions)]
+    env_logger::Builder::new()
+        .filter_level(log::LevelFilter::Debug)
+        .init();
+
+    //If using a release build, we let the user decide
+    #[cfg(not(debug_assertions))]
+    env_logger::Builder::new()
+        .filter_level(log::LevelFilter::Warn)
+        .init();
 }
 
 fn create_backgrounds(
