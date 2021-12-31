@@ -31,6 +31,8 @@ use std::{
     sync::mpsc::{channel, Sender},
 };
 
+//mod img_processor;
+
 const TMP_DIR: &str = "/tmp/fswww";
 const TMP_PID: &str = "pid";
 const TMP_IN: &str = "in";

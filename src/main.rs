@@ -162,7 +162,6 @@ fn get_daemon_pid() -> Result<u32, String> {
     //if the daemon exits unexpectably, the pid file will exist, but the pid in the file will no
     //longer be valid, and we might send the signal to the wrong process! So we check for that.
     let proc_file = "/proc/".to_owned() + &pid + "/cmdline";
-    println!("Reading : {}", proc_file);
     let program = fs::read_to_string(&proc_file)
         .expect(&("Couldn't read ".to_owned() + &proc_file + " to check if pid is correct")); //TODO: BETTER MESSAGE IF PROBLEM IS MISSING FILE
     println!("{}", program);
