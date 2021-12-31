@@ -26,7 +26,7 @@ use smithay_client_toolkit::{
 use std::{
     cell::{Cell, RefCell, RefMut},
     fs,
-    io::Write,
+    io::{BufRead, Write},
     path::Path,
     rc::Rc,
     sync::mpsc::{channel, Sender},
@@ -214,7 +214,8 @@ pub fn main(origin_pid: Option<i32>) {
         .unwrap();
 
     if let Some(pid) = origin_pid {
-        send_answer(true, pid);
+        signal::kill(Pid::from_raw(pid), signal::SIGUSR1)
+            .expect("Failed to send signal indicating daemon is running.");
     }
 
     let mut shared_data = event_loop.get_signal();
@@ -238,6 +239,7 @@ pub fn main(origin_pid: Option<i32>) {
             }
         })
         .expect("Error during event loop!");
+    send_answer(true);
 }
 
 fn make_logger() {
@@ -303,7 +305,7 @@ fn handle_usr1(mut bgs: RefMut<Vec<Background>>) {
     match fs::read_to_string(Path::new(TMP_DIR).join(TMP_IN)) {
         Ok(content) => {
             let mut lines = content.lines();
-            let pid_request = lines.next().unwrap().parse().unwrap();
+            let _ = lines.next();
 
             let img = lines.next().unwrap();
             let (send, recv) = channel();
@@ -320,21 +322,29 @@ fn handle_usr1(mut bgs: RefMut<Vec<Background>>) {
             while let Ok((i, img)) = recv.recv() {
                 bgs[i].draw(&img);
             }
-            send_answer(true, pid_request);
+            send_answer(true);
         }
         Err(e) => warn!("Error reading {}/{} file: {}", TMP_DIR, TMP_IN, e),
     }
 }
 
-fn send_answer(ok: bool, pid: i32) {
-    if ok {
-        if let Err(e) = signal::kill(Pid::from_raw(pid), signal::SIGUSR1) {
-            error!("Failed to send signal back indicating success: {}", e);
+fn send_answer(ok: bool) {
+    if let Ok(in_file) = fs::read_to_string(Path::new(TMP_DIR).join(TMP_IN)) {
+        let pid = in_file.lines().next().unwrap().parse().unwrap();
+        if ok {
+            if let Err(e) = signal::kill(Pid::from_raw(pid), signal::SIGUSR1) {
+                error!("Failed to send signal back indicating success: {}", e);
+            }
+        } else {
+            if let Err(e) = signal::kill(Pid::from_raw(pid), signal::SIGUSR2) {
+                error!("Failed to send signal back indicating failure: {}", e);
+            }
         }
     } else {
-        if let Err(e) = signal::kill(Pid::from_raw(pid), signal::SIGUSR2) {
-            error!("Failed to send signal back indicating failure: {}", e);
-        }
+        error!(
+            "Failed to read {}/{} for pid of calling process.",
+            TMP_DIR, TMP_IN
+        );
     }
 }
 
