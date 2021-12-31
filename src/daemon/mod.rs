@@ -238,7 +238,25 @@ pub fn main(origin_pid: Option<i32>) {
             }
         })
         .expect("Error during event loop!");
-    send_answer(true);
+
+    info!("Finished running event loop.");
+
+    let pid: Option<i32> = if let Ok(in_file) = fs::read_to_string(Path::new(TMP_DIR).join(TMP_IN))
+    {
+        match in_file.lines().next().unwrap().parse() {
+            Ok(i) => Some(i),
+            Err(_) => None,
+        }
+    } else {
+        error!(
+            "Failed to read {}/{} for pid of calling process.",
+            TMP_DIR, TMP_IN
+        );
+        None
+    };
+    fs::remove_dir_all("/tmp/fswww").expect("Failed to remove /tmp/fswww directory.");
+    info!("Removed /tmp/fswww directory");
+    send_answer(true, pid);
 }
 
 fn make_logger() {

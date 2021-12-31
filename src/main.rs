@@ -139,11 +139,12 @@ fn kill() {
         }
     }
 
-    signal::kill(Pid::from_raw(pid as i32), signal::SIGUSR2).expect("Failed to kill daemon...");
+    let msg = format!("{}\n", std::process::id());
+    fs::write("/tmp/fswww/in", msg)
+        .expect("Couldn't write to /tmp/fswww/in. Did you delete the file?");
 
-    fs::remove_dir_all("/tmp/fswww").expect("Failed to remove /tmp/fswww directory.");
-
-    println!("Successfully killed fswww daemon and removed /tmp/fswww directory!");
+    signal::kill(Pid::from_raw(pid as i32), signal::SIGUSR2)
+        .expect("Failed to send signal to kill daemon...");
 }
 
 fn get_daemon_pid() -> Result<u32, String> {
