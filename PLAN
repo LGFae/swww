@@ -6,29 +6,25 @@ These are the steps we will take while developing this program:
 
 	Scale the png before printing. DONE
 
-	Put a different png in every monitor.
+    Run program as a daemon. DONE
 
-	If the same png are sent to different monitors, scale them only once.
+	Create a communication procedure with the daemon, that allows for: DONE
+		Changing the image. DONE
+		Killing the daemon. DONE
 
-	Make a simple custom wayland protocol to talk to the program while it runs:
-		In the beginning, it will only have a message to change the file being rendered.
+	Now fswww should only be run as both a daemon, and a cli program. DONE
 
-	Make a second CLI program that will talk to the program "fswwwctl"
-		In the beginning, it will have only 3 commands: init, bg and kill
-			bg will simply put the file as background on ALL monitors
-
-	Now fswww should only be run as a daemon, and entirely controlled with fswwwctl
-
-	Update custom wayland protocol:
+	Update communication procedure:
 		support for selecting the filter when switching img path
 		support for selecting the output when sending img path
 
-	fswwwctl with support for selecting the filter, per image sent. 
-	fswwwctl with support for selecting the output, per image sent. 
+	Support for selecting the filter, per image sent. 
+	Support for selecting the output, per image sent. 
+	If the same img are sent to different monitors, scale them only once.
 
 	Make the transition effects when switching rendered files
 		^^ THIS ONE IS A BIT UNPREDICTABLE ^^
-		When done, wayland protocol and fswwwctl should be updated to allow for transition effects
+		When done, communication protocol should be updated to allow for transition effects
 
 	Write custom gif reader.
 		If we find only one image, we use the previous logic.
@@ -47,6 +43,4 @@ These are the steps we will take while developing this program:
 	Write logic to make transition between png and gif smoother.
 	Write logic to make transition between 2 gifs smoother.
 
-	With all this done, make a second wayland-protocol to allow for streams
-		2 events: 1 that updates the next frame, the other that commits it, which will send it to the compositor
-			Updating next frame: 'full' and 'partial'.
+	With all this done, adapt communication procedure to allow for streams
