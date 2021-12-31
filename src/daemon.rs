@@ -162,7 +162,7 @@ impl Drop for Background {
     }
 }
 
-pub fn main() {
+pub fn main(/*original_pid: Option<i32>*/) {
     //If using a debug build, we generaly want to see all the logging
     #[cfg(debug_assertions)]
     env_logger::Builder::new()
@@ -217,6 +217,9 @@ pub fn main() {
         .quick_insert(event_handle)
         .unwrap();
 
+    //if let Some(pid) = original_pid {
+    //    send_answer(true, pid);
+    //}
     loop {
         // This is ugly, let's hope that some version of drain_filter() gets stabilized soon
         // https://github.com/rust-lang/rust/issues/43244

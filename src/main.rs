@@ -35,15 +35,18 @@ fn main() {
     let opts = Fswww::from_args();
     match opts {
         Fswww::Init { no_daemon } => {
-            if get_daemon_pid().is_none() {
+            if get_daemon_pid().is_err() {
                 if !no_daemon {
                     if let Ok(fork::Fork::Child) = fork::daemon(false, false) {
+                        //daemon::main(Some(std::process::id() as i32));
                         daemon::main();
                     } else {
                         eprintln!("Couldn't fork process!");
                         exit(1);
                     }
+                    //wait_for_response(); //remove later!
                 } else {
+                    //daemon::main(None);
                     daemon::main();
                 }
             } else {
@@ -54,10 +57,18 @@ fn main() {
         Fswww::Kill => kill(),
         Fswww::Img { path } => send_img(&path),
     }
+    //wait_for_response();
 }
 
 fn send_img(path: &str) {
-    let pid = get_daemon_pid().unwrap_or_else(|| exit(1)); //Do this first because we exit if we can't find it
+    let pid;
+    match get_daemon_pid() {
+        Ok(p) => pid = p,
+        Err(e) => {
+            die(&e, 1);
+            unreachable!()
+        }
+    }
 
     let path = path::Path::new(path);
     let abs_path = match path.canonicalize() {
@@ -104,7 +115,14 @@ fn wait_for_response() {
 }
 
 fn kill() {
-    let pid = get_daemon_pid().unwrap_or_else(|| exit(1));
+    let pid;
+    match get_daemon_pid() {
+        Ok(p) => pid = p,
+        Err(e) => {
+            die(&e, 1);
+            unreachable!()
+        }
+    }
 
     signal::kill(Pid::from_raw(pid as i32), signal::SIGKILL).expect("Failed to kill daemon...");
 
@@ -113,28 +131,44 @@ fn kill() {
     println!("Successfully killed fswww daemon and removed /tmp/fswww directory!");
 }
 
-fn get_daemon_pid() -> Option<u32> {
+fn get_daemon_pid() -> Result<u32, String> {
     let pid_file_path = path::Path::new(PID_FILE);
     if !pid_file_path.exists() {
-        eprintln!(
+        return Err(format!(
             "pid file {} doesn't exist. Are you sure the daemon is running?",
             PID_FILE
-        );
-        return None;
+        ));
     }
     let pid = fs::read_to_string(pid_file_path).expect("Failed to read pid file");
 
     //if the daemon exits unexpectably, the pid file will exist, but the pid in the file will no
     //longer be valid, and we might send the signal to the wrong process! So we check for that.
-    let program = fs::read_to_string("/proc/".to_owned() + &pid + "/cmdline")
-        .expect("Couldn't read '/proc/' to check if pid is correct");
-    let pid: u32 = pid.parse().unwrap();
-    if !(program.ends_with("fswww") && pid != std::process::id()) {
-        eprintln!(
-            "Pid in {} refers a different program than the fswww daemon. It was probably terminated abnormaly and is no longer running.", 
+    let proc_file = "/proc/".to_owned() + &pid + "/cmdline";
+    println!("Reading : {}", proc_file);
+    let program = fs::read_to_string(&proc_file)
+        .expect(&("Couldn't read ".to_owned() + &proc_file + " to check if pid is correct")); //TODO: BETTER MESSAGE IF PROBLEM IS MISSING FILE
+    println!("{}", program);
+
+    //NOTE: since all calls to fswww (except --help) demand a subcommand, this will always have at
+    //least two elements
+    let mut args = program.split('\0');
+    if !args.next().unwrap().ends_with("fswww") {
+        return Err(format!(
+            "Pid in {} refers a different program than the fswww daemon. It was probably terminated abnormaly and is no longer running.",
             PID_FILE
-            );
-        return None;
+
+               ));
     }
-    Some(pid)
+    if args.next().unwrap() != "init" {
+        return Err(format!(
+            "Pid in {} refers a different instance of fswww than the daemon. The daemon was probably terminated abnormaly and is no longer running.",
+            PID_FILE));
+    }
+
+    Ok(pid.parse().unwrap())
+}
+
+fn die(msg: &str, err_code: i32) {
+    eprintln!("{}", msg);
+    exit(err_code);
 }
