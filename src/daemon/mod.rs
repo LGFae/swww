@@ -11,6 +11,7 @@ use smithay_client_toolkit::{
         calloop::{
             self,
             signals::{Signal, Signals},
+            LoopSignal,
         },
         client::protocol::{wl_output, wl_shm, wl_surface},
         client::{Attached, Main},
@@ -196,15 +197,14 @@ pub fn main(origin_pid: Option<i32>) {
     let _listner_handle =
         env.listen_for_outputs(move |output, info, _| output_handler(output, info));
 
-    let mut event_loop = calloop::EventLoop::<bool>::try_new().unwrap();
+    let mut event_loop = calloop::EventLoop::<LoopSignal>::try_new().unwrap();
 
-    let mut running = true;
     let signal = Signals::new(&[Signal::SIGUSR1, Signal::SIGTERM]).unwrap();
     let event_handle = event_loop.handle();
     event_handle
         .insert_source(signal, |s, _, shared_data| match s.signal() {
             Signal::SIGUSR1 => handle_usr1(bgs.borrow_mut()),
-            Signal::SIGTERM => *shared_data = false,
+            Signal::SIGTERM => shared_data.stop(),
             _ => (),
         })
         .unwrap();
@@ -216,26 +216,28 @@ pub fn main(origin_pid: Option<i32>) {
     if let Some(pid) = origin_pid {
         send_answer(true, pid);
     }
-    while running {
-        // This is ugly, let's hope that some version of drain_filter() gets stabilized soon
-        // https://github.com/rust-lang/rust/issues/43244
-        {
-            let mut bgs = bgs.borrow_mut();
-            let mut i = 0;
-            while i != bgs.len() {
-                if bgs[i].handle_events() {
-                    bgs.remove(i);
-                } else {
-                    i += 1;
+
+    let mut shared_data = event_loop.get_signal();
+    event_loop
+        .run(None, &mut shared_data, |_shared_data| {
+            // This is ugly, let's hope that some version of drain_filter() gets stabilized soon
+            // https://github.com/rust-lang/rust/issues/43244
+            {
+                let mut bgs = bgs.borrow_mut();
+                let mut i = 0;
+                while i != bgs.len() {
+                    if bgs[i].handle_events() {
+                        bgs.remove(i);
+                    } else {
+                        i += 1;
+                    }
                 }
             }
-        }
-
-        event_loop.dispatch(None, &mut running).unwrap();
-        if let Err(e) = display.flush() {
-            error!("Couldn't flush display: {}", e);
-        }
-    }
+            if let Err(e) = display.flush() {
+                error!("Couldn't flush display: {}", e);
+            }
+        })
+        .expect("Error during event loop!");
 }
 
 fn make_logger() {
