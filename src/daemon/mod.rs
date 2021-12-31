@@ -32,7 +32,7 @@ use std::{
     sync::mpsc::{channel, Sender},
 };
 
-//mod img_processor;
+mod img_processor;
 
 const TMP_DIR: &str = "/tmp/fswww";
 const TMP_PID: &str = "pid";
@@ -199,12 +199,12 @@ pub fn main(origin_pid: Option<i32>) {
 
     let mut event_loop = calloop::EventLoop::<LoopSignal>::try_new().unwrap();
 
-    let signal = Signals::new(&[Signal::SIGUSR1, Signal::SIGTERM]).unwrap();
+    let signal = Signals::new(&[Signal::SIGUSR1, Signal::SIGUSR2]).unwrap();
     let event_handle = event_loop.handle();
     event_handle
         .insert_source(signal, |s, _, shared_data| match s.signal() {
             Signal::SIGUSR1 => handle_usr1(bgs.borrow_mut()),
-            Signal::SIGTERM => shared_data.stop(),
+            Signal::SIGUSR2 => shared_data.stop(),
             _ => (),
         })
         .unwrap();
