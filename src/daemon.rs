@@ -194,12 +194,17 @@ pub fn main(/*original_pid: Option<i32>*/) {
     let _listner_handle =
         env.listen_for_outputs(move |output, info, _| output_handler(output, info));
 
-    let mut event_loop = calloop::EventLoop::<()>::try_new().unwrap();
+    let mut event_loop = calloop::EventLoop::<bool>::try_new().unwrap();
 
-    let usr1 = Signals::new(&[Signal::SIGUSR1]).unwrap();
+    let mut running = true;
+    let signal = Signals::new(&[Signal::SIGUSR1, Signal::SIGTERM]).unwrap();
     let event_handle = event_loop.handle();
     event_handle
-        .insert_source(usr1, |_, _, _| handle_usr1(bgs.borrow_mut()))
+        .insert_source(signal, |s, _, shared_data| match s.signal() {
+            Signal::SIGUSR1 => handle_usr1(bgs.borrow_mut()),
+            Signal::SIGTERM => *shared_data = false,
+            _ => (),
+        })
         .unwrap();
 
     WaylandSource::new(queue)
@@ -209,7 +214,7 @@ pub fn main(/*original_pid: Option<i32>*/) {
     //if let Some(pid) = original_pid {
     //    send_answer(true, pid);
     //}
-    loop {
+    while running {
         // This is ugly, let's hope that some version of drain_filter() gets stabilized soon
         // https://github.com/rust-lang/rust/issues/43244
         {
@@ -227,7 +232,7 @@ pub fn main(/*original_pid: Option<i32>*/) {
         if let Err(e) = display.flush() {
             error!("Couldn't flush display: {}", e);
         }
-        event_loop.dispatch(None, &mut ()).unwrap();
+        event_loop.dispatch(None, &mut running).unwrap();
     }
 }
 

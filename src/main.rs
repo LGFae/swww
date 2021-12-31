@@ -124,7 +124,7 @@ fn kill() {
         }
     }
 
-    signal::kill(Pid::from_raw(pid as i32), signal::SIGKILL).expect("Failed to kill daemon...");
+    signal::kill(Pid::from_raw(pid as i32), signal::SIGTERM).expect("Failed to kill daemon...");
 
     fs::remove_dir_all("/tmp/fswww").expect("Failed to remove /tmp/fswww directory.");
 
