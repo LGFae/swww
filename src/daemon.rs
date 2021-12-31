@@ -232,7 +232,9 @@ pub fn main() {
             }
         }
 
-        display.flush().unwrap();
+        if let Err(e) = display.flush() {
+            error!("Couldn't flush display: {}", e);
+        }
         event_loop.dispatch(None, &mut ()).unwrap();
     }
 }
@@ -303,11 +305,21 @@ fn handle_usr1(mut bgs: RefMut<Vec<Background>>) {
             while let Ok((i, img)) = recv.recv() {
                 bgs[i].draw(&img);
             }
-            if let Err(e) = signal::kill(Pid::from_raw(pid_request), signal::SIGUSR1) {
-                error!("Failed to send signal back indicating success: {}", e);
-            }
+            send_answer(true, pid_request);
         }
         Err(e) => warn!("Error reading {}/{} file: {}", TMP_DIR, TMP_IN, e),
+    }
+}
+
+fn send_answer(ok: bool, pid: i32) {
+    if ok {
+        if let Err(e) = signal::kill(Pid::from_raw(pid), signal::SIGUSR1) {
+            error!("Failed to send signal back indicating success: {}", e);
+        }
+    } else {
+        if let Err(e) = signal::kill(Pid::from_raw(pid), signal::SIGUSR2) {
+            error!("Failed to send signal back indicating failure: {}", e);
+        }
     }
 }
 
