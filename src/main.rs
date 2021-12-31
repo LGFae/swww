@@ -35,7 +35,7 @@ fn main() {
     let opts = Fswww::from_args();
     match opts {
         Fswww::Init { no_daemon } => {
-            if !already_running() {
+            if get_daemon_pid().is_none() {
                 if !no_daemon {
                     if let Ok(fork::Fork::Child) = fork::daemon(false, false) {
                         daemon::main();
@@ -57,7 +57,7 @@ fn main() {
 }
 
 fn send_img(path: &str) {
-    let pid = get_daemon_pid(); //Do this first because we exit if we can't find it
+    let pid = get_daemon_pid().unwrap_or_else(|| exit(1)); //Do this first because we exit if we can't find it
 
     let path = path::Path::new(path);
     let abs_path = match path.canonicalize() {
@@ -72,7 +72,7 @@ fn send_img(path: &str) {
     fs::write("/tmp/fswww/in", msg)
         .expect("Couldn't write to /tmp/fswww/in. Did you delete the file?");
 
-    signal::kill(Pid::from_raw(pid), signal::SIGUSR1).expect("Failed to send signal.");
+    signal::kill(Pid::from_raw(pid as i32), signal::SIGUSR1).expect("Failed to send signal.");
 
     wait_for_response();
 }
@@ -93,8 +93,10 @@ extern "C" fn handle_sigusr(signal: libc::c_int) {
 fn wait_for_response() {
     let handler = SigHandler::Handler(handle_sigusr);
     unsafe {
-        signal::signal(signal::SIGUSR1, handler);
-        signal::signal(signal::SIGUSR2, handler);
+        signal::signal(signal::SIGUSR1, handler)
+            .expect("Couldn't register signal handler for usr1");
+        signal::signal(signal::SIGUSR2, handler)
+            .expect("Couldn't register signal handler for usr2");
     }
     unistd::sleep(10);
     eprintln!("Timeout waiting for daemon!");
@@ -102,32 +104,37 @@ fn wait_for_response() {
 }
 
 fn kill() {
-    let pid = get_daemon_pid();
+    let pid = get_daemon_pid().unwrap_or_else(|| exit(1));
 
-    signal::kill(Pid::from_raw(pid), signal::SIGKILL).expect("Failed to kill daemon...");
+    signal::kill(Pid::from_raw(pid as i32), signal::SIGKILL).expect("Failed to kill daemon...");
 
     fs::remove_dir_all("/tmp/fswww").expect("Failed to remove /tmp/fswww directory.");
 
     println!("Successfully killed fswww daemon and removed /tmp/fswww directory!");
 }
 
-fn get_daemon_pid() -> i32 {
+fn get_daemon_pid() -> Option<u32> {
     let pid_file_path = path::Path::new(PID_FILE);
-    //TODO: if the daemon exits unexpectably, this will be true, but the pid in the file will no
-    //longer valid, and we might kill the wrong process!
     if !pid_file_path.exists() {
         eprintln!(
             "pid file {} doesn't exist. Are you sure the daemon is running?",
             PID_FILE
         );
-        exit(1);
+        return None;
     }
-    fs::read_to_string(pid_file_path)
-        .expect("Failed to read pid file")
-        .parse()
-        .unwrap()
-}
+    let pid = fs::read_to_string(pid_file_path).expect("Failed to read pid file");
 
-fn already_running() -> bool {
-    path::Path::new("/tmp/fswww").exists()
+    //if the daemon exits unexpectably, the pid file will exist, but the pid in the file will no
+    //longer be valid, and we might send the signal to the wrong process! So we check for that.
+    let program = fs::read_to_string("/proc/".to_owned() + &pid + "/cmdline")
+        .expect("Couldn't read '/proc/' to check if pid is correct");
+    let pid: u32 = pid.parse().unwrap();
+    if !(program.ends_with("fswww") && pid != std::process::id()) {
+        eprintln!(
+            "Pid in {} refers a different program than the fswww daemon. It was probably terminated abnormaly and is no longer running.", 
+            PID_FILE
+            );
+        return None;
+    }
+    Some(pid)
 }
