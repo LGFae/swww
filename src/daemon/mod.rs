@@ -1,4 +1,3 @@
-use image::{self, imageops, GenericImageView};
 use log::{debug, error, info, warn};
 use nix::{sys::signal, unistd::Pid};
 
@@ -10,6 +9,7 @@ use smithay_client_toolkit::{
     reexports::{
         calloop::{
             self,
+            channel::{self, Sender},
             signals::{Signal, Signals},
             LoopSignal,
         },
@@ -27,9 +27,8 @@ use std::{
     cell::{Cell, RefCell, RefMut},
     fs,
     io::Write,
-    path::Path,
+    path::{Path, PathBuf},
     rc::Rc,
-    sync::mpsc::{channel, Sender},
 };
 
 mod img_processor;
@@ -197,47 +196,62 @@ pub fn main(origin_pid: Option<i32>) {
     let _listner_handle =
         env.listen_for_outputs(move |output, info, _| output_handler(output, info));
 
-    let mut event_loop = calloop::EventLoop::<LoopSignal>::try_new().unwrap();
+    let thread_handle;
+    {
+        let (sender, receiver) = channel::channel();
+        let mut event_loop = calloop::EventLoop::<LoopSignal>::try_new().unwrap();
+        let (call_send, call_recv) = channel::channel();
 
-    let signal = Signals::new(&[Signal::SIGUSR1, Signal::SIGUSR2]).unwrap();
-    let event_handle = event_loop.handle();
-    event_handle
-        .insert_source(signal, |s, _, shared_data| match s.signal() {
-            Signal::SIGUSR1 => handle_usr1(bgs.borrow_mut()),
-            Signal::SIGUSR2 => shared_data.stop(),
-            _ => (),
-        })
-        .unwrap();
+        let signals = Signals::new(&[Signal::SIGUSR1, Signal::SIGUSR2]).unwrap();
+        let event_handle = event_loop.handle();
+        event_handle
+            .insert_source(signals, |s, _, shared_data| match s.signal() {
+                Signal::SIGUSR1 => handle_usr1(bgs.borrow_mut(), sender.clone()),
+                Signal::SIGUSR2 => shared_data.stop(),
+                _ => (),
+            })
+            .unwrap();
 
-    WaylandSource::new(queue)
-        .quick_insert(event_handle)
-        .unwrap();
+        event_handle
+            .insert_source(call_recv, |event, _, shared_data| match event {
+                calloop::channel::Event::Msg(msg) => handle_recv_msg(bgs.borrow_mut(), msg),
+                calloop::channel::Event::Closed => shared_data.stop(),
+            })
+            .unwrap();
 
-    if origin_pid.is_some() {
-        send_answer(true, origin_pid);
-    }
+        thread_handle =
+            std::thread::spawn(move || img_processor::handle_usr_signals(call_send, receiver));
 
-    let mut shared_data = event_loop.get_signal();
-    event_loop
-        .run(None, &mut shared_data, |_shared_data| {
-            // This is ugly, let's hope that some version of drain_filter() gets stabilized soon
-            // https://github.com/rust-lang/rust/issues/43244
-            {
-                let mut bgs = bgs.borrow_mut();
-                let mut i = 0;
-                while i != bgs.len() {
-                    if bgs[i].handle_events() {
-                        bgs.remove(i);
-                    } else {
-                        i += 1;
+        WaylandSource::new(queue)
+            .quick_insert(event_handle)
+            .unwrap();
+
+        if origin_pid.is_some() {
+            send_answer(true, origin_pid);
+        }
+
+        let mut shared_data = event_loop.get_signal();
+        event_loop
+            .run(None, &mut shared_data, |_shared_data| {
+                // This is ugly, let's hope that some version of drain_filter() gets stabilized soon
+                // https://github.com/rust-lang/rust/issues/43244
+                {
+                    let mut bgs = bgs.borrow_mut();
+                    let mut i = 0;
+                    while i != bgs.len() {
+                        if bgs[i].handle_events() {
+                            bgs.remove(i);
+                        } else {
+                            i += 1;
+                        }
                     }
                 }
-            }
-            if let Err(e) = display.flush() {
-                error!("Couldn't flush display: {}", e);
-            }
-        })
-        .expect("Error during event loop!");
+                if let Err(e) = display.flush() {
+                    error!("Couldn't flush display: {}", e);
+                }
+            })
+            .expect("Error during event loop!");
+    }
 
     info!("Finished running event loop.");
 
@@ -256,7 +270,11 @@ pub fn main(origin_pid: Option<i32>) {
     };
     fs::remove_dir_all("/tmp/fswww").expect("Failed to remove /tmp/fswww directory.");
     info!("Removed /tmp/fswww directory");
-    send_answer(true, pid);
+    if thread_handle.join().is_ok() {
+        send_answer(true, pid);
+    } else {
+        send_answer(false, pid);
+    }
 }
 
 fn make_logger() {
@@ -315,33 +333,73 @@ fn make_tmp_files() {
     fs::File::create(out_path).unwrap();
 }
 
-fn handle_usr1(mut bgs: RefMut<Vec<Background>>) {
+fn handle_usr1(bgs: RefMut<Vec<Background>>, sender: Sender<(Vec<String>, (u32, u32), PathBuf)>) {
     //The format for the string is as follows:
     //  the first line contains the pid of the process that made the request
-    //  the second contains (for now) the path to the new img
+    //  the second contains the name of the outputs to put the img in
+    //  the third contains the path to the image
     match fs::read_to_string(Path::new(TMP_DIR).join(TMP_IN)) {
         Ok(content) => {
             let mut lines = content.lines();
+
             let _ = lines.next();
 
+            let outputs = lines.next().unwrap();
+
             let img = lines.next().unwrap();
-            let (send, recv) = channel();
-            for (i, bg) in bgs.iter().enumerate() {
-                let dim = bg.dimensions;
-                let send = send.clone();
-                let img = img.to_owned();
-                std::thread::spawn(move || {
-                    debug!("Starting thread to open and resize image...");
-                    img_try_open_and_resize(&img, dim.0, dim.1, send, i)
-                });
+            let img = Path::new(img);
+
+            //First, let's eliminate outputs with names that don't exist:
+            let mut real_outputs: Vec<String> = Vec::with_capacity(bgs.len());
+            //An empty line means all outputs
+            if outputs.is_empty() {
+                for bg in bgs.iter() {
+                    real_outputs.push(bg.output_name.to_owned());
+                }
+            } else {
+                for output in outputs.split(' ') {
+                    for bg in bgs.iter() {
+                        let output = output.to_string();
+                        if output == bg.output_name && !real_outputs.contains(&output) {
+                            real_outputs.push(output);
+                        }
+                    }
+                }
             }
-            drop(send);
-            while let Ok((i, img)) = recv.recv() {
-                bgs[i].draw(&img);
+            //Then, we gather all those that have the same dimensions, sending the message
+            //until we've sent for every output
+            while !real_outputs.is_empty() {
+                let mut out_same_dim = Vec::with_capacity(real_outputs.len());
+                out_same_dim.push(real_outputs.pop().unwrap());
+                let dim = bgs
+                    .iter()
+                    .find(|bg| bg.output_name == out_same_dim[0])
+                    .unwrap()
+                    .dimensions;
+                for bg in bgs.iter().filter(|bg| bg.dimensions == dim) {
+                    out_same_dim.push(bg.output_name.clone());
+                    real_outputs.retain(|o| *o != bg.output_name);
+                }
+                debug!(
+                    "Sending message to processor: {:?}",
+                    (&out_same_dim, dim, img.to_path_buf())
+                );
+                sender.send((out_same_dim, dim, img.to_path_buf()));
             }
-            send_answer(true, None);
         }
         Err(e) => warn!("Error reading {}/{} file: {}", TMP_DIR, TMP_IN, e),
+    }
+}
+
+fn handle_recv_msg(mut bgs: RefMut<Vec<Background>>, msg: Option<(Vec<String>, Vec<u8>)>) {
+    debug!("Daemon received message back from processor.");
+    if let Some((outputs, img)) = msg {
+        for bg in bgs.iter_mut() {
+            if outputs.contains(&bg.output_name) {
+                bg.draw(&img);
+            }
+        }
+        send_answer(true, None);
     }
 }
 
@@ -367,45 +425,6 @@ fn send_answer(ok: bool, pid: Option<i32>) {
     } else {
         if let Err(e) = signal::kill(Pid::from_raw(pid), signal::SIGUSR2) {
             error!("Failed to send signal back indicating failure: {}", e);
-        }
-    }
-}
-
-fn img_try_open_and_resize(
-    img_path: &str,
-    width: u32,
-    height: u32,
-    send: Sender<(usize, Vec<u8>)>,
-    i: usize,
-) {
-    match image::open(img_path) {
-        Ok(img) => {
-            if width == 0 || height == 0 {
-                warn!("Surface dimensions are set to 0. Can't resize image...");
-                return;
-            }
-
-            let img_dimensions = img.dimensions();
-            debug!("Output dimensions: width: {} height: {}", width, height);
-            debug!(
-                "Image dimensions:  width: {} height: {}",
-                img_dimensions.0, img_dimensions.1
-            );
-            let resized_img = if img_dimensions != (width, height) {
-                info!("Image dimensions are different from output's. Resizing...");
-                img.resize_to_fill(width, height, imageops::FilterType::Lanczos3)
-            } else {
-                info!("Image dimensions are identical to output's. Skipped resize!!");
-                img
-            };
-
-            // The ARGB is 'little endian', so here we must  put the order
-            // of bytes 'in reverse', so it needs to be BGRA.
-            info!("Img is ready!");
-            send.send((i, resized_img.into_bgra8().into_raw()));
-        }
-        Err(e) => {
-            warn!("Couldn't open image: {}", e);
         }
     }
 }
