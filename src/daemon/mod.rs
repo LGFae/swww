@@ -231,10 +231,10 @@ pub fn main(origin_pid: Option<i32>) {
             }
         }
 
+        event_loop.dispatch(None, &mut running).unwrap();
         if let Err(e) = display.flush() {
             error!("Couldn't flush display: {}", e);
         }
-        event_loop.dispatch(None, &mut running).unwrap();
     }
 }
 
