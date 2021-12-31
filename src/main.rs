@@ -40,7 +40,7 @@ enum Fswww {
     },
 }
 
-fn main() -> Result<(), ()> {
+fn main() -> Result<(), String> {
     let opts = Fswww::from_args();
     match opts {
         Fswww::Init { no_daemon } => {
@@ -55,39 +55,29 @@ fn main() -> Result<(), ()> {
                         if let Ok(fork::Fork::Child) = fork::daemon(false, false) {
                             daemon::main(Some(this_pid));
                         } else {
-                            eprintln!("Couldn't daemonize forked process!");
-                            return Err(());
+                            return Err("Couldn't daemonize forked process!".to_string());
                         }
                     }
                     Ok(fork::Fork::Parent(pid)) => {
                         println!("Daemon pid = {}", pid);
                     }
                     Err(_) => {
-                        eprintln!("Coulnd't fork process!");
-                        return Err(());
+                        return Err("Coulnd't fork process!".to_string());
                     }
                 }
             } else {
-                eprintln!("There seems to already be another instance running...");
-                return Err(());
+                return Err("There seems to already be another instance running...".to_string());
             }
         }
-        Fswww::Kill => kill(),
-        Fswww::Img { file } => send_img(&file),
+        Fswww::Kill => kill()?,
+        Fswww::Img { file } => send_img(&file)?,
     }
 
     wait_for_response()
 }
 
-fn send_img(path: &Path) {
-    let pid;
-    match get_daemon_pid() {
-        Ok(p) => pid = p,
-        Err(e) => {
-            die(&e, 1);
-            unreachable!()
-        }
-    }
+fn send_img(path: &Path) -> Result<(), String> {
+    let pid = get_daemon_pid()?;
 
     let abs_path = match path.canonicalize() {
         Ok(p) => p,
@@ -102,6 +92,7 @@ fn send_img(path: &Path) {
         .expect("Couldn't write to /tmp/fswww/in. Did you delete the file?");
 
     signal::kill(Pid::from_raw(pid as i32), signal::SIGUSR1).expect("Failed to send signal.");
+    Ok(())
 }
 
 extern "C" fn handle_sigusr(signal: libc::c_int) {
@@ -113,7 +104,7 @@ extern "C" fn handle_sigusr(signal: libc::c_int) {
     }
 }
 
-fn wait_for_response() -> Result<(), ()> {
+fn wait_for_response() -> Result<(), String> {
     let handler = SigHandler::Handler(handle_sigusr);
     unsafe {
         signal::signal(signal::SIGUSR1, handler)
@@ -123,21 +114,13 @@ fn wait_for_response() -> Result<(), ()> {
     }
     let time_slept = unistd::sleep(10);
     if time_slept >= 10 {
-        eprintln!("Timeout waiting for daemon!");
-        return Err(());
+        return Err("Timeout waiting for daemon!".to_string());
     }
     Ok(())
 }
 
-fn kill() {
-    let pid;
-    match get_daemon_pid() {
-        Ok(p) => pid = p,
-        Err(e) => {
-            die(&e, 1);
-            unreachable!()
-        }
-    }
+fn kill() -> Result<(), String> {
+    let pid = get_daemon_pid()?;
 
     let msg = format!("{}\n", std::process::id());
     fs::write("/tmp/fswww/in", msg)
@@ -145,6 +128,8 @@ fn kill() {
 
     signal::kill(Pid::from_raw(pid as i32), signal::SIGUSR2)
         .expect("Failed to send signal to kill daemon...");
+
+    Ok(())
 }
 
 fn get_daemon_pid() -> Result<u32, String> {
@@ -181,9 +166,4 @@ fn get_daemon_pid() -> Result<u32, String> {
     }
 
     Ok(pid.parse().unwrap())
-}
-
-fn die(msg: &str, err_code: i32) {
-    eprintln!("{}", msg);
-    exit(err_code);
 }
