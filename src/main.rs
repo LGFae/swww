@@ -113,6 +113,8 @@ fn kill() {
 
 fn get_daemon_pid() -> i32 {
     let pid_file_path = path::Path::new(PID_FILE);
+    //TODO: if the daemon exits unexpectably, this will be true, but the pid in the file will no
+    //longer valid, and we might kill the wrong process!
     if !pid_file_path.exists() {
         eprintln!(
             "pid file {} doesn't exist. Are you sure the daemon is running?",
