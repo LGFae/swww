@@ -1,6 +1,10 @@
 use fork;
-use nix::{sys::signal, unistd::Pid};
-use std::{fs, path, process::exit};
+use nix::{
+    libc,
+    sys::signal::{self, SigHandler, Signal},
+    unistd::{self, Pid},
+};
+use std::{convert::TryFrom, fs, path, process::exit};
 use structopt::StructOpt;
 mod daemon;
 
@@ -63,12 +67,38 @@ fn send_img(path: &str) {
             exit(1);
         }
     };
-    let mut img_path_str = abs_path.to_str().unwrap().to_owned();
-    img_path_str.push('\n');
-    fs::write("/tmp/fswww/in", img_path_str)
+    let img_path_str = abs_path.to_str().unwrap();
+    let msg = format!("{}\n{}\n", std::process::id(), img_path_str);
+    fs::write("/tmp/fswww/in", msg)
         .expect("Couldn't write to /tmp/fswww/in. Did you delete the file?");
 
     signal::kill(Pid::from_raw(pid), signal::SIGUSR1).expect("Failed to send signal.");
+
+    wait_for_response();
+}
+
+extern "C" fn handle_sigusr(signal: libc::c_int) {
+    let signal = Signal::try_from(signal).unwrap();
+    if signal == Signal::SIGUSR1 {
+        println!("Success!");
+        exit(0);
+    } else if signal == Signal::SIGUSR1 {
+        eprintln!("FAILED...");
+        exit(1);
+    }
+    //Since we only ever register usr1 and usr2, we can't never reach here
+    unreachable!();
+}
+
+fn wait_for_response() {
+    let handler = SigHandler::Handler(handle_sigusr);
+    unsafe {
+        signal::signal(signal::SIGUSR1, handler);
+        signal::signal(signal::SIGUSR2, handler);
+    }
+    unistd::sleep(10);
+    eprintln!("Timeout waiting for daemon!");
+    exit(1);
 }
 
 fn kill() {

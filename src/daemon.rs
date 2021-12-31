@@ -1,5 +1,6 @@
 use image::{self, imageops, GenericImageView};
-use log::{debug, info, warn};
+use log::{debug, error, info, warn};
+use nix::{sys::signal, unistd::Pid};
 
 use smithay_client_toolkit::{
     default_environment,
@@ -280,22 +281,27 @@ fn make_tmp_files() {
 
 fn handle_usr1(mut bgs: RefMut<Vec<Background>>) {
     match fs::read_to_string(Path::new(TMP_DIR).join(TMP_IN)) {
-        Ok(mut content) => {
-            content.pop();
+        Ok(content) => {
+            let mut lines = content.lines();
+            let pid_request = lines.next().unwrap().parse().unwrap();
 
+            let img = lines.next().unwrap();
             let (send, recv) = channel();
             for (i, bg) in bgs.iter().enumerate() {
                 let dim = bg.dimensions;
                 let send = send.clone();
-                let content = content.clone();
+                let img = img.to_owned();
                 std::thread::spawn(move || {
                     debug!("Starting thread to open and resize image...");
-                    img_try_open_and_resize(&content, dim.0, dim.1, send, i)
+                    img_try_open_and_resize(&img, dim.0, dim.1, send, i)
                 });
             }
             drop(send);
             while let Ok((i, img)) = recv.recv() {
                 bgs[i].draw(&img);
+            }
+            if let Err(e) = signal::kill(Pid::from_raw(pid_request), signal::SIGUSR1) {
+                error!("Failed to send signal back indicating success: {}", e);
             }
         }
         Err(e) => warn!("Error reading {}/{} file: {}", TMP_DIR, TMP_IN, e),
