@@ -1,6 +1,6 @@
 use fork;
 use nix::{sys::signal, unistd::Pid};
-use std::process::exit;
+use std::{fs, path, process::exit};
 use structopt::StructOpt;
 mod daemon;
 
@@ -53,10 +53,19 @@ fn main() {
 }
 
 fn send_img(path: &str) {
-    let pid = get_daemon_pid();
-    let mut img_path = path.to_string();
-    img_path.push('\n');
-    std::fs::write("/tmp/fswww/in", img_path)
+    let pid = get_daemon_pid(); //Do this first because we exit if we can't find it
+
+    let path = path::Path::new(path);
+    let abs_path = match path.canonicalize() {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("{}", e);
+            exit(1);
+        }
+    };
+    let mut img_path_str = abs_path.to_str().unwrap().to_owned();
+    img_path_str.push('\n');
+    fs::write("/tmp/fswww/in", img_path_str)
         .expect("Couldn't write to /tmp/fswww/in. Did you delete the file?");
 
     signal::kill(Pid::from_raw(pid), signal::SIGUSR1).expect("Failed to send signal.");
@@ -67,13 +76,13 @@ fn kill() {
 
     signal::kill(Pid::from_raw(pid), signal::SIGKILL).expect("Failed to kill daemon...");
 
-    std::fs::remove_dir_all("/tmp/fswww").expect("Failed to remove /tmp/fswww directory.");
+    fs::remove_dir_all("/tmp/fswww").expect("Failed to remove /tmp/fswww directory.");
 
     println!("Successfully killed fswww daemon and removed /tmp/fswww directory!");
 }
 
 fn get_daemon_pid() -> i32 {
-    let pid_file_path = std::path::Path::new(PID_FILE);
+    let pid_file_path = path::Path::new(PID_FILE);
     if !pid_file_path.exists() {
         eprintln!(
             "pid file {} doesn't exist. Are you sure the daemon is running?",
@@ -81,12 +90,12 @@ fn get_daemon_pid() -> i32 {
         );
         exit(1);
     }
-    std::fs::read_to_string(pid_file_path)
+    fs::read_to_string(pid_file_path)
         .expect("Failed to read pid file")
         .parse()
         .unwrap()
 }
 
 fn already_running() -> bool {
-    std::path::Path::new("/tmp/fswww").exists()
+    path::Path::new("/tmp/fswww").exists()
 }
