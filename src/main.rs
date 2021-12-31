@@ -8,7 +8,6 @@ use std::{
     convert::TryFrom,
     fs,
     path::{Path, PathBuf},
-    process::exit,
 };
 use structopt::StructOpt;
 mod daemon;
@@ -82,8 +81,7 @@ fn send_img(path: &Path) -> Result<(), String> {
     let abs_path = match path.canonicalize() {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("{}", e);
-            exit(1);
+            return Err(format!("Failed to find absolute path: {}", e));
         }
     };
     let img_path_str = abs_path.to_str().unwrap();
