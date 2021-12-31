@@ -309,6 +309,7 @@ fn create_backgrounds(
             .create_auto_pool()
             .expect("Failed to create a memory pool!");
 
+        debug!("New background with output: {:?}", info);
         if let Some(bg) = Background::new(&output, info.name.clone(), surface, layer_shell, pool) {
             (*bgs.borrow_mut()).push(bg);
         }
