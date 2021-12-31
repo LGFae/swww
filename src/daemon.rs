@@ -280,6 +280,9 @@ fn make_tmp_files() {
 }
 
 fn handle_usr1(mut bgs: RefMut<Vec<Background>>) {
+    //The format for the string is as follows:
+    //  the first line contains the pid of the process that made the request
+    //  the second contains (for now) the path to the new img
     match fs::read_to_string(Path::new(TMP_DIR).join(TMP_IN)) {
         Ok(content) => {
             let mut lines = content.lines();
