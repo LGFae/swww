@@ -4,7 +4,12 @@ use nix::{
     sys::signal::{self, SigHandler, Signal},
     unistd::{self, Pid},
 };
-use std::{convert::TryFrom, fs, path, process::exit};
+use std::{
+    convert::TryFrom,
+    fs,
+    path::{Path, PathBuf},
+    process::exit,
+};
 use structopt::StructOpt;
 mod daemon;
 
@@ -28,7 +33,10 @@ enum Fswww {
     Kill,
 
     /// Send an img for the daemon to display
-    Img { path: String },
+    Img {
+        #[structopt(parse(from_os_str))]
+        path: PathBuf,
+    },
 }
 
 fn main() {
@@ -70,7 +78,7 @@ fn main() {
     //wait_for_response();
 }
 
-fn send_img(path: &str) {
+fn send_img(path: &Path) {
     let pid;
     match get_daemon_pid() {
         Ok(p) => pid = p,
@@ -80,7 +88,6 @@ fn send_img(path: &str) {
         }
     }
 
-    let path = path::Path::new(path);
     let abs_path = match path.canonicalize() {
         Ok(p) => p,
         Err(e) => {
@@ -142,7 +149,7 @@ fn kill() {
 }
 
 fn get_daemon_pid() -> Result<u32, String> {
-    let pid_file_path = path::Path::new(PID_FILE);
+    let pid_file_path = Path::new(PID_FILE);
     if !pid_file_path.exists() {
         return Err(format!(
             "pid file {} doesn't exist. Are you sure the daemon is running?",
