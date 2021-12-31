@@ -40,14 +40,14 @@ enum Fswww {
     },
 }
 
-fn main() {
+fn main() -> Result<(), ()> {
     let opts = Fswww::from_args();
     match opts {
         Fswww::Init { no_daemon } => {
             if get_daemon_pid().is_err() {
                 if no_daemon {
                     daemon::main(None);
-                    return;
+                    return Ok(());
                 }
                 let this_pid = std::process::id() as i32;
                 match fork::fork() {
@@ -56,27 +56,27 @@ fn main() {
                             daemon::main(Some(this_pid));
                         } else {
                             eprintln!("Couldn't daemonize forked process!");
-                            exit(1);
+                            return Err(());
                         }
                     }
                     Ok(fork::Fork::Parent(pid)) => {
                         println!("Daemon pid = {}", pid);
-                        wait_for_response(); //remove later!
                     }
                     Err(_) => {
                         eprintln!("Coulnd't fork process!");
-                        exit(1);
+                        return Err(());
                     }
                 }
             } else {
                 eprintln!("There seems to already be another instance running...");
-                exit(1);
+                return Err(());
             }
         }
         Fswww::Kill => kill(),
         Fswww::Img { file } => send_img(&file),
     }
-    //wait_for_response();
+
+    wait_for_response()
 }
 
 fn send_img(path: &Path) {
@@ -102,24 +102,18 @@ fn send_img(path: &Path) {
         .expect("Couldn't write to /tmp/fswww/in. Did you delete the file?");
 
     signal::kill(Pid::from_raw(pid as i32), signal::SIGUSR1).expect("Failed to send signal.");
-
-    wait_for_response();
 }
 
 extern "C" fn handle_sigusr(signal: libc::c_int) {
     let signal = Signal::try_from(signal).unwrap();
     if signal == Signal::SIGUSR1 {
         println!("Success!");
-        exit(0);
-    } else if signal == Signal::SIGUSR1 {
+    } else if signal == Signal::SIGUSR2 {
         eprintln!("FAILED...");
-        exit(1);
     }
-    //Since we only ever register usr1 and usr2, we can't never reach here
-    unreachable!();
 }
 
-fn wait_for_response() {
+fn wait_for_response() -> Result<(), ()> {
     let handler = SigHandler::Handler(handle_sigusr);
     unsafe {
         signal::signal(signal::SIGUSR1, handler)
@@ -127,9 +121,12 @@ fn wait_for_response() {
         signal::signal(signal::SIGUSR2, handler)
             .expect("Couldn't register signal handler for usr2");
     }
-    unistd::sleep(10);
-    eprintln!("Timeout waiting for daemon!");
-    exit(1);
+    let time_slept = unistd::sleep(10);
+    if time_slept >= 10 {
+        eprintln!("Timeout waiting for daemon!");
+        return Err(());
+    }
+    Ok(())
 }
 
 fn kill() {
