@@ -34,8 +34,9 @@ enum Fswww {
 
     /// Send an img for the daemon to display
     Img {
+        /// Path to the image to display
         #[structopt(parse(from_os_str))]
-        path: PathBuf,
+        file: PathBuf,
     },
 }
 
@@ -73,7 +74,7 @@ fn main() {
             }
         }
         Fswww::Kill => kill(),
-        Fswww::Img { path } => send_img(&path),
+        Fswww::Img { file } => send_img(&file),
     }
     //wait_for_response();
 }
