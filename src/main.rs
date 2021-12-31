@@ -36,6 +36,10 @@ enum Fswww {
         /// Path to the image to display
         #[structopt(parse(from_os_str))]
         file: PathBuf,
+
+        /// Comma separated list of outputs to display the image at
+        #[structopt(short, long)]
+        outputs: Option<String>,
     },
 }
 
@@ -69,13 +73,13 @@ fn main() -> Result<(), String> {
             }
         }
         Fswww::Kill => kill()?,
-        Fswww::Img { file } => send_img(&file)?,
+        Fswww::Img { file, outputs } => send_img(file, outputs.unwrap_or("".to_string()))?,
     }
 
     wait_for_response()
 }
 
-fn send_img(path: &Path) -> Result<(), String> {
+fn send_img(path: PathBuf, outputs: String) -> Result<(), String> {
     let pid = get_daemon_pid()?;
 
     let abs_path = match path.canonicalize() {
@@ -85,7 +89,7 @@ fn send_img(path: &Path) -> Result<(), String> {
         }
     };
     let img_path_str = abs_path.to_str().unwrap();
-    let msg = format!("{}\n{}\n", std::process::id(), img_path_str);
+    let msg = format!("{}\n{}\n{}\n", std::process::id(), outputs, img_path_str);
     fs::write("/tmp/fswww/in", msg)
         .expect("Couldn't write to /tmp/fswww/in. Did you delete the file?");
 
@@ -111,7 +115,7 @@ fn wait_for_response() -> Result<(), String> {
             .expect("Couldn't register signal handler for usr2");
     }
     let time_slept = unistd::sleep(10);
-    if time_slept >= 10 {
+    if time_slept == 0 {
         return Err("Timeout waiting for daemon!".to_string());
     }
     Ok(())
