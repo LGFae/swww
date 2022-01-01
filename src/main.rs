@@ -136,13 +136,13 @@ fn main() -> Result<(), String> {
             file,
             outputs,
             filter,
-        } => send_img(file, outputs.unwrap_or("".to_string()))?,
+        } => send_img(file, outputs.unwrap_or("".to_string()), filter)?,
     }
 
     wait_for_response()
 }
 
-fn send_img(path: PathBuf, outputs: String) -> Result<(), String> {
+fn send_img(path: PathBuf, outputs: String, filter: Filter) -> Result<(), String> {
     if let Err(e) = image::open(&path) {
         return Err(format!("Cannot open img {:?}: {}", path, e));
     }
@@ -155,7 +155,13 @@ fn send_img(path: PathBuf, outputs: String) -> Result<(), String> {
         }
     };
     let img_path_str = abs_path.to_str().unwrap();
-    let msg = format!("{}\n{}\n{}\n", std::process::id(), outputs, img_path_str);
+    let msg = format!(
+        "{}\n{}\n{}\n{}\n",
+        std::process::id(),
+        filter,
+        outputs,
+        img_path_str
+    );
     fs::write("/tmp/fswww/in", msg)
         .expect("Couldn't write to /tmp/fswww/in. Did you delete the file?");
 
