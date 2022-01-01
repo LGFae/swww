@@ -40,47 +40,34 @@ fn handle_msg(
     img: PathBuf,
 ) {
     let (width, height) = dimensions;
-    if let Some(img) = img_try_open_and_resize(&img, width, height) {
-        info!("Img is ready!");
-        sender.send(Some((outputs, img))).unwrap();
-    } else {
-        sender.send(None).unwrap();
-    }
+    let img = img_try_open_and_resize(&img, width, height);
+    info!("Img is ready!");
+    sender.send(Some((outputs, img))).unwrap();
 }
 
-fn img_try_open_and_resize(img_path: &Path, width: u32, height: u32) -> Option<Vec<u8>> {
-    match image::open(img_path) {
-        Ok(img) => {
-            if width == 0 || height == 0 {
-                error!("Surface dimensions are set to 0. Can't resize image...");
-                return None;
-            }
+fn img_try_open_and_resize(img_path: &Path, width: u32, height: u32) -> Vec<u8> {
+    //We check if image::open works before sending it, so it should never fail
+    let img =
+        image::open(img_path).expect("Failed to open image, though this should be impossible...");
+    let img_dimensions = img.dimensions();
+    debug!("Output dimensions: width: {} height: {}", width, height);
+    debug!(
+        "Image dimensions:  width: {} height: {}",
+        img_dimensions.0, img_dimensions.1
+    );
+    let resized_img = if img_dimensions != (width, height) {
+        info!("Image dimensions are different from output's. Resizing...");
+        img.resize_to_fill(width, height, imageops::FilterType::Lanczos3)
+    } else {
+        info!("Image dimensions are identical to output's. Skipped resize!!");
+        img
+    };
 
-            let img_dimensions = img.dimensions();
-            debug!("Output dimensions: width: {} height: {}", width, height);
-            debug!(
-                "Image dimensions:  width: {} height: {}",
-                img_dimensions.0, img_dimensions.1
-            );
-            let resized_img = if img_dimensions != (width, height) {
-                info!("Image dimensions are different from output's. Resizing...");
-                img.resize_to_fill(width, height, imageops::FilterType::Lanczos3)
-            } else {
-                info!("Image dimensions are identical to output's. Skipped resize!!");
-                img
-            };
-
-            // The ARGB is 'little endian', so here we must  put the order
-            // of bytes 'in reverse', so it needs to be BGRA.
-            debug!(
-                "Sending message back from processor: {:?}, {}x{}",
-                img_path, width, height
-            );
-            Some(resized_img.into_bgra8().into_raw())
-        }
-        Err(e) => {
-            error!("Couldn't open image: {}", e);
-            None
-        }
-    }
+    // The ARGB is 'little endian', so here we must  put the order
+    // of bytes 'in reverse', so it needs to be BGRA.
+    debug!(
+        "Sending message back from processor: {:?}, {}x{}",
+        img_path, width, height
+    );
+    resized_img.into_bgra8().into_raw()
 }

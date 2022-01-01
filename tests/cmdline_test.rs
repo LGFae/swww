@@ -13,6 +13,7 @@ const TEST_IMGS: [&str; 3] = [
 fn main() {
     initialization();
     sending_imgs();
+    sending_img_that_does_not_exist();
     sending_img_to_individual_monitors();
     killing_daemon();
 }
@@ -25,6 +26,10 @@ fn sending_imgs() {
     for img in TEST_IMGS {
         cmd().arg("img").arg(img).assert().success();
     }
+}
+
+fn sending_img_that_does_not_exist() {
+    cmd().arg("img").arg("I don't exist").assert().failure();
 }
 
 fn sending_img_to_individual_monitors() {

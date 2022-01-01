@@ -1,4 +1,5 @@
 use fork;
+use image;
 use nix::{
     libc,
     sys::signal::{self, SigHandler, Signal},
@@ -10,6 +11,7 @@ use std::{
     path::{Path, PathBuf},
 };
 use structopt::StructOpt;
+
 mod daemon;
 
 const PID_FILE: &str = "/tmp/fswww/pid";
@@ -37,7 +39,8 @@ enum Fswww {
         #[structopt(parse(from_os_str))]
         file: PathBuf,
 
-        /// Comma separated list of outputs to display the image at
+        /// Comma separated list of outputs to display the image at. If it isn't set, the image is
+        /// displayed on all outputs
         #[structopt(short, long)]
         outputs: Option<String>,
     },
@@ -80,6 +83,9 @@ fn main() -> Result<(), String> {
 }
 
 fn send_img(path: PathBuf, outputs: String) -> Result<(), String> {
+    if let Err(e) = image::open(&path) {
+        return Err(format!("Cannot open img {:?}: {}", path, e));
+    }
     let pid = get_daemon_pid()?;
 
     let abs_path = match path.canonicalize() {

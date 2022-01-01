@@ -409,9 +409,11 @@ fn handle_recv_msg(
                 bg.draw(&img);
             }
         }
-        *msg_count -= 1;
-        if *msg_count == 0 {
-            send_answer(true, None);
+        if *msg_count > 0 {
+            *msg_count -= 1;
+            if *msg_count == 0 {
+                send_answer(true, None);
+            }
         }
     }
 }
