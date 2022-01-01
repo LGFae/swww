@@ -25,3 +25,7 @@ nix = "0.23"
 
 [dev-dependencies]
 assert_cmd = "2.0"
+
+[[test]]
+name = "cmdline_test"
+harness = false
