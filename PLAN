@@ -15,29 +15,16 @@ These are the steps we will take while developing this program:
 	Now fswww should only be run as both a daemon, and a cli program. DONE
 
 	support for selecting the output when sending img path DONE
-	support for selecting the filter when switching img path
 
 	If the same img are sent to different monitors, scale them only once. DONE. As long as they are sent together
 
-	WRITE AUTOMATED TESTING SCRIPT
+	support for selecting the filter when switching img path
+
+	animated gif support
 
 	Make the transition effects when switching rendered files
 		^^ THIS ONE IS A BIT UNPREDICTABLE ^^
 		When done, communication protocol should be updated to allow for transition effects
-
-	Write custom gif reader.
-		If we find only one image, we use the previous logic.
-		Make a pipeline with the reading.
-		Store only the difference of one frame to the next.
-		Update by copying the contents of the previous buffer onto the current one, and then only updating the difference.
-		Once everything is cached, remember to free the file.
-		At this point, transition between gif and png should be abrupt.
-
-	Study possibility of using Huffman's with the above.
-		We could create a sort of bag with all the possible pixels in the image.
-		Memory usage would decrease significantly, at the added processing cost of having to decode
-		the sequence of bits everytime before updating a frame. 
-		There's also the extra processing cost of doing the encoding in the first place.
 
 	Write logic to make transition between png and gif smoother.
 	Write logic to make transition between 2 gifs smoother.
