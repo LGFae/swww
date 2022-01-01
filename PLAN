@@ -14,16 +14,12 @@ These are the steps we will take while developing this program:
 
 	Now fswww should only be run as both a daemon, and a cli program. DONE
 
-	CURRENT PROBLEM: WE DON'T HAVE THE OUTPUTS' NAMES IN THE INFO.
-	SOLUTION: https://smithay.github.io/client-toolkit/smithay_client_toolkit/output/struct.XdgOutputHandler.html
+	support for selecting the output when sending img path DONE
+	support for selecting the filter when switching img path
 
-	Update communication procedure:
-		support for selecting the output when sending img path
-		support for selecting the filter when switching img path
+	If the same img are sent to different monitors, scale them only once. DONE. As long as they are sent together
 
-	Support for selecting the filter, per image sent. 
-	Support for selecting the output, per image sent. 
-	If the same img are sent to different monitors, scale them only once.
+	WRITE AUTOMATED TESTING SCRIPT
 
 	Make the transition effects when switching rendered files
 		^^ THIS ONE IS A BIT UNPREDICTABLE ^^
