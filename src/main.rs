@@ -16,6 +16,30 @@ mod daemon;
 
 const PID_FILE: &str = "/tmp/fswww/pid";
 
+#[derive(Debug)]
+enum Filter {
+    Nearest,
+    Triangle,
+    CatmullRom,
+    Gaussian,
+    Lanczos3,
+}
+
+impl std::str::FromStr for Filter {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "Nearest" => Ok(Self::Nearest),
+            "Triangle" => Ok(Self::Triangle),
+            "CatmullRom" => Ok(Self::CatmullRom),
+            "Gaussian" => Ok(Self::Gaussian),
+            "Lanczos3" => Ok(Self::Lanczos3),
+            _ => Err("Non existing filter".to_string()),
+        }
+    }
+}
+
 #[derive(Debug, StructOpt)]
 #[structopt(
     name = "fswww",
@@ -43,6 +67,24 @@ enum Fswww {
         /// displayed on all outputs
         #[structopt(short, long)]
         outputs: Option<String>,
+
+        ///Filter to use when scaling images. Available options are:
+        ///
+        ///        Nearest
+        ///        Triangle
+        ///        CatmullRom
+        ///        Gaussian
+        ///        Lanczos3
+        ///
+        ///These are offered by the image crate (https://crates.io/crates/image).
+        ///'Nearest' is what I recommend for pixel art stuff, and ONLY for pixel
+        ///art stuff. It is also the fastest filter.
+        ///For non pixel art stuff, I would usually recommend one of the last three,
+        ///though some experimentation will be necessary to see which one you like
+        ///best. Also note they are all slower than Nearest. For some examples, see
+        ///https://docs.rs/image/0.23.14/image/imageops/enum.FilterType.html.
+        #[structopt(short, long, default_value = "Lanczos3", verbatim_doc_comment)]
+        filter: Filter,
     },
 }
 
@@ -76,7 +118,11 @@ fn main() -> Result<(), String> {
             }
         }
         Fswww::Kill => kill()?,
-        Fswww::Img { file, outputs } => send_img(file, outputs.unwrap_or("".to_string()))?,
+        Fswww::Img {
+            file,
+            outputs,
+            filter,
+        } => send_img(file, outputs.unwrap_or("".to_string()))?,
     }
 
     wait_for_response()
