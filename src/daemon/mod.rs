@@ -384,14 +384,17 @@ fn handle_usr1(
                     "Sending message to processor: {:?}",
                     (&out_same_dim, dim, img.to_path_buf())
                 );
-                //Discard error, as the chanell should never be closed.
+
                 sender
                     .send((out_same_dim, dim, img.to_path_buf()))
                     .expect("Channel with img_processor closed unexpectably");
                 *msg_count += 1;
             }
         }
-        Err(e) => warn!("Error reading {}/{} file: {}", TMP_DIR, TMP_IN, e),
+        Err(e) => {
+            error!("Error reading {}/{} file: {}", TMP_DIR, TMP_IN, e);
+            send_answer(false, None);
+        }
     }
 }
 
@@ -418,7 +421,21 @@ fn send_answer(ok: bool, pid: Option<i32>) {
         Some(p) => p,
         None => {
             if let Ok(in_file) = fs::read_to_string(Path::new(TMP_DIR).join(TMP_IN)) {
-                in_file.lines().next().unwrap().parse().unwrap()
+                let pid_str = in_file.lines().next().unwrap();
+                let proc_file = "/proc/".to_owned() + pid_str + "/cmdline";
+                let program;
+                match fs::read_to_string(&proc_file) {
+                    Ok(p) => program = p.split('\0').next().unwrap().to_owned(),
+                    Err(_) => return,
+                }
+                if !program.ends_with("fswww") {
+                    error!(
+                        "Pid in {}/{} doesn't belong to a fswww process.",
+                        TMP_DIR, TMP_IN
+                    );
+                    return;
+                }
+                pid_str.parse().unwrap()
             } else {
                 error!(
                     "Failed to read {}/{} for pid of calling process.",
@@ -428,9 +445,10 @@ fn send_answer(ok: bool, pid: Option<i32>) {
             }
         }
     };
+
     if ok {
         if let Err(e) = signal::kill(Pid::from_raw(pid), signal::SIGUSR1) {
-            error!("Failed to send signal back indicating success: {}", e);
+            warn!("Failed to send signal back indicating success: {}", e);
         }
     } else {
         if let Err(e) = signal::kill(Pid::from_raw(pid), signal::SIGUSR2) {
