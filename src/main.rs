@@ -40,11 +40,25 @@ impl std::str::FromStr for Filter {
     }
 }
 
+impl std::fmt::Display for Filter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Nearest => write!(f, "Nearest"),
+            Self::Triangle => write!(f, "Triangle"),
+            Self::CatmullRom => write!(f, "CatmullRom"),
+            Self::Gaussian => write!(f, "Gaussian"),
+            Self::Lanczos3 => write!(f, "Lanczos3"),
+        }
+    }
+}
+
 #[derive(Debug, StructOpt)]
-#[structopt(
-    name = "fswww",
-    about = "The Final Solution to your Wayland Wallpaper Woes"
-)]
+#[structopt(name = "fswww")]
+///The Final Solution to your Wayland Wallpaper Woes
+///
+///Change what your monitors display as a background by controlling the fswww daemon at runtime.
+///Supports animated gifs and putting different stuff in different monitors. I also did my best to
+///make it as resource efficient as possible.
 enum Fswww {
     ///Initialize the daemon. Exits if there is already a daemon running
     Init {
