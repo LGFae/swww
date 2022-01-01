@@ -13,7 +13,7 @@ use std::{
 ///processes img accornding to request, and sends back the result
 ///If sigterm is found instead, ends the loop
 pub fn processor_loop(
-    sender: Sender<Option<(Vec<String>, Vec<u8>)>>,
+    sender: Sender<(Vec<String>, Vec<u8>)>,
     receiver: Channel<(Vec<String>, (u32, u32), PathBuf)>,
 ) {
     let mut event_loop = calloop::EventLoop::<LoopSignal>::try_new().unwrap();
@@ -34,7 +34,7 @@ pub fn processor_loop(
 }
 
 fn handle_msg(
-    sender: Sender<Option<(Vec<String>, Vec<u8>)>>,
+    sender: Sender<(Vec<String>, Vec<u8>)>,
     outputs: Vec<String>,
     dimensions: (u32, u32),
     img: PathBuf,
@@ -42,7 +42,7 @@ fn handle_msg(
     let (width, height) = dimensions;
     let img = img_try_open_and_resize(&img, width, height);
     info!("Img is ready!");
-    sender.send(Some((outputs, img))).unwrap();
+    sender.send((outputs, img)).unwrap();
 }
 
 fn img_try_open_and_resize(img_path: &Path, width: u32, height: u32) -> Vec<u8> {

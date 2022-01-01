@@ -400,20 +400,19 @@ fn handle_usr1(
 
 fn handle_recv_msg(
     mut bgs: RefMut<Vec<Background>>,
-    msg: Option<(Vec<String>, Vec<u8>)>,
+    msg: (Vec<String>, Vec<u8>),
     msg_count: &mut u32,
 ) {
-    if let Some((outputs, img)) = msg {
-        for bg in bgs.iter_mut() {
-            if outputs.contains(&bg.output_name) {
-                bg.draw(&img);
-            }
+    let (outputs, img) = msg;
+    for bg in bgs.iter_mut() {
+        if outputs.contains(&bg.output_name) {
+            bg.draw(&img);
         }
-        if *msg_count > 0 {
-            *msg_count -= 1;
-            if *msg_count == 0 {
-                send_answer(true, None);
-            }
+    }
+    if *msg_count > 0 {
+        *msg_count -= 1;
+        if *msg_count == 0 {
+            send_answer(true, None);
         }
     }
 }
