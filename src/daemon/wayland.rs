@@ -7,9 +7,11 @@ use smithay_client_toolkit::{
             protocol::{wl_compositor, wl_output, wl_shm},
             Display, EventQueue,
         },
-        protocols::wlr::unstable::layer_shell::v1::client::zwlr_layer_shell_v1,
+        protocols::{
+            unstable::xdg_output::v1::client::zxdg_output_manager_v1,
+            wlr::unstable::layer_shell::v1::client::zwlr_layer_shell_v1,
+        },
     },
-    seat::SeatHandler,
     shm::ShmHandler,
 };
 
@@ -19,7 +21,6 @@ pub struct Env {
     shm: ShmHandler,
     outputs: OutputHandler,
     xdg_out: XdgOutputHandler,
-    seats: SeatHandler,
     layer_shell: SimpleGlobal<zwlr_layer_shell_v1::ZwlrLayerShellV1>,
 }
 
@@ -27,7 +28,8 @@ smithay_client_toolkit::environment!(Env,
 singles = [
 wl_compositor::WlCompositor => compositor,
 zwlr_layer_shell_v1::ZwlrLayerShellV1 => layer_shell,
-wl_shm::WlShm => shm
+wl_shm::WlShm => shm,
+zxdg_output_manager_v1::ZxdgOutputManagerV1 => xdg_out
 ],
 multis = [
     wl_output::WlOutput => outputs,
@@ -60,7 +62,6 @@ pub fn make_wayland_environment() -> (Environment<Env>, Display, EventQueue) {
             compositor: SimpleGlobal::new(),
             //subcompositor:
             shm: ShmHandler::new(),
-            seats: SeatHandler::new(),
             layer_shell: SimpleGlobal::new(),
             xdg_out,
             outputs,
