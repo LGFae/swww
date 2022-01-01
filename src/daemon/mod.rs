@@ -2,9 +2,7 @@ use log::{debug, error, info, warn};
 use nix::{sys::signal, unistd::Pid};
 
 use smithay_client_toolkit::{
-    default_environment,
-    environment::{Environment, SimpleGlobal},
-    new_default_environment,
+    environment::Environment,
     output::{with_output_info, OutputInfo},
     reexports::{
         calloop::{
@@ -32,20 +30,12 @@ use std::{
 };
 
 mod img_processor;
+mod wayland;
 
 const TMP_DIR: &str = "/tmp/fswww";
 const TMP_PID: &str = "pid";
 const TMP_IN: &str = "in";
 const TMP_OUT: &str = "out";
-
-default_environment!(Env,
-    fields = [
-        layer_shell: SimpleGlobal<zwlr_layer_shell_v1::ZwlrLayerShellV1>,
-    ],
-    singles = [
-        zwlr_layer_shell_v1::ZwlrLayerShellV1 => layer_shell
-    ],
-);
 
 #[derive(PartialEq, Copy, Clone)]
 enum RenderEvent {
@@ -170,9 +160,7 @@ pub fn main(origin_pid: Option<i32>) {
     make_tmp_files();
     info!("Created temporary files in {}.", TMP_DIR);
 
-    let (env, display, queue) =
-        new_default_environment!(Env, fields = [layer_shell: SimpleGlobal::new(),])
-            .expect("Initial roundtrip failed!");
+    let (env, display, queue) = wayland::make_wayland_environment();
 
     let bgs = Rc::new(RefCell::new(Vec::new()));
 
@@ -183,7 +171,6 @@ pub fn main(origin_pid: Option<i32>) {
     let output_handler = move |output: wl_output::WlOutput, info: &OutputInfo| {
         create_backgrounds(output, info, &env_handle, &bgs_handle, &layer_shell.clone())
     };
-
     // Process currently existing outputs
     for output in env.get_all_outputs() {
         if let Some(info) = with_output_info(&output, Clone::clone) {
@@ -294,7 +281,7 @@ fn make_logger() {
 fn create_backgrounds(
     output: wl_output::WlOutput,
     info: &OutputInfo,
-    env: &Environment<Env>,
+    env: &Environment<wayland::Env>,
     bgs: &Rc<RefCell<Vec<Background>>>,
     layer_shell: &Attached<zwlr_layer_shell_v1::ZwlrLayerShellV1>,
 ) {

@@ -14,9 +14,12 @@ These are the steps we will take while developing this program:
 
 	Now fswww should only be run as both a daemon, and a cli program. DONE
 
+	CURRENT PROBLEM: WE DON'T HAVE THE OUTPUTS' NAMES IN THE INFO.
+	SOLUTION: https://smithay.github.io/client-toolkit/smithay_client_toolkit/output/struct.XdgOutputHandler.html
+
 	Update communication procedure:
-		support for selecting the filter when switching img path
 		support for selecting the output when sending img path
+		support for selecting the filter when switching img path
 
 	Support for selecting the filter, per image sent. 
 	Support for selecting the output, per image sent. 
