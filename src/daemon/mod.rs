@@ -186,23 +186,25 @@ pub fn main(origin_pid: Option<i32>) {
     let thread_handle;
     {
         let (sender, receiver) = channel::channel();
-        let mut event_loop = calloop::EventLoop::<LoopSignal>::try_new().unwrap();
+        let mut event_loop = calloop::EventLoop::<(LoopSignal, u32)>::try_new().unwrap();
         let (call_send, call_recv) = channel::channel();
 
         let signals = Signals::new(&[Signal::SIGUSR1, Signal::SIGUSR2]).unwrap();
         let event_handle = event_loop.handle();
         event_handle
-            .insert_source(signals, |s, _, shared_data| match s.signal() {
-                Signal::SIGUSR1 => handle_usr1(bgs.borrow_mut(), sender.clone()),
-                Signal::SIGUSR2 => shared_data.stop(),
+            .insert_source(signals, |s, _, (loog_signal, msg_sent)| match s.signal() {
+                Signal::SIGUSR1 => handle_usr1(bgs.borrow_mut(), sender.clone(), msg_sent),
+                Signal::SIGUSR2 => loog_signal.stop(),
                 _ => (),
             })
             .unwrap();
 
         event_handle
-            .insert_source(call_recv, |event, _, shared_data| match event {
-                calloop::channel::Event::Msg(msg) => handle_recv_msg(bgs.borrow_mut(), msg),
-                calloop::channel::Event::Closed => shared_data.stop(),
+            .insert_source(call_recv, |event, _, (loog_signal, msg_sent)| match event {
+                calloop::channel::Event::Msg(msg) => {
+                    handle_recv_msg(bgs.borrow_mut(), msg, msg_sent)
+                }
+                calloop::channel::Event::Closed => loog_signal.stop(), //TODO: THIS IS AN ERROR, ACTUALLY
             })
             .unwrap();
 
@@ -217,9 +219,10 @@ pub fn main(origin_pid: Option<i32>) {
             send_answer(true, origin_pid);
         }
 
-        let mut shared_data = event_loop.get_signal();
+        let loop_signal = event_loop.get_signal();
+        let msg_sent = 0;
         event_loop
-            .run(None, &mut shared_data, |_shared_data| {
+            .run(None, &mut (loop_signal, msg_sent), |_shared_data| {
                 // This is ugly, let's hope that some version of drain_filter() gets stabilized soon
                 // https://github.com/rust-lang/rust/issues/43244
                 {
@@ -321,7 +324,11 @@ fn make_tmp_files() {
     fs::File::create(out_path).unwrap();
 }
 
-fn handle_usr1(bgs: RefMut<Vec<Background>>, sender: Sender<(Vec<String>, (u32, u32), PathBuf)>) {
+fn handle_usr1(
+    bgs: RefMut<Vec<Background>>,
+    sender: Sender<(Vec<String>, (u32, u32), PathBuf)>,
+    msg_count: &mut u32,
+) {
     //The format for the string is as follows:
     //  the first line contains the pid of the process that made the request
     //  the second contains the name of the outputs to put the img in
@@ -377,21 +384,32 @@ fn handle_usr1(bgs: RefMut<Vec<Background>>, sender: Sender<(Vec<String>, (u32, 
                     "Sending message to processor: {:?}",
                     (&out_same_dim, dim, img.to_path_buf())
                 );
-                sender.send((out_same_dim, dim, img.to_path_buf()));
+                //Discard error, as the chanell should never be closed.
+                sender
+                    .send((out_same_dim, dim, img.to_path_buf()))
+                    .expect("Channel with img_processor closed unexpectably");
+                *msg_count += 1;
             }
         }
         Err(e) => warn!("Error reading {}/{} file: {}", TMP_DIR, TMP_IN, e),
     }
 }
 
-fn handle_recv_msg(mut bgs: RefMut<Vec<Background>>, msg: Option<(Vec<String>, Vec<u8>)>) {
+fn handle_recv_msg(
+    mut bgs: RefMut<Vec<Background>>,
+    msg: Option<(Vec<String>, Vec<u8>)>,
+    msg_count: &mut u32,
+) {
     if let Some((outputs, img)) = msg {
         for bg in bgs.iter_mut() {
             if outputs.contains(&bg.output_name) {
                 bg.draw(&img);
             }
         }
-        send_answer(true, None);
+        *msg_count -= 1;
+        if *msg_count == 0 {
+            send_answer(true, None);
+        }
     }
 }
 
