@@ -354,6 +354,8 @@ fn handle_usr1(bgs: RefMut<Vec<Background>>, sender: Sender<(Vec<String>, (u32, 
                     }
                 }
             }
+            debug!("Requesting img for outputs: {:?}", real_outputs);
+
             //Then, we gather all those that have the same dimensions, sending the message
             //until we've sent for every output
             while !real_outputs.is_empty() {
@@ -364,10 +366,13 @@ fn handle_usr1(bgs: RefMut<Vec<Background>>, sender: Sender<(Vec<String>, (u32, 
                     .find(|bg| bg.output_name == out_same_dim[0])
                     .unwrap()
                     .dimensions;
-                for bg in bgs.iter().filter(|bg| bg.dimensions == dim) {
+                for bg in bgs
+                    .iter()
+                    .filter(|bg| real_outputs.contains(&bg.output_name))
+                {
                     out_same_dim.push(bg.output_name.clone());
-                    real_outputs.retain(|o| *o != bg.output_name);
                 }
+                real_outputs.retain(|o| !out_same_dim.contains(o));
                 debug!(
                     "Sending message to processor: {:?}",
                     (&out_same_dim, dim, img.to_path_buf())

@@ -17,7 +17,6 @@ use smithay_client_toolkit::{
 
 pub struct Env {
     compositor: SimpleGlobal<wl_compositor::WlCompositor>,
-    //subcompositor: SimpleGlobal<wl_subcompositor::WlSubcompositor>,
     shm: ShmHandler,
     outputs: OutputHandler,
     xdg_out: XdgOutputHandler,
