@@ -207,7 +207,7 @@ pub fn main(origin_pid: Option<i32>) {
             .unwrap();
 
         thread_handle =
-            std::thread::spawn(move || img_processor::handle_usr_signals(call_send, receiver));
+            std::thread::spawn(move || img_processor::processor_loop(call_send, receiver));
 
         WaylandSource::new(queue)
             .quick_insert(event_handle)
@@ -385,7 +385,6 @@ fn handle_usr1(bgs: RefMut<Vec<Background>>, sender: Sender<(Vec<String>, (u32, 
 }
 
 fn handle_recv_msg(mut bgs: RefMut<Vec<Background>>, msg: Option<(Vec<String>, Vec<u8>)>) {
-    debug!("Daemon received message back from processor.");
     if let Some((outputs, img)) = msg {
         for bg in bgs.iter_mut() {
             if outputs.contains(&bg.output_name) {

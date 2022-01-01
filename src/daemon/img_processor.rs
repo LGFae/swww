@@ -12,7 +12,7 @@ use std::{
 ///Waits for either sigusr1 or sigusr2 to be sent to this process,
 ///processes img accornding to request, and sends back the result
 ///If sigterm is found instead, ends the loop
-pub fn handle_usr_signals(
+pub fn processor_loop(
     sender: Sender<Option<(Vec<String>, Vec<u8>)>>,
     receiver: Channel<(Vec<String>, (u32, u32), PathBuf)>,
 ) {
@@ -72,6 +72,10 @@ fn img_try_open_and_resize(img_path: &Path, width: u32, height: u32) -> Option<V
 
             // The ARGB is 'little endian', so here we must  put the order
             // of bytes 'in reverse', so it needs to be BGRA.
+            debug!(
+                "Sending message back from processor: {:?}, {}x{}",
+                img_path, width, height
+            );
             Some(resized_img.into_bgra8().into_raw())
         }
         Err(e) => {
