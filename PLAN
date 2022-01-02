@@ -18,7 +18,7 @@ These are the steps we will take while developing this program:
 
 	If the same img are sent to different monitors, scale them only once. DONE. As long as they are sent together
 
-	support for selecting the filter when switching img path
+	support for selecting the filter when switching img path DONE
 
 	animated gif support
 
