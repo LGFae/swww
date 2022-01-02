@@ -80,13 +80,32 @@ fn animate(
     sender: Sender<(Vec<String>, Vec<u8>)>,
     receiver: mpsc::Receiver<Vec<String>>,
 ) {
-    let mut now = Instant::now();
+    let mut frames = GifDecoder::new(gif.into_inner())
+        .expect("Couldn't decode gif, though this should be impossible...")
+        .into_frames();
+
     let (frame_sender, frame_recv) = mpsc::channel();
     let (cache_sender, cache_recv) = mpsc::channel();
-    thread::spawn(move || cache_the_frames(gif, frame_sender, cache_sender, width, height, filter));
+    thread::spawn(move || cache_the_frames(frame_recv, cache_sender));
+
     //first loop
-    while let Ok(frame) = frame_recv.recv() {
-        match receiver.recv_timeout(frame.1.saturating_sub(now.elapsed())) {
+    let mut now = Instant::now();
+    while let Some(frame) = frames.next() {
+        let frame = frame.unwrap();
+        let (dur_num, dur_div) = frame.delay().numer_denom_ms();
+        let duration = Duration::from_millis((dur_num / dur_div).into());
+        let img = img_resize(
+            image::DynamicImage::ImageRgba8(frame.into_buffer()),
+            width,
+            height,
+            filter,
+        );
+
+        frame_sender
+            .send((img.clone(), duration))
+            .unwrap_or_else(|_| return);
+
+        match receiver.recv_timeout(duration.saturating_sub(now.elapsed())) {
             Ok(out_to_remove) => {
                 outputs.retain(|o| !out_to_remove.contains(o));
                 if outputs.is_empty() {
@@ -100,10 +119,11 @@ fn animate(
             Err(mpsc::RecvTimeoutError::Timeout) => (),
         };
         sender
-            .send((outputs.clone(), frame.0))
+            .send((outputs.clone(), img))
             .unwrap_or_else(|_| return);
         now = Instant::now();
     }
+    drop(frame_sender); //This will make the loop in the other thread exit
     let cached_frames = cache_recv.recv().unwrap();
 
     //If there was only one frame, we leave immediatelly, since no animation is necessary
@@ -115,36 +135,13 @@ fn animate(
 }
 
 fn cache_the_frames(
-    gif: Reader<BufReader<std::fs::File>>,
-    frame_sender: mpsc::Sender<(Vec<u8>, Duration)>,
+    frame_recv: mpsc::Receiver<(Vec<u8>, Duration)>,
     cache_sender: mpsc::Sender<Vec<(Vec<u8>, Duration)>>,
-    width: u32,
-    height: u32,
-    filter: FilterType,
 ) {
-    let mut frames = GifDecoder::new(gif.into_inner())
-        .expect("Couldn't decode gif, though this should be impossible...")
-        .into_frames();
     let mut cached_frames = Vec::new();
-
-    while let Some(frame) = frames.next() {
-        let frame = frame.unwrap();
-        let (dur_num, dur_div) = frame.delay().numer_denom_ms();
-        let duration = Duration::from_millis((dur_num / dur_div).into());
-        let img = img_resize(
-            image::DynamicImage::ImageRgba8(frame.into_buffer()),
-            width,
-            height,
-            filter,
-        );
-
-        cached_frames.push((img.clone(), duration));
-
-        frame_sender
-            .send((img, duration))
-            .unwrap_or_else(|_| return);
+    while let Ok((uncached, duration)) = frame_recv.recv() {
+        cached_frames.push((uncached, duration));
     }
-    drop(frame_sender);
     cache_sender.send(cached_frames).unwrap_or_else(|_| return);
 }
 
@@ -172,8 +169,8 @@ fn loop_animation(
             sender
                 .send((outputs.clone(), frame_copy))
                 .unwrap_or_else(|_| return);
+            now = Instant::now();
         }
-        now = Instant::now();
     }
 }
 
