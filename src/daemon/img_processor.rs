@@ -8,6 +8,7 @@ use smithay_client_toolkit::reexports::calloop::channel::Sender;
 use smithay_client_toolkit::reexports::calloop::channel::{self, Channel};
 
 use std::io::BufReader;
+use std::time::{Duration, Instant};
 use std::{path::Path, sync::mpsc, thread};
 
 pub enum ProcessingResult {
@@ -83,6 +84,7 @@ fn animate(
         .expect("Couldn't decode gif, though this should be impossible...")
         .into_frames();
     let mut cached_frames = Vec::new();
+    let mut now = Instant::now();
     //first loop
     while let Some(frame) = frames.next() {
         let frame = frame.unwrap();
@@ -97,7 +99,7 @@ fn animate(
 
         cached_frames.push((img.clone(), duration));
 
-        match receiver.recv_timeout(std::time::Duration::from_millis(duration)) {
+        match receiver.recv_timeout(Duration::from_millis(duration).saturating_sub(now.elapsed())) {
             Ok(out_to_remove) => {
                 outputs.retain(|o| !out_to_remove.contains(o));
                 if outputs.is_empty() {
@@ -113,18 +115,22 @@ fn animate(
         sender
             .send((outputs.clone(), img))
             .unwrap_or_else(|_| return);
+        now = Instant::now();
     }
 
     //If there was only one frame, we leave immediatelly, since no animation is necessary
     if cached_frames.len() == 1 {
         return;
     }
+    info!("Finished caching the frames!");
 
     //loop forever with the cached results:
     loop {
         for frame in &cached_frames {
             let frame_copy = frame.0.clone();
-            match receiver.recv_timeout(std::time::Duration::from_millis(frame.1)) {
+            match receiver
+                .recv_timeout(Duration::from_millis(frame.1).saturating_sub(now.elapsed()))
+            {
                 Ok(out_to_remove) => {
                     outputs.retain(|o| !out_to_remove.contains(o));
                     if outputs.is_empty() {
@@ -138,6 +144,7 @@ fn animate(
                 .send((outputs.clone(), frame_copy))
                 .unwrap_or_else(|_| return);
         }
+        now = Instant::now();
     }
 }
 
