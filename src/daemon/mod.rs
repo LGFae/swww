@@ -9,6 +9,7 @@ use smithay_client_toolkit::{
         calloop::{
             self, channel,
             signals::{Signal, Signals},
+            EventSource, RegistrationToken,
         },
         client::protocol::{wl_output, wl_shm, wl_surface},
         client::{Attached, Main},
@@ -195,15 +196,24 @@ pub fn main(origin_pid: Option<i32>) {
         let signals = Signals::new(&[Signal::SIGUSR1, Signal::SIGUSR2]).unwrap();
         let event_handle = event_loop.handle();
         event_handle
-            .insert_source(signals, |s, _, (running, new_channel, anim_senders)| {
-                match s.signal() {
+            .insert_source(
+                signals,
+                |s, _, (running, new_channel, anim_senders)| match s.signal() {
                     Signal::SIGUSR1 => {
-                        //let event_handle = handle_clone.clone();
                         let mut bgs_ref = bgs.borrow_mut();
                         if let Some(results) = handle_usr1(&mut bgs_ref) {
                             for result in results {
                                 match result {
                                     ProcessingResult::Img(msg) => {
+                                        //NOTE: THIS LOOP IS IN THE WRONG PLACE
+                                        let mut i = 0;
+                                        while i < anim_senders.len() {
+                                            if anim_senders[i].send(msg.0.clone()).is_err() {
+                                                anim_senders.remove(i);
+                                            } else {
+                                                i += 1;
+                                            }
+                                        }
                                         debug!("Received img as processing result");
                                         handle_recv_msg(&mut bgs_ref, msg);
                                     }
@@ -218,8 +228,8 @@ pub fn main(origin_pid: Option<i32>) {
                     }
                     Signal::SIGUSR2 => *running = false,
                     _ => (),
-                }
-            })
+                },
+            )
             .unwrap();
 
         WaylandSource::new(queue)
@@ -245,6 +255,7 @@ pub fn main(origin_pid: Option<i32>) {
                 }
             }
 
+            //let tokens = Vec::new();
             let mut shared_data = (true, None, v.clone());
             event_loop
                 .dispatch(None, &mut shared_data)
@@ -254,18 +265,26 @@ pub fn main(origin_pid: Option<i32>) {
                 break;
             }
 
-            if let Some(channel) = shared_data.1 {
+            if let Some(mut channel) = shared_data.1 {
                 let event_handle = event_loop.handle();
-                event_handle
+
+                //USE DISPATCHER TO RETAIN EVENT SOURCE!!!!!!!
+                let token = event_handle
                     .insert_source(channel, |evt, _, (_, new_channel, _old_channels)| {
                         *new_channel = None;
                         let mut bgs = bgs.borrow_mut();
                         match evt {
                             channel::Event::Msg(msg) => handle_recv_msg(&mut bgs, msg),
-                            channel::Event::Closed => (), //TODO: remove this source from loop
+                            channel::Event::Closed => (), //event_handle.kill(evt), //TODO: remove this source from loop
                         }
                     })
                     .unwrap();
+                channel.post_run(|evt, _| {
+                    match evt {
+                        channel::Event::Closed => event_handle.kill(token),
+                        _ => (),
+                    };
+                });
             }
             v = shared_data.2;
             if let Err(e) = display.flush() {
