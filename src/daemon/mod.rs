@@ -7,10 +7,8 @@ use smithay_client_toolkit::{
     output::{with_output_info, OutputInfo},
     reexports::{
         calloop::{
-            self,
-            channel::{self, Sender},
+            self, channel,
             signals::{Signal, Signals},
-            LoopSignal,
         },
         client::protocol::{wl_output, wl_shm, wl_surface},
         client::{Attached, Main},
@@ -26,11 +24,13 @@ use std::{
     cell::{Cell, RefCell, RefMut},
     fs,
     io::Write,
-    path::{Path, PathBuf},
+    path::Path,
     rc::Rc,
+    sync::mpsc,
 };
 
 mod img_processor;
+use img_processor::ProcessingResult;
 mod wayland;
 
 const TMP_DIR: &str = "/tmp/fswww";
@@ -184,33 +184,43 @@ pub fn main(origin_pid: Option<i32>) {
     let _listner_handle =
         env.listen_for_outputs(move |output, info, _| output_handler(output, info));
 
-    let thread_handle;
     {
-        let (sender, receiver) = channel::channel();
-        let mut event_loop = calloop::EventLoop::<(LoopSignal, u32)>::try_new().unwrap();
-        let (call_send, call_recv) = channel::channel();
+        let mut event_loop = calloop::EventLoop::<(
+            bool,
+            Option<channel::Channel<(Vec<String>, Vec<u8>)>>,
+            Vec<mpsc::Sender<Vec<String>>>,
+        )>::try_new()
+        .unwrap();
 
         let signals = Signals::new(&[Signal::SIGUSR1, Signal::SIGUSR2]).unwrap();
         let event_handle = event_loop.handle();
         event_handle
-            .insert_source(signals, |s, _, (loog_signal, msg_sent)| match s.signal() {
-                Signal::SIGUSR1 => handle_usr1(bgs.borrow_mut(), sender.clone(), msg_sent),
-                Signal::SIGUSR2 => loog_signal.stop(),
-                _ => (),
-            })
-            .unwrap();
-
-        event_handle
-            .insert_source(call_recv, |event, _, (loog_signal, msg_sent)| match event {
-                calloop::channel::Event::Msg(msg) => {
-                    handle_recv_msg(bgs.borrow_mut(), msg, msg_sent)
+            .insert_source(signals, |s, _, (running, new_channel, anim_senders)| {
+                match s.signal() {
+                    Signal::SIGUSR1 => {
+                        //let event_handle = handle_clone.clone();
+                        let mut bgs_ref = bgs.borrow_mut();
+                        if let Some(results) = handle_usr1(&mut bgs_ref) {
+                            for result in results {
+                                match result {
+                                    ProcessingResult::Img(msg) => {
+                                        debug!("Received img as processing result");
+                                        handle_recv_msg(&mut bgs_ref, msg);
+                                    }
+                                    ProcessingResult::Gif((channel, sender)) => {
+                                        debug!("Received gif as processing result");
+                                        *new_channel = Some(channel);
+                                        anim_senders.push(sender);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Signal::SIGUSR2 => *running = false,
+                    _ => (),
                 }
-                calloop::channel::Event::Closed => loog_signal.stop(), //TODO: THIS IS AN ERROR, ACTUALLY
             })
             .unwrap();
-
-        thread_handle =
-            std::thread::spawn(move || img_processor::processor_loop(call_send, receiver));
 
         WaylandSource::new(queue)
             .quick_insert(event_handle)
@@ -219,29 +229,49 @@ pub fn main(origin_pid: Option<i32>) {
         if origin_pid.is_some() {
             send_answer(true, origin_pid);
         }
-
-        let loop_signal = event_loop.get_signal();
-        let msg_sent = 0;
-        event_loop
-            .run(None, &mut (loop_signal, msg_sent), |_shared_data| {
-                // This is ugly, let's hope that some version of drain_filter() gets stabilized soon
-                // https://github.com/rust-lang/rust/issues/43244
-                {
-                    let mut bgs = bgs.borrow_mut();
-                    let mut i = 0;
-                    while i != bgs.len() {
-                        if bgs[i].handle_events() {
-                            bgs.remove(i);
-                        } else {
-                            i += 1;
-                        }
+        let mut v: Vec<mpsc::Sender<Vec<String>>> = Vec::new();
+        loop {
+            // This is ugly, let's hope that some version of drain_filter() gets stabilized soon
+            // https://github.com/rust-lang/rust/issues/43244
+            {
+                let mut bgs = bgs.borrow_mut();
+                let mut i = 0;
+                while i != bgs.len() {
+                    if bgs[i].handle_events() {
+                        bgs.remove(i);
+                    } else {
+                        i += 1;
                     }
                 }
-                if let Err(e) = display.flush() {
-                    error!("Couldn't flush display: {}", e);
-                }
-            })
-            .expect("Error during event loop!");
+            }
+
+            let mut shared_data = (true, None, v.clone());
+            event_loop
+                .dispatch(None, &mut shared_data)
+                .expect("Error during event loop!");
+
+            if !shared_data.0 {
+                break;
+            }
+
+            if let Some(channel) = shared_data.1 {
+                let event_handle = event_loop.handle();
+                event_handle
+                    .insert_source(channel, |evt, _, (_, new_channel, _old_channels)| {
+                        *new_channel = None;
+                        let mut bgs = bgs.borrow_mut();
+                        match evt {
+                            channel::Event::Msg(msg) => handle_recv_msg(&mut bgs, msg),
+                            channel::Event::Closed => (), //TODO: remove this source from loop
+                        }
+                    })
+                    .unwrap();
+            }
+            v = shared_data.2;
+            if let Err(e) = display.flush() {
+                error!("Couldn't flush display: {}", e);
+            }
+        }
     }
 
     info!("Finished running event loop.");
@@ -261,11 +291,7 @@ pub fn main(origin_pid: Option<i32>) {
     };
     fs::remove_dir_all("/tmp/fswww").expect("Failed to remove /tmp/fswww directory.");
     info!("Removed /tmp/fswww directory");
-    if thread_handle.join().is_ok() {
-        send_answer(true, pid);
-    } else {
-        send_answer(false, pid);
-    }
+    send_answer(true, pid);
 }
 
 fn make_logger() {
@@ -325,11 +351,7 @@ fn make_tmp_files() {
     fs::File::create(out_path).unwrap();
 }
 
-fn handle_usr1(
-    bgs: RefMut<Vec<Background>>,
-    sender: Sender<(Vec<String>, (u32, u32), FilterType, PathBuf)>,
-    msg_count: &mut u32,
-) {
+fn handle_usr1(bgs: &mut RefMut<Vec<Background>>) -> Option<Vec<ProcessingResult>> {
     //The format for the string is as follows:
     //  the first line contains the pid of the process that made the request
     //  the second line contains the filter to use
@@ -368,6 +390,7 @@ fn handle_usr1(
 
             //Then, we gather all those that have the same dimensions, sending the message
             //until we've sent for every output
+            let mut processing_results = Vec::new();
             while !real_outputs.is_empty() {
                 let mut out_same_dim = Vec::with_capacity(real_outputs.len());
                 out_same_dim.push(real_outputs.pop().unwrap());
@@ -388,15 +411,23 @@ fn handle_usr1(
                     (&out_same_dim, dim, img.to_path_buf())
                 );
 
-                sender
-                    .send((out_same_dim, dim, filter, img.to_path_buf()))
-                    .expect("Channel with img_processor closed unexpectably");
-                *msg_count += 1;
+                //NOTE: IF THERE ARE MULTIPLE MONITORS WITH DIFFERENT SIZE, THIS WILL CALCULATE
+                //THEM IN SEQUENCE, WHICH WE DON'T REALLY WANT
+                processing_results.push(img_processor::processor_loop((
+                    out_same_dim,
+                    dim,
+                    filter,
+                    img,
+                )));
             }
+            Some(processing_results)
         }
         Err(e) => {
-            error!("Error reading {}/{} file: {}", TMP_DIR, TMP_IN, e);
-            send_answer(false, None);
+            error!(
+                "Failed to read sent msg, even though this should be impossible {}",
+                e
+            );
+            None
         }
     }
 }
@@ -412,23 +443,14 @@ fn get_filter_from_str(s: &str) -> FilterType {
     }
 }
 
-fn handle_recv_msg(
-    mut bgs: RefMut<Vec<Background>>,
-    msg: (Vec<String>, Vec<u8>),
-    msg_count: &mut u32,
-) {
+fn handle_recv_msg(bgs: &mut RefMut<Vec<Background>>, msg: (Vec<String>, Vec<u8>)) {
     let (outputs, img) = msg;
     for bg in bgs.iter_mut() {
         if outputs.contains(&bg.output_name) {
             bg.draw(&img);
         }
     }
-    if *msg_count > 0 {
-        *msg_count -= 1;
-        if *msg_count == 0 {
-            send_answer(true, None);
-        }
-    }
+    send_answer(true, None);
 }
 
 fn send_answer(ok: bool, pid: Option<i32>) {

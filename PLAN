@@ -23,7 +23,6 @@ These are the steps we will take while developing this program:
 	animated gif support DONE
 
 	CHECK if simple mempoll works. REALLY check it, throughly. Use only one buffer, if it does.
-	Try to use the frames iterator, instead of transforming them into a vector.
 	Calculate duration correctly for animation frames.
 	Come up with a way to make storing the frames info more memory efficient.
 
