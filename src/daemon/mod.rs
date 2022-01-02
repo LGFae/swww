@@ -1,3 +1,4 @@
+use image::imageops::FilterType;
 use log::{debug, error, info, warn};
 use nix::{sys::signal, unistd::Pid};
 
@@ -326,18 +327,20 @@ fn make_tmp_files() {
 
 fn handle_usr1(
     bgs: RefMut<Vec<Background>>,
-    sender: Sender<(Vec<String>, (u32, u32), PathBuf)>,
+    sender: Sender<(Vec<String>, (u32, u32), FilterType, PathBuf)>,
     msg_count: &mut u32,
 ) {
     //The format for the string is as follows:
     //  the first line contains the pid of the process that made the request
-    //  the second contains the name of the outputs to put the img in
-    //  the third contains the path to the image
+    //  the second line contains the filter to use
+    //  the third contains the name of the outputs to put the img in
+    //  the fourth contains the path to the image
     match fs::read_to_string(Path::new(TMP_DIR).join(TMP_IN)) {
         Ok(content) => {
             let mut lines = content.lines();
 
             let _ = lines.next();
+            let filter = get_filter_from_str(lines.next().unwrap());
 
             let outputs = lines.next().unwrap();
 
@@ -352,7 +355,7 @@ fn handle_usr1(
                     real_outputs.push(bg.output_name.to_owned());
                 }
             } else {
-                for output in outputs.split(' ') {
+                for output in outputs.split(',') {
                     for bg in bgs.iter() {
                         let output = output.to_string();
                         if output == bg.output_name && !real_outputs.contains(&output) {
@@ -386,7 +389,7 @@ fn handle_usr1(
                 );
 
                 sender
-                    .send((out_same_dim, dim, img.to_path_buf()))
+                    .send((out_same_dim, dim, filter, img.to_path_buf()))
                     .expect("Channel with img_processor closed unexpectably");
                 *msg_count += 1;
             }
@@ -395,6 +398,17 @@ fn handle_usr1(
             error!("Error reading {}/{} file: {}", TMP_DIR, TMP_IN, e);
             send_answer(false, None);
         }
+    }
+}
+
+fn get_filter_from_str(s: &str) -> FilterType {
+    match s {
+        "Nearest" => FilterType::Nearest,
+        "Triangle" => FilterType::Triangle,
+        "CatmullRom" => FilterType::CatmullRom,
+        "Gaussian" => FilterType::Gaussian,
+        "Lanczos3" => FilterType::Lanczos3,
+        _ => unreachable!(), //This is impossible because we test it before sending
     }
 }
 

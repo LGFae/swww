@@ -14,6 +14,7 @@ fn main() {
     initialization();
     sending_imgs();
     sending_img_that_does_not_exist();
+    sending_imgs_with_filter();
     sending_img_to_individual_monitors();
     killing_daemon();
 }
@@ -34,6 +35,18 @@ fn sending_img_that_does_not_exist() {
 
 fn sending_img_to_individual_monitors() {
     //For this, we need to implement the query functionallity
+}
+
+fn sending_imgs_with_filter() {
+    for filter in ["Nearest", "Triangle", "CatmullRom", "Gaussian", "Lanczos3"] {
+        cmd()
+            .arg("img")
+            .arg(TEST_IMGS[0])
+            .arg("-f")
+            .arg(filter)
+            .assert()
+            .success();
+    }
 }
 
 fn killing_daemon() {

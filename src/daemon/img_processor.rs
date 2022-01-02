@@ -1,5 +1,5 @@
-use image::{self, imageops, GenericImageView};
-use log::{debug, error, info, warn};
+use image::{self, imageops::FilterType, GenericImageView};
+use log::{debug, info};
 
 use smithay_client_toolkit::reexports::calloop::channel::Channel;
 use smithay_client_toolkit::reexports::calloop::{self, channel::Sender, LoopSignal};
@@ -14,7 +14,7 @@ use std::{
 ///If sigterm is found instead, ends the loop
 pub fn processor_loop(
     sender: Sender<(Vec<String>, Vec<u8>)>,
-    receiver: Channel<(Vec<String>, (u32, u32), PathBuf)>,
+    receiver: Channel<(Vec<String>, (u32, u32), FilterType, PathBuf)>,
 ) {
     let mut event_loop = calloop::EventLoop::<LoopSignal>::try_new().unwrap();
     let event_handle = event_loop.handle();
@@ -22,7 +22,7 @@ pub fn processor_loop(
         .insert_source(receiver, |event, _, loop_signal| match event {
             calloop::channel::Event::Msg(msg) => {
                 let sender = sender.clone();
-                thread::spawn(move || handle_msg(sender, msg.0, msg.1, msg.2));
+                thread::spawn(move || handle_msg(sender, msg.0, msg.1, msg.2, msg.3));
             }
             calloop::channel::Event::Closed => loop_signal.stop(),
         })
@@ -37,15 +37,21 @@ fn handle_msg(
     sender: Sender<(Vec<String>, Vec<u8>)>,
     outputs: Vec<String>,
     dimensions: (u32, u32),
+    filter: FilterType,
     img: PathBuf,
 ) {
     let (width, height) = dimensions;
-    let img = img_try_open_and_resize(&img, width, height);
+    let img = img_try_open_and_resize(&img, width, height, filter);
     info!("Img is ready!");
     sender.send((outputs, img)).unwrap();
 }
 
-fn img_try_open_and_resize(img_path: &Path, width: u32, height: u32) -> Vec<u8> {
+fn img_try_open_and_resize(
+    img_path: &Path,
+    width: u32,
+    height: u32,
+    filter: FilterType,
+) -> Vec<u8> {
     //We check if image::open works before sending it, so it should never fail
     let img =
         image::open(img_path).expect("Failed to open image, though this should be impossible...");
@@ -57,7 +63,7 @@ fn img_try_open_and_resize(img_path: &Path, width: u32, height: u32) -> Vec<u8> 
     );
     let resized_img = if img_dimensions != (width, height) {
         info!("Image dimensions are different from output's. Resizing...");
-        img.resize_to_fill(width, height, imageops::FilterType::Lanczos3)
+        img.resize_to_fill(width, height, filter)
     } else {
         info!("Image dimensions are identical to output's. Skipped resize!!");
         img
