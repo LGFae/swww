@@ -89,7 +89,7 @@ fn animate(
     while let Some(frame) = frames.next() {
         let frame = frame.unwrap();
         let (dur_num, dur_div) = frame.delay().numer_denom_ms();
-        let duration = (dur_num / dur_div).into();
+        let duration = Duration::from_millis((dur_num / dur_div).into());
         let img = img_resize(
             image::DynamicImage::ImageRgba8(frame.into_buffer()),
             width,
@@ -99,7 +99,7 @@ fn animate(
 
         cached_frames.push((img.clone(), duration));
 
-        match receiver.recv_timeout(Duration::from_millis(duration).saturating_sub(now.elapsed())) {
+        match receiver.recv_timeout(duration.saturating_sub(now.elapsed())) {
             Ok(out_to_remove) => {
                 outputs.retain(|o| !out_to_remove.contains(o));
                 if outputs.is_empty() {
@@ -122,15 +122,24 @@ fn animate(
     if cached_frames.len() == 1 {
         return;
     }
-    info!("Finished caching the frames!");
 
-    //loop forever with the cached results:
+    loop_animation(&cached_frames, outputs, sender, receiver);
+}
+
+//fn cache_the_frames(frame_sender: mpsc::Sender<>) -> Vec<(Vec<u8>, Duration)> {}
+
+fn loop_animation(
+    cached_frames: &[(Vec<u8>, Duration)],
+    mut outputs: Vec<String>,
+    sender: Sender<(Vec<String>, Vec<u8>)>,
+    receiver: mpsc::Receiver<Vec<String>>,
+) {
+    info!("Finished caching the frames!");
+    let mut now = Instant::now();
     loop {
-        for frame in &cached_frames {
+        for frame in cached_frames {
             let frame_copy = frame.0.clone();
-            match receiver
-                .recv_timeout(Duration::from_millis(frame.1).saturating_sub(now.elapsed()))
-            {
+            match receiver.recv_timeout(frame.1.saturating_sub(now.elapsed())) {
                 Ok(out_to_remove) => {
                     outputs.retain(|o| !out_to_remove.contains(o));
                     if outputs.is_empty() {
