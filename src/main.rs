@@ -221,7 +221,6 @@ fn get_daemon_pid() -> Result<u32, String> {
     let proc_file = "/proc/".to_owned() + &pid + "/cmdline";
     let program = fs::read_to_string(&proc_file)
         .expect(&("Couldn't read ".to_owned() + &proc_file + " to check if pid is correct")); //TODO: BETTER MESSAGE IF PROBLEM IS MISSING FILE
-    println!("{}", program);
 
     //NOTE: since all calls to fswww (except --help) demand a subcommand, this will always have at
     //least two elements
