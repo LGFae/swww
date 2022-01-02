@@ -20,7 +20,12 @@ These are the steps we will take while developing this program:
 
 	support for selecting the filter when switching img path DONE
 
-	animated gif support
+	animated gif support DONE
+
+	CHECK if simple mempoll works. REALLY check it, throughly. Use only one buffer, if it does.
+	Try to use the frames iterator, instead of transforming them into a vector.
+	Calculate duration correctly for animation frames.
+	Come up with a way to make storing the frames info more memory efficient.
 
 	Make the transition effects when switching rendered files
 		^^ THIS ONE IS A BIT UNPREDICTABLE ^^

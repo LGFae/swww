@@ -5,6 +5,7 @@ use log::{debug, info};
 use smithay_client_toolkit::reexports::calloop::channel::Channel;
 use smithay_client_toolkit::reexports::calloop::{self, channel::Sender, LoopSignal};
 
+use std::iter::Peekable;
 use std::{
     path::{Path, PathBuf},
     sync::mpsc,
@@ -63,18 +64,21 @@ fn handle_msg(
     let img;
     match img_buff.format() {
         Some(ImageFormat::Gif) => {
-            let gif = image::codecs::gif::GifDecoder::new(img_buff.into_inner())
-                .expect("Failed to read gif. This should be impossible");
-            let mut frames = gif.into_frames().collect_frames().unwrap();
-            if frames.len() > 1 {
-                let (anim_sender, anim_recv) = mpsc::channel();
-                thread::spawn(move || {
-                    animate(frames, width, height, outputs, filter, sender, anim_recv)
-                });
-                return Some(anim_sender);
-            } else {
-                img = image::DynamicImage::ImageRgba8(frames.pop().unwrap().into_buffer());
-            }
+            let (anim_sender, anim_recv) = mpsc::channel();
+            thread::spawn(move || {
+                animate(
+                    image::codecs::gif::GifDecoder::new(img_buff.into_inner())
+                        .expect("Failed to read gif. This should be impossible")
+                        .into_frames(),
+                    width,
+                    height,
+                    outputs,
+                    filter,
+                    sender,
+                    anim_recv,
+                )
+            });
+            return Some(anim_sender);
         }
         None => unreachable!("Unsupported format. This also should be impossible..."),
         _ => {
@@ -96,7 +100,7 @@ fn handle_msg(
 }
 
 fn animate(
-    frames: Vec<image::Frame>,
+    mut frames: image::Frames,
     width: u32,
     height: u32,
     mut outputs: Vec<String>,
@@ -104,9 +108,10 @@ fn animate(
     frame_sender: Sender<(Vec<String>, Vec<u8>)>,
     anim_recv: mpsc::Receiver<Vec<String>>,
 ) {
-    let mut cached_frames = Vec::with_capacity(frames.len());
+    let mut cached_frames = Vec::new();
     //first loop
-    for frame in frames.into_iter() {
+    while let Some(frame) = frames.next() {
+        let frame = frame.unwrap();
         let (dur_num, dur_div) = frame.delay().numer_denom_ms();
         let duration = (dur_num / dur_div).into();
         let img = img_resize(
@@ -132,6 +137,12 @@ fn animate(
             .send((outputs.clone(), img))
             .unwrap_or_else(|_| return);
     }
+
+    //If there was only one frame, we leave immediatelly, since no animation is necessary
+    if cached_frames.len() == 1 {
+        return;
+    }
+
     //loop forever with the cached results:
     loop {
         for frame in &cached_frames {
