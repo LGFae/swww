@@ -136,27 +136,38 @@ fn animate(
 
 fn cache_the_frames(
     frame_recv: mpsc::Receiver<(Vec<u8>, Duration)>,
-    cache_sender: mpsc::Sender<Vec<(Vec<u8>, Duration)>>,
+    cache_sender: mpsc::Sender<Vec<(Vec<(usize, u8)>, Duration)>>,
 ) {
     let mut cached_frames = Vec::new();
     while let Ok((uncached, duration)) = frame_recv.recv() {
-        cached_frames.push((uncached, duration));
+        if cached_frames.is_empty() {
+            cached_frames.push((Vec::with_capacity(uncached.len()), duration));
+            for (i, v) in uncached.into_iter().enumerate() {
+                cached_frames[0].0.push((i, v));
+            }
+        } else {
+            cached_frames.push((diff_from(&uncached, &cached_frames[0].0), duration));
+        }
     }
     cache_sender.send(cached_frames).unwrap_or_else(|_| return);
 }
 
 fn loop_animation(
-    cached_frames: &[(Vec<u8>, Duration)],
+    cached_frames: &[(Vec<(usize, u8)>, Duration)],
     mut outputs: Vec<String>,
     sender: Sender<(Vec<String>, Vec<u8>)>,
     receiver: mpsc::Receiver<Vec<String>>,
 ) {
     info!("Finished caching the frames!");
     let mut now = Instant::now();
+    let mut frame_zero = Vec::with_capacity(cached_frames[0].0.len());
+    for (_, v) in &cached_frames[0].0 {
+        frame_zero.push(*v);
+    }
     loop {
-        for frame in cached_frames {
-            let frame_copy = frame.0.clone();
-            match receiver.recv_timeout(frame.1.saturating_sub(now.elapsed())) {
+        for (cached_img, duration) in cached_frames {
+            let img = rebuild_img(&cached_img, &frame_zero);
+            match receiver.recv_timeout(duration.saturating_sub(now.elapsed())) {
                 Ok(out_to_remove) => {
                     outputs.retain(|o| !out_to_remove.contains(o));
                     if outputs.is_empty() {
@@ -167,11 +178,32 @@ fn loop_animation(
                 Err(mpsc::RecvTimeoutError::Timeout) => (),
             };
             sender
-                .send((outputs.clone(), frame_copy))
+                .send((outputs.clone(), img))
                 .unwrap_or_else(|_| return);
             now = Instant::now();
         }
     }
+}
+
+fn diff_from(uncached: &[u8], frame_zero: &[(usize, u8)]) -> Vec<(usize, u8)> {
+    let mut cached_frame = Vec::new();
+    for i in 0..uncached.len() {
+        if uncached[i] != frame_zero[i].1 {
+            cached_frame.push((i, uncached[i]));
+        }
+    }
+    cached_frame
+}
+
+fn rebuild_img(cached: &[(usize, u8)], frame_zero: &[u8]) -> Vec<u8> {
+    let mut rebuilt_frame = Vec::from(frame_zero);
+    if cached.len() == frame_zero.len() {
+        return rebuilt_frame; //Return early, this is our first frame (THIS IS NOT IDEAL)
+    }
+    for (i, v) in cached {
+        rebuilt_frame[*i] = *v;
+    }
+    rebuilt_frame
 }
 
 fn img_resize(img: image::DynamicImage, width: u32, height: u32, filter: FilterType) -> Vec<u8> {
