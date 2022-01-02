@@ -9,7 +9,6 @@ use smithay_client_toolkit::{
         calloop::{
             self, channel,
             signals::{Signal, Signals},
-            EventSource, RegistrationToken,
         },
         client::protocol::{wl_output, wl_shm, wl_surface},
         client::{Attached, Main},
@@ -25,7 +24,7 @@ use std::{
     cell::{Cell, RefCell, RefMut},
     fs,
     io::Write,
-    path::Path,
+    path::{Path, PathBuf},
     rc::Rc,
     sync::mpsc,
 };
@@ -201,19 +200,21 @@ pub fn main(origin_pid: Option<i32>) {
                 |s, _, (running, new_channel, anim_senders)| match s.signal() {
                     Signal::SIGUSR1 => {
                         let mut bgs_ref = bgs.borrow_mut();
-                        if let Some(results) = handle_usr1(&mut bgs_ref) {
-                            for result in results {
+                        if let Some((outputs, filter, img)) = decode_usr1_msg(&mut bgs_ref) {
+                            let mut i = 0;
+                            while i < anim_senders.len() {
+                                if anim_senders[i].send(outputs.clone()).is_err() {
+                                    anim_senders.remove(i);
+                                } else {
+                                    i += 1;
+                                }
+                            }
+                            for result in
+                                send_request_to_processor(&mut bgs_ref, outputs, filter, &img)
+                            {
                                 match result {
                                     ProcessingResult::Img(msg) => {
                                         //NOTE: THIS LOOP IS IN THE WRONG PLACE
-                                        let mut i = 0;
-                                        while i < anim_senders.len() {
-                                            if anim_senders[i].send(msg.0.clone()).is_err() {
-                                                anim_senders.remove(i);
-                                            } else {
-                                                i += 1;
-                                            }
-                                        }
                                         debug!("Received img as processing result");
                                         handle_recv_msg(&mut bgs_ref, msg);
                                     }
@@ -265,11 +266,9 @@ pub fn main(origin_pid: Option<i32>) {
                 break;
             }
 
-            if let Some(mut channel) = shared_data.1 {
+            if let Some(channel) = shared_data.1 {
                 let event_handle = event_loop.handle();
-
-                //USE DISPATCHER TO RETAIN EVENT SOURCE!!!!!!!
-                let token = event_handle
+                event_handle
                     .insert_source(channel, |evt, _, (_, new_channel, _old_channels)| {
                         *new_channel = None;
                         let mut bgs = bgs.borrow_mut();
@@ -279,12 +278,6 @@ pub fn main(origin_pid: Option<i32>) {
                         }
                     })
                     .unwrap();
-                channel.post_run(|evt, _| {
-                    match evt {
-                        channel::Event::Closed => event_handle.kill(token),
-                        _ => (),
-                    };
-                });
             }
             v = shared_data.2;
             if let Err(e) = display.flush() {
@@ -370,12 +363,14 @@ fn make_tmp_files() {
     fs::File::create(out_path).unwrap();
 }
 
-fn handle_usr1(bgs: &mut RefMut<Vec<Background>>) -> Option<Vec<ProcessingResult>> {
-    //The format for the string is as follows:
-    //  the first line contains the pid of the process that made the request
-    //  the second line contains the filter to use
-    //  the third contains the name of the outputs to put the img in
-    //  the fourth contains the path to the image
+///The format for the message is as follows:
+///  the first line contains the pid of the process that made the request
+///  the second line contains the filter to use
+///  the third contains the name of the outputs to put the img in
+///  the fourth contains the path to the image
+fn decode_usr1_msg(
+    bgs: &mut RefMut<Vec<Background>>,
+) -> Option<(Vec<String>, FilterType, PathBuf)> {
     match fs::read_to_string(Path::new(TMP_DIR).join(TMP_IN)) {
         Ok(content) => {
             let mut lines = content.lines();
@@ -386,7 +381,7 @@ fn handle_usr1(bgs: &mut RefMut<Vec<Background>>) -> Option<Vec<ProcessingResult
             let outputs = lines.next().unwrap();
 
             let img = lines.next().unwrap();
-            let img = Path::new(img);
+            let img = Path::new(img).to_path_buf();
 
             //First, let's eliminate outputs with names that don't exist:
             let mut real_outputs: Vec<String> = Vec::with_capacity(bgs.len());
@@ -406,40 +401,7 @@ fn handle_usr1(bgs: &mut RefMut<Vec<Background>>) -> Option<Vec<ProcessingResult
                 }
             }
             debug!("Requesting img for outputs: {:?}", real_outputs);
-
-            //Then, we gather all those that have the same dimensions, sending the message
-            //until we've sent for every output
-            let mut processing_results = Vec::new();
-            while !real_outputs.is_empty() {
-                let mut out_same_dim = Vec::with_capacity(real_outputs.len());
-                out_same_dim.push(real_outputs.pop().unwrap());
-                let dim = bgs
-                    .iter()
-                    .find(|bg| bg.output_name == out_same_dim[0])
-                    .unwrap()
-                    .dimensions;
-                for bg in bgs
-                    .iter()
-                    .filter(|bg| real_outputs.contains(&bg.output_name))
-                {
-                    out_same_dim.push(bg.output_name.clone());
-                }
-                real_outputs.retain(|o| !out_same_dim.contains(o));
-                debug!(
-                    "Sending message to processor: {:?}",
-                    (&out_same_dim, dim, img.to_path_buf())
-                );
-
-                //NOTE: IF THERE ARE MULTIPLE MONITORS WITH DIFFERENT SIZE, THIS WILL CALCULATE
-                //THEM IN SEQUENCE, WHICH WE DON'T REALLY WANT
-                processing_results.push(img_processor::processor_loop((
-                    out_same_dim,
-                    dim,
-                    filter,
-                    img,
-                )));
-            }
-            Some(processing_results)
+            Some((real_outputs, filter, img))
         }
         Err(e) => {
             error!(
@@ -449,6 +411,42 @@ fn handle_usr1(bgs: &mut RefMut<Vec<Background>>) -> Option<Vec<ProcessingResult
             None
         }
     }
+}
+
+fn send_request_to_processor(
+    bgs: &mut RefMut<Vec<Background>>,
+    mut outputs: Vec<String>,
+    filter: FilterType,
+    img: &Path,
+) -> Vec<ProcessingResult> {
+    let mut processing_results = Vec::new();
+    while !outputs.is_empty() {
+        let mut out_same_dim = Vec::with_capacity(outputs.len());
+        out_same_dim.push(outputs.pop().unwrap());
+        let dim = bgs
+            .iter()
+            .find(|bg| bg.output_name == out_same_dim[0])
+            .unwrap()
+            .dimensions;
+        for bg in bgs.iter().filter(|bg| outputs.contains(&bg.output_name)) {
+            out_same_dim.push(bg.output_name.clone());
+        }
+        outputs.retain(|o| !out_same_dim.contains(o));
+        debug!(
+            "Sending message to processor: {:?}",
+            (&out_same_dim, dim, img.to_path_buf())
+        );
+
+        //NOTE: IF THERE ARE MULTIPLE MONITORS WITH DIFFERENT SIZE, THIS WILL CALCULATE
+        //THEM IN SEQUENCE, WHICH WE DON'T REALLY WANT
+        processing_results.push(img_processor::processor_loop((
+            out_same_dim,
+            dim,
+            filter,
+            img,
+        )));
+    }
+    processing_results
 }
 
 fn get_filter_from_str(s: &str) -> FilterType {
