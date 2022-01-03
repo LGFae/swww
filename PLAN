@@ -27,8 +27,6 @@ These are the steps we will take while developing this program:
 	Come up with a way to make storing the frames info more memory efficient. PARTIALLY DONE
 	CURRENTLY USING LESS CPU THAN MPVPAPER, BUT MORE MEMORY
 
-	Change logging solution to slog (same one smithay uses)
-
 	CHECK if simple mempoll works. REALLY check it, throughly. Use only one buffer, if it does.
 
 

@@ -167,7 +167,10 @@ impl Drop for Background {
 ///--no-daemon option.
 ///Note that, if, for some reason, you decide to run fswww-daemon manually yourself, there is no
 ///option to fork it; you may only pass -h or --help to see this message, or -V or --version to see
-///the version you are running.
+///the version you are running. Note also there is no advantage to running the daemon this way, as
+///you will fail receive the confirmation message the daemon sends revealing initialization went ok
+///that fswww waits for, and you won't really see any extra information, as loging is redirected to
+/// /tmp/fswww/log by default in release builds.
 struct Daemon {}
 
 pub fn main() {

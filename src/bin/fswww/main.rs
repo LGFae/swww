@@ -63,8 +63,17 @@ impl std::fmt::Display for Filter {
 enum Fswww {
     ///Initialize the daemon. Exits if there is already a daemon running
     Init {
-        ///Don't fork the daemon. This will keep it running in the current
-        ///terminal, so you can track its log, for example
+        ///Don't fork the daemon. This will keep it running in the current terminal.
+        ///
+        ///Note this doesn't really have any advantage for a release build, as all loging
+        ///for release builds are redirected to /tmp/fswww/log.
+        ///
+        ///Also, fswww waits for a
+        ///signal from the daemon to indicate it initalized successfully, and running something
+        ///like <fswww init --no-daemon &>, though it will sent the process to the background, will
+        ///fail to receive that message properly. Furthermore, in this case you would have 2
+        ///processes running in the background, not one: the original parent fswww and the child
+        ///fswww-daemon.
         #[structopt(long)]
         no_daemon: bool,
     },
