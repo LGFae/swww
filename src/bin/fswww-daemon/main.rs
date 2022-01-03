@@ -39,6 +39,8 @@ const TMP_DIR: &str = "/tmp/fswww";
 const TMP_PID: &str = "pid";
 const TMP_IN: &str = "in";
 const TMP_OUT: &str = "out";
+
+#[cfg(not(debug_assertions))]
 const TMP_LOG: &str = "log";
 
 #[derive(PartialEq, Copy, Clone)]
@@ -307,21 +309,26 @@ pub fn main() {
         }
     }
     info!("Finished running event loop.");
-    send_answer(true);
+    send_answer(true); //in order to send the answer, we read the in file for the pid of the caller
     info!("Removing... /tmp/fswww directory");
     fs::remove_dir_all("/tmp/fswww").expect("Failed to remove /tmp/fswww directory.");
 }
 
 fn make_logger() {
     #[cfg(debug_assertions)]
+    let config = simplelog::ConfigBuilder::new()
+        .set_thread_level(LevelFilter::Info) //let me see where the processing is happenning
+        .set_time_format_str("%H:%M:%S%.f") //let me see those nanoseconds
+        .build();
     TermLogger::init(
         LevelFilter::Debug,
-        simplelog::Config::default(),
+        config,
         TerminalMode::Stderr,
         ColorChoice::AlwaysAnsi,
     )
     .expect("Failed to initialize logger. Cancelling...");
 
+    //For the release version, we log to a file, only warnings and errors, using the default config
     #[cfg(not(debug_assertions))]
     simplelog::WriteLogger::init(
         LevelFilter::Warn,
