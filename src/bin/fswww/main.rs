@@ -85,20 +85,17 @@ enum Fswww {
 
         ///Filter to use when scaling images. Available options are:
         ///
-        ///        Nearest
-        ///        Triangle
-        ///        CatmullRom
-        ///        Gaussian
-        ///        Lanczos3
+        ///Nearest | Triangle | CatmullRom | Gaussian | Lanczos3
         ///
-        ///These are offered by the image crate (https://crates.io/crates/image).
-        ///'Nearest' is what I recommend for pixel art stuff, and ONLY for pixel
-        ///art stuff. It is also the fastest filter.
-        ///For non pixel art stuff, I would usually recommend one of the last three,
-        ///though some experimentation will be necessary to see which one you like
-        ///best. Also note they are all slower than Nearest. For some examples, see
+        ///These are offered by the image crate (https://crates.io/crates/image). 'Nearest' is
+        ///what I recommend for pixel art stuff, and ONLY for pixel art stuff. It is also the
+        ///fastest filter.
+        ///
+        ///For non pixel art stuff, I would usually recommend one of the last three, though some
+        ///experimentation will be necessary to see which one you like best. Also note they are
+        ///all slower than Nearest. For some examples, see
         ///https://docs.rs/image/0.23.14/image/imageops/enum.FilterType.html.
-        #[structopt(short, long, default_value = "Lanczos3", verbatim_doc_comment)]
+        #[structopt(short, long, default_value = "Lanczos3")]
         filter: Filter,
     },
 }
@@ -161,8 +158,6 @@ fn send_img(path: PathBuf, outputs: String, filter: Filter) -> Result<(), String
     if let Err(e) = image::open(&path) {
         return Err(format!("Cannot open img {:?}: {}", path, e));
     }
-    let pid = get_daemon_pid()?;
-
     let abs_path = match path.canonicalize() {
         Ok(p) => p,
         Err(e) => {
