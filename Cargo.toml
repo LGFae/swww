@@ -15,8 +15,8 @@ panic = "abort"
 [dependencies]
 smithay-client-toolkit = "0.15"
 image = "0.23"
-log = "0.4"
-env_logger = "0.9"
+log = {version = "0.4", features = ["max_level_debug", "release_max_level_warn"]}
+simplelog = "^0.11.1"
 fork = "0.1"
 structopt = {version = "0.3", default-features = true}
 nix = "0.23"

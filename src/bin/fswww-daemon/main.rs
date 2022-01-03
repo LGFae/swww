@@ -1,6 +1,7 @@
 use image::imageops::FilterType;
 use log::{debug, error, info, warn};
 use nix::{sys::signal, unistd::Pid};
+use simplelog::{ColorChoice, LevelFilter, TermLogger, TerminalMode};
 use structopt::StructOpt;
 
 use smithay_client_toolkit::{
@@ -38,6 +39,7 @@ const TMP_DIR: &str = "/tmp/fswww";
 const TMP_PID: &str = "pid";
 const TMP_IN: &str = "in";
 const TMP_OUT: &str = "out";
+const TMP_LOG: &str = "log";
 
 #[derive(PartialEq, Copy, Clone)]
 enum RenderEvent {
@@ -171,10 +173,12 @@ struct Daemon {}
 pub fn main() {
     Daemon::from_args();
 
+    make_tmp_files(); //Must make this first because the file we log to is in there
     make_logger();
-    info!("Starting...");
-    make_tmp_files();
-    info!("Created temporary files in {}.", TMP_DIR);
+    info!(
+        "Made temporary files in {} and initalized logger. Starting daemon...",
+        TMP_DIR
+    );
 
     let (env, display, queue) = wayland::make_wayland_environment();
 
@@ -306,17 +310,22 @@ pub fn main() {
 }
 
 fn make_logger() {
-    //If using a debug build, we generaly want to see all the logging
     #[cfg(debug_assertions)]
-    env_logger::Builder::new()
-        .filter_level(log::LevelFilter::Debug)
-        .init();
+    TermLogger::init(
+        LevelFilter::Debug,
+        simplelog::Config::default(),
+        TerminalMode::Stderr,
+        ColorChoice::AlwaysAnsi,
+    )
+    .expect("Failed to initialize logger. Cancelling...");
 
-    //If using a release build, we let the user decide
     #[cfg(not(debug_assertions))]
-    env_logger::Builder::new()
-        .filter_level(log::LevelFilter::Warn)
-        .init();
+    simplelog::WriteLogger::init(
+        LevelFilter::Warn,
+        simplelog::Config::default(),
+        fs::File::create(Path::new(TMP_DIR).join(TMP_LOG)).unwrap(),
+    )
+    .expect("Failed to initialize logger. Cancelling...");
 }
 
 fn create_backgrounds(
@@ -357,6 +366,8 @@ fn make_tmp_files() {
     pid_file.write_all(pid.to_string().as_bytes()).unwrap();
 
     //These two should only be made if they don't exist already
+    //Also we don't make the log file here, since it only needs to be made when
+    //the logger writes to it (release builds)
     for file in [TMP_IN, TMP_OUT] {
         let path = dir_path.join(file);
         if !path.exists() {
