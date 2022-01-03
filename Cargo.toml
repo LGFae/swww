@@ -3,6 +3,7 @@ name = "fswww"
 version = "0.1.0"
 authors = ["Leonardo Gibrowski Faé <leonardo.fae44@gmail.com>"]
 edition = "2018"
+default-run = "fswww"
 
 [profile.release]
 debug = 0
