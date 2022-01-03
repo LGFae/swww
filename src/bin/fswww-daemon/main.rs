@@ -208,7 +208,8 @@ pub fn main() {
     let _listner_handle =
         env.listen_for_outputs(move |output, info, _| output_handler(output, info));
 
-    run_main_loop(bgs, queue, display);
+    run_main_loop(&bgs, queue, &display);
+
     info!("Finished running event loop.");
 
     send_answer(true); //in order to send the answer, we read the in file for the pid of the caller
@@ -288,7 +289,7 @@ fn make_tmp_files() {
     }
 }
 
-fn run_main_loop(bgs: Rc<RefCell<Vec<Background>>>, queue: EventQueue, display: Display) {
+fn run_main_loop(bgs: &Rc<RefCell<Vec<Background>>>, queue: EventQueue, display: &Display) {
     let mut event_loop = calloop::EventLoop::<(
         bool,
         Option<channel::Channel<(Vec<String>, Vec<u8>)>>,
