@@ -23,8 +23,10 @@ These are the steps we will take while developing this program:
 	animated gif support DONE
 
 	CHECK if simple mempoll works. REALLY check it, throughly. Use only one buffer, if it does.
-	Calculate duration correctly for animation frames.
+	Calculate duration correctly for animation frames. DONE
 	Come up with a way to make storing the frames info more memory efficient.
+
+	CURRENTLY USING LESS CPU THAN MPVPAPER, BUT MORE MEMORY
 
 	Make the transition effects when switching rendered files
 		^^ THIS ONE IS A BIT UNPREDICTABLE ^^

@@ -9,12 +9,13 @@ use std::{
     convert::TryFrom,
     fs,
     path::{Path, PathBuf},
+    process::Command,
 };
 use structopt::StructOpt;
 
-mod daemon;
-
-const PID_FILE: &str = "/tmp/fswww/pid";
+const TMP_DIR: &str = "/tmp/fswww";
+const IN_FILE: &str = "in";
+const PID_FILE: &str = "pid";
 
 #[derive(Debug)]
 enum Filter {
@@ -102,33 +103,47 @@ enum Fswww {
     },
 }
 
+fn spawn_daemon(no_daemon: bool) -> Result<(), String> {
+    let mut cmd = Command::new("fswww-daemon");
+    let spawn_err =
+        "Failed to initialize fswww-daemon. Are you sure it is installed (and in the PATH)?";
+    if no_daemon {
+        if cmd.output().is_err() {
+            return Err(spawn_err.to_string());
+        };
+    }
+    match fork::fork() {
+        Ok(fork::Fork::Child) => {
+            if let Ok(fork::Fork::Child) = fork::daemon(false, false) {
+                cmd.output().expect(spawn_err);
+                Ok(())
+            } else {
+                Err("Couldn't daemonize forked process!".to_string())
+            }
+        }
+        Ok(fork::Fork::Parent(pid)) => {
+            println!("Daemon pid = {}", pid);
+            Ok(())
+        }
+        Err(_) => Err("Coulnd't fork process!".to_string()),
+    }
+}
+
 fn main() -> Result<(), String> {
     let opts = Fswww::from_args();
     match opts {
         Fswww::Init { no_daemon } => {
             if get_daemon_pid().is_err() {
-                if no_daemon {
-                    daemon::main(None);
-                    return Ok(());
-                }
-                let this_pid = std::process::id() as i32;
-                match fork::fork() {
-                    Ok(fork::Fork::Child) => {
-                        if let Ok(fork::Fork::Child) = fork::daemon(false, false) {
-                            daemon::main(Some(this_pid));
-                        } else {
-                            return Err("Couldn't daemonize forked process!".to_string());
-                        }
-                    }
-                    Ok(fork::Fork::Parent(pid)) => {
-                        println!("Daemon pid = {}", pid);
-                    }
-                    Err(_) => {
-                        return Err("Coulnd't fork process!".to_string());
-                    }
-                }
+                spawn_daemon(no_daemon)?;
             } else {
                 return Err("There seems to already be another instance running...".to_string());
+            }
+            if no_daemon {
+                //in this case, when the daemon stops we are done
+                return Ok(());
+            } else {
+                //Otherwise, we need to wait for the daemon to say all is well
+                send_request(&format!("{}\n", std::process::id()))?;
             }
         }
         Fswww::Kill => kill()?,
@@ -162,10 +177,8 @@ fn send_img(path: PathBuf, outputs: String, filter: Filter) -> Result<(), String
         outputs,
         img_path_str
     );
-    fs::write("/tmp/fswww/in", msg)
-        .expect("Couldn't write to /tmp/fswww/in. Did you delete the file?");
+    send_request(&msg)?;
 
-    signal::kill(Pid::from_raw(pid as i32), signal::SIGUSR1).expect("Failed to send signal.");
     Ok(())
 }
 
@@ -206,12 +219,29 @@ fn kill() -> Result<(), String> {
     Ok(())
 }
 
+//TODO: Proper error handling (no need to panic for most of these, just return the error)
+fn send_request(request: &str) -> Result<(), String> {
+    let dir_path = Path::new(TMP_DIR);
+    if !dir_path.exists() {
+        fs::create_dir(dir_path).expect("Failed to create /tmp/fswww");
+    }
+    let pid = get_daemon_pid()?;
+    let in_file = dir_path.join(IN_FILE);
+    if !in_file.exists() {
+        fs::File::create(&in_file).unwrap();
+    }
+    fs::write(in_file, request).expect("Couldn't write to /tmp/fswww/in");
+
+    signal::kill(Pid::from_raw(pid as i32), signal::SIGUSR1).expect("Failed to send signal.");
+    Ok(())
+}
+
 fn get_daemon_pid() -> Result<u32, String> {
-    let pid_file_path = Path::new(PID_FILE);
+    let pid_file_path = Path::new(TMP_DIR).join(PID_FILE);
     if !pid_file_path.exists() {
         return Err(format!(
-            "pid file {} doesn't exist. Are you sure the daemon is running?",
-            PID_FILE
+            "pid file {}/{} doesn't exist. Are you sure the daemon is running?",
+            TMP_DIR, PID_FILE
         ));
     }
     let pid = fs::read_to_string(pid_file_path).expect("Failed to read pid file");
@@ -225,18 +255,12 @@ fn get_daemon_pid() -> Result<u32, String> {
     //NOTE: since all calls to fswww (except --help) demand a subcommand, this will always have at
     //least two elements
     let mut args = program.split('\0');
-    if !args.next().unwrap().ends_with("fswww") {
+    if !args.next().unwrap().ends_with("fswww-daemon") {
         return Err(format!(
-            "Pid in {} refers a different program than the fswww daemon. It was probably terminated abnormaly and is no longer running.",
-            PID_FILE
+            "Pid in {}/{} refers a different program than the fswww daemon. It was probably terminated abnormaly and is no longer running.",
+            TMP_DIR, PID_FILE
 
                ));
     }
-    if args.next().unwrap() != "init" {
-        return Err(format!(
-            "Pid in {} refers a different instance of fswww than the daemon. The daemon was probably terminated abnormaly and is no longer running.",
-            PID_FILE));
-    }
-
     Ok(pid.parse().unwrap())
 }

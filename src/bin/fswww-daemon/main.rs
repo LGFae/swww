@@ -1,6 +1,7 @@
 use image::imageops::FilterType;
 use log::{debug, error, info, warn};
 use nix::{sys::signal, unistd::Pid};
+use structopt::StructOpt;
 
 use smithay_client_toolkit::{
     environment::Environment,
@@ -155,7 +156,21 @@ impl Drop for Background {
     }
 }
 
-pub fn main(origin_pid: Option<i32>) {
+#[derive(Debug, StructOpt)]
+#[structopt(name = "fswww-daemon")]
+///The fswww daemon
+///
+///You should never have to interact directly with the daemon, but use fswww init to start it
+///instead. fswww will automatically fork the process for you, unless you run it with the
+///--no-daemon option.
+///Note that, if, for some reason, you decide to run fswww-daemon manually yourself, there is no
+///option to fork it; you may only pass -h or --help to see this message, or -V or --version to see
+///the version you are running.
+struct Daemon {}
+
+pub fn main() {
+    Daemon::from_args();
+
     make_logger();
     info!("Starting...");
     make_tmp_files();
@@ -237,9 +252,8 @@ pub fn main(origin_pid: Option<i32>) {
             .quick_insert(event_handle)
             .unwrap();
 
-        if origin_pid.is_some() {
-            send_answer(true, origin_pid);
-        }
+        send_answer(true);
+
         let mut v: Vec<mpsc::Sender<Vec<String>>> = Vec::new();
         loop {
             // This is ugly, let's hope that some version of drain_filter() gets stabilized soon
@@ -285,25 +299,10 @@ pub fn main(origin_pid: Option<i32>) {
             }
         }
     }
-
     info!("Finished running event loop.");
-
-    let pid: Option<i32> = if let Ok(in_file) = fs::read_to_string(Path::new(TMP_DIR).join(TMP_IN))
-    {
-        match in_file.lines().next().unwrap().parse() {
-            Ok(i) => Some(i),
-            Err(_) => None,
-        }
-    } else {
-        error!(
-            "Failed to read {}/{} for pid of calling process.",
-            TMP_DIR, TMP_IN
-        );
-        None
-    };
+    send_answer(true);
+    info!("Removing... /tmp/fswww directory");
     fs::remove_dir_all("/tmp/fswww").expect("Failed to remove /tmp/fswww directory.");
-    info!("Removed /tmp/fswww directory");
-    send_answer(true, pid);
 }
 
 fn make_logger() {
@@ -357,10 +356,13 @@ fn make_tmp_files() {
     let pid = std::process::id();
     pid_file.write_all(pid.to_string().as_bytes()).unwrap();
 
-    let in_path = dir_path.join(TMP_IN);
-    fs::File::create(in_path).unwrap();
-    let out_path = dir_path.join(TMP_OUT);
-    fs::File::create(out_path).unwrap();
+    //These two should only be made if they don't exist already
+    for file in [TMP_IN, TMP_OUT] {
+        let path = dir_path.join(file);
+        if !path.exists() {
+            fs::File::create(path).unwrap();
+        }
+    }
 }
 
 ///The format for the message is as follows:
@@ -467,37 +469,35 @@ fn handle_recv_msg(bgs: &mut RefMut<Vec<Background>>, msg: (Vec<String>, Vec<u8>
             bg.draw(&img);
         }
     }
-    send_answer(true, None);
+    send_answer(true);
 }
 
-fn send_answer(ok: bool, pid: Option<i32>) {
-    let pid = match pid {
-        Some(p) => p,
-        None => {
-            if let Ok(in_file) = fs::read_to_string(Path::new(TMP_DIR).join(TMP_IN)) {
-                let pid_str = in_file.lines().next().unwrap();
-                let proc_file = "/proc/".to_owned() + pid_str + "/cmdline";
-                let program;
-                match fs::read_to_string(&proc_file) {
-                    Ok(p) => program = p.split('\0').next().unwrap().to_owned(),
-                    Err(_) => return,
-                }
-                if !program.ends_with("fswww") {
-                    error!(
-                        "Pid in {}/{} doesn't belong to a fswww process.",
-                        TMP_DIR, TMP_IN
-                    );
-                    return;
-                }
-                pid_str.parse().unwrap()
-            } else {
-                error!(
-                    "Failed to read {}/{} for pid of calling process.",
-                    TMP_DIR, TMP_IN
-                );
-                return;
-            }
+fn send_answer(ok: bool) {
+    let pid = if let Ok(in_file) = fs::read_to_string(Path::new(TMP_DIR).join(TMP_IN)) {
+        let pid_str = match in_file.lines().next() {
+            Some(str) => str,
+            None => return, //This can happen if we called the daemon directly
+        };
+        let proc_file = "/proc/".to_owned() + pid_str + "/cmdline";
+        let program;
+        match fs::read_to_string(&proc_file) {
+            Ok(p) => program = p.split('\0').next().unwrap().to_owned(),
+            Err(_) => return,
         }
+        if !program.ends_with("fswww") {
+            error!(
+                "Pid in {}/{} doesn't belong to a fswww process.",
+                TMP_DIR, TMP_IN
+            );
+            return;
+        }
+        pid_str.parse().unwrap()
+    } else {
+        error!(
+            "Failed to read {}/{} for pid of calling process.",
+            TMP_DIR, TMP_IN
+        );
+        return;
     };
 
     if ok {
