@@ -16,7 +16,7 @@ pub enum ProcessingResult {
     Gif((Channel<(Vec<String>, Vec<u8>)>, mpsc::Sender<Vec<String>>)),
 }
 
-use brotli::enc::BrotliCompress;
+use miniz_oxide::deflate;
 
 ///Waits for a msg from the daemon event_loop
 pub fn processor_loop(msg: (Vec<String>, (u32, u32), FilterType, &Path)) -> ProcessingResult {
@@ -138,41 +138,26 @@ fn animate(
 
 fn cache_the_frames(
     frame_recv: mpsc::Receiver<(Vec<u8>, Duration)>,
-    cache_sender: mpsc::Sender<Vec<(Vec<(usize, [u8; 4])>, Duration)>>,
+    cache_sender: mpsc::Sender<Vec<(Vec<u8>, Duration)>>,
 ) {
     let mut cached_frames = Vec::new();
     while let Ok((uncached, duration)) = frame_recv.recv() {
-        if cached_frames.is_empty() {
-            cached_frames.push((Vec::with_capacity(uncached.len() / 4), duration));
-            for (i, v) in uncached.chunks_exact(4).enumerate() {
-                let pixel = [v[0], v[1], v[2], v[3]];
-                cached_frames[0].0.push((i, pixel));
-            }
-        } else {
-            cached_frames.push((diff_from(&uncached, &cached_frames[0].0), duration));
-        }
+        cached_frames.push((deflate::compress_to_vec(&uncached, 6), duration));
     }
     cache_sender.send(cached_frames).unwrap_or_else(|_| return);
 }
 
 fn loop_animation(
-    cached_frames: &[(Vec<(usize, [u8; 4])>, Duration)],
+    cached_frames: &[(Vec<u8>, Duration)],
     mut outputs: Vec<String>,
     sender: Sender<(Vec<String>, Vec<u8>)>,
     receiver: mpsc::Receiver<Vec<String>>,
 ) {
     info!("Finished caching the frames!");
     let mut now = Instant::now();
-    let mut frame_zero = Vec::with_capacity(cached_frames[0].0.len());
-    for (_, v) in &cached_frames[0].0 {
-        frame_zero.push(v[0]);
-        frame_zero.push(v[1]);
-        frame_zero.push(v[2]);
-        frame_zero.push(v[3]);
-    }
     loop {
         for (cached_img, duration) in cached_frames {
-            let img = rebuild_img(&cached_img, &frame_zero);
+            let img = miniz_oxide::inflate::decompress_to_vec(&cached_img).unwrap();
             match receiver.recv_timeout(duration.saturating_sub(now.elapsed())) {
                 Ok(out_to_remove) => {
                     outputs.retain(|o| !out_to_remove.contains(o));
@@ -189,33 +174,6 @@ fn loop_animation(
             now = Instant::now();
         }
     }
-}
-
-fn diff_from(uncached: &[u8], frame_zero: &[(usize, [u8; 4])]) -> Vec<(usize, [u8; 4])> {
-    let mut cached_frame = Vec::new();
-    let mut i = 0;
-    for pixel in uncached.chunks_exact(4) {
-        if pixel != frame_zero[i].1 {
-            let pixel = [pixel[0], pixel[1], pixel[2], pixel[3]];
-            cached_frame.push((i, pixel));
-        }
-        i += 1;
-    }
-    cached_frame
-}
-
-fn rebuild_img(cached: &[(usize, [u8; 4])], frame_zero: &[u8]) -> Vec<u8> {
-    let mut rebuilt_frame = Vec::from(frame_zero);
-    if cached.len() * 4 == frame_zero.len() {
-        return rebuilt_frame; //Return early, this is our first frame (THIS IS NOT IDEAL)
-    }
-    for (i, v) in cached {
-        rebuilt_frame[*i * 4] = v[0];
-        rebuilt_frame[*i * 4 + 1] = v[1];
-        rebuilt_frame[*i * 4 + 2] = v[2];
-        rebuilt_frame[*i * 4 + 3] = v[3];
-    }
-    rebuilt_frame
 }
 
 fn img_resize(img: image::DynamicImage, width: u32, height: u32, filter: FilterType) -> Vec<u8> {
