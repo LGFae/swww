@@ -24,19 +24,21 @@ These are the steps we will take while developing this program:
 
 	Calculate duration correctly for animation frames. DONE
 
-	Come up with a way to make storing the frames info more memory efficient. PARTIALLY DONE
-	CURRENTLY USING LESS CPU THAN MPVPAPER, BUT MORE MEMORY
-
+	Come up with a way to make storing the frames info more memory efficient.  DONE
+	
 	LOGGING: Improve messages and time. Very important for later.
 
 	CHECK if simple mempoll works. REALLY check it, throughly. Use only one buffer, if it does.
 
-
+LONG TERM:
 	Make the transition effects when switching rendered files
-		^^ THIS ONE IS A BIT UNPREDICTABLE ^^
 		When done, communication protocol should be updated to allow for transition effects
 
 	Write logic to make transition between png and gif smoother.
 	Write logic to make transition between 2 gifs smoother.
 
+	Write a custom compression/decompression algorithm, making use of what we
+	know about the nature of the information (i.e they are 8888 images)
+
+UNSURE:
 	With all this done, adapt communication procedure to allow for streams
