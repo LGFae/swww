@@ -25,10 +25,10 @@ pub struct Env {
 
 smithay_client_toolkit::environment!(Env,
 singles = [
-wl_compositor::WlCompositor => compositor,
-zwlr_layer_shell_v1::ZwlrLayerShellV1 => layer_shell,
-wl_shm::WlShm => shm,
-zxdg_output_manager_v1::ZxdgOutputManagerV1 => xdg_out
+    wl_compositor::WlCompositor => compositor,
+    zwlr_layer_shell_v1::ZwlrLayerShellV1 => layer_shell,
+    wl_shm::WlShm => shm,
+    zxdg_output_manager_v1::ZxdgOutputManagerV1 => xdg_out
 ],
 multis = [
     wl_output::WlOutput => outputs,
@@ -59,7 +59,6 @@ pub fn make_wayland_environment() -> (Environment<Env>, Display, EventQueue) {
         &mut event_queue,
         Env {
             compositor: SimpleGlobal::new(),
-            //subcompositor:
             shm: ShmHandler::new(),
             layer_shell: SimpleGlobal::new(),
             xdg_out,
