@@ -21,6 +21,7 @@ simplelog = "^0.11.1"
 fork = "0.1"
 structopt = {version = "0.3", default-features = true}
 nix = "0.23"
+brotli = "3.3"
 
 [dev-dependencies]
 assert_cmd = "2.0"
