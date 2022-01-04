@@ -13,6 +13,9 @@ codegen-units = 1
 panic = "abort"
 #strip = true #enable this once it gets stabilized -- literally next cargo version
 
+[profile.bench]
+debuf = 1
+
 [dependencies]
 smithay-client-toolkit = "0.15"
 image = "0.23"
