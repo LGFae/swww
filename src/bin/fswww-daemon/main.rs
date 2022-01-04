@@ -223,6 +223,7 @@ fn make_logger() {
         .set_thread_level(LevelFilter::Info) //let me see where the processing is happenning
         .set_time_format_str("%H:%M:%S%.f") //let me see those nanoseconds
         .build();
+    #[cfg(debug_assertions)]
     TermLogger::init(
         LevelFilter::Debug,
         config,
