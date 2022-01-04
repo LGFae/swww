@@ -44,7 +44,7 @@ fn handle_msg(
             let img = img_buf
                 .decode()
                 .expect("Img decoding failed, though this should be impossible...");
-            let img_bytes = img_resize(img, width, height, filter);
+            let img_bytes = img_resize_compress(img, width, height, filter);
             ProcessingResult::Img((outputs, img_bytes))
         }
     }
@@ -86,26 +86,21 @@ fn animate(
         .expect("Couldn't decode gif, though this should be impossible...")
         .into_frames();
 
-    let (frame_sender, frame_recv) = mpsc::channel();
-    let (cache_sender, cache_recv) = mpsc::channel();
-    thread::spawn(move || cache_the_frames(frame_recv, cache_sender));
-
+    let mut cached_frames = Vec::new();
     //first loop
     let mut now = Instant::now();
     while let Some(frame) = frames.next() {
         let frame = frame.unwrap();
         let (dur_num, dur_div) = frame.delay().numer_denom_ms();
         let duration = Duration::from_millis((dur_num / dur_div).into());
-        let img = img_resize(
+
+        let img = img_resize_compress(
             image::DynamicImage::ImageRgba8(frame.into_buffer()),
             width,
             height,
             filter,
         );
-
-        frame_sender
-            .send((img.clone(), duration))
-            .unwrap_or_else(|_| return);
+        cached_frames.push((img.clone(), duration));
 
         match receiver.recv_timeout(duration.saturating_sub(now.elapsed())) {
             Ok(out_to_remove) => {
@@ -125,8 +120,6 @@ fn animate(
             .unwrap_or_else(|_| return);
         now = Instant::now();
     }
-    drop(frame_sender); //This will make the loop in the other thread exit
-    let cached_frames = cache_recv.recv().unwrap();
 
     //If there was only one frame, we leave immediatelly, since no animation is necessary
     if cached_frames.len() == 1 {
@@ -134,17 +127,6 @@ fn animate(
     }
 
     loop_animation(&cached_frames, outputs, sender, receiver);
-}
-
-fn cache_the_frames(
-    frame_recv: mpsc::Receiver<(Vec<u8>, Duration)>,
-    cache_sender: mpsc::Sender<Vec<(Vec<u8>, Duration)>>,
-) {
-    let mut cached_frames = Vec::new();
-    while let Ok((uncached, duration)) = frame_recv.recv() {
-        cached_frames.push((deflate::compress_to_vec(&uncached, 6), duration));
-    }
-    cache_sender.send(cached_frames).unwrap_or_else(|_| return);
 }
 
 fn loop_animation(
@@ -157,7 +139,6 @@ fn loop_animation(
     let mut now = Instant::now();
     loop {
         for (cached_img, duration) in cached_frames {
-            let img = miniz_oxide::inflate::decompress_to_vec(&cached_img).unwrap();
             match receiver.recv_timeout(duration.saturating_sub(now.elapsed())) {
                 Ok(out_to_remove) => {
                     outputs.retain(|o| !out_to_remove.contains(o));
@@ -169,14 +150,19 @@ fn loop_animation(
                 Err(mpsc::RecvTimeoutError::Timeout) => (),
             };
             sender
-                .send((outputs.clone(), img))
+                .send((outputs.clone(), cached_img.clone()))
                 .unwrap_or_else(|_| return);
             now = Instant::now();
         }
     }
 }
 
-fn img_resize(img: image::DynamicImage, width: u32, height: u32, filter: FilterType) -> Vec<u8> {
+fn img_resize_compress(
+    img: image::DynamicImage,
+    width: u32,
+    height: u32,
+    filter: FilterType,
+) -> Vec<u8> {
     let img_dimensions = img.dimensions();
     debug!("Output dimensions: width: {} height: {}", width, height);
     debug!(
@@ -193,5 +179,5 @@ fn img_resize(img: image::DynamicImage, width: u32, height: u32, filter: FilterT
 
     // The ARGB is 'little endian', so here we must  put the order
     // of bytes 'in reverse', so it needs to be BGRA.
-    resized_img.into_bgra8().into_raw()
+    deflate::compress_to_vec(&resized_img.into_bgra8().into_raw(), 6)
 }
