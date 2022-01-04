@@ -16,6 +16,8 @@ pub enum ProcessingResult {
     Gif((Channel<(Vec<String>, Vec<u8>)>, mpsc::Sender<Vec<String>>)),
 }
 
+use brotli::enc::BrotliCompress;
+
 ///Waits for a msg from the daemon event_loop
 pub fn processor_loop(msg: (Vec<String>, (u32, u32), FilterType, &Path)) -> ProcessingResult {
     let answer = handle_msg(msg.0, msg.1, msg.2, msg.3);
