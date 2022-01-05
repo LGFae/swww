@@ -11,10 +11,10 @@ lto = true
 opt-level = 3
 codegen-units = 1
 panic = "abort"
-#strip = true #enable this once it gets stabilized -- literally next cargo version
+#strip = "symbols" #enable this once it gets stabilized -- literally next cargo version
 
 [profile.bench]
-debuf = 1
+debug = 1
 
 [dependencies]
 smithay-client-toolkit = "0.15"
