@@ -30,6 +30,10 @@ These are the steps we will take while developing this program:
 
 	CHECK if simple mempoll works. REALLY check it, throughly. Use only one buffer, if it does.
 
+	Make QUERY command. This will allow for better automated testing.
+
+	Use fifo files for IPC (check if it even works). This should simplify much of the internal logic (no more signals).
+
 LONG TERM:
 	Make the transition effects when switching rendered files
 		When done, communication protocol should be updated to allow for transition effects
