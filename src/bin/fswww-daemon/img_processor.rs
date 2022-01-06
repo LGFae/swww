@@ -11,66 +11,81 @@ use std::io::BufReader;
 use std::time::{Duration, Instant};
 use std::{path::Path, sync::mpsc, thread};
 
-pub enum ProcessingResult {
-    Img((Vec<String>, Vec<u8>)),
-    Gif((Channel<(Vec<String>, Vec<u8>)>, mpsc::Sender<Vec<String>>)),
-}
+pub type ProcessingResult = Option<(Vec<String>, Vec<u8>)>;
 
 use miniz_oxide::deflate;
 
-///Waits for a msg from the daemon event_loop
-pub fn processor_loop(msg: (Vec<String>, (u32, u32), FilterType, &Path)) -> ProcessingResult {
-    let answer = handle_msg(msg.0, msg.1, msg.2, msg.3);
-    debug!("Finished image processing!");
-    answer
+pub struct Processor {
+    frame_sender: Sender<(Vec<String>, Vec<u8>)>,
+    on_going_animations: Vec<mpsc::Sender<Vec<String>>>,
 }
 
-fn handle_msg(
-    outputs: Vec<String>,
-    dimensions: (u32, u32),
-    filter: FilterType,
-    path: &Path,
-) -> ProcessingResult {
-    let (width, height) = dimensions;
-
-    //We check if we can open and read the image before sending it, so these should never fail
-    let img_buf = image::io::Reader::open(&path)
-        .expect("Failed to open image, though this should be impossible...");
-    match img_buf.format() {
-        Some(ImageFormat::Gif) => process_gif(img_buf, width, height, outputs, filter),
-
-        None => unreachable!("Unsupported format. This also should be impossible..."),
-        _ => {
-            let img = img_buf
-                .decode()
-                .expect("Img decoding failed, though this should be impossible...");
-            let img_bytes = img_resize_compress(img, width, height, filter);
-            ProcessingResult::Img((outputs, img_bytes))
+impl Processor {
+    pub fn new(frame_sender: Sender<(Vec<String>, Vec<u8>)>) -> Self {
+        Self {
+            on_going_animations: Vec::new(),
+            frame_sender,
         }
     }
-}
+    pub fn process(
+        &mut self,
+        msg: (Vec<String>, (u32, u32), FilterType, &Path),
+    ) -> ProcessingResult {
+        let outputs = msg.0;
+        let (width, height) = msg.1;
+        let filter = msg.2;
+        let path = msg.3;
 
-fn process_gif(
-    gif_buf: Reader<BufReader<std::fs::File>>,
-    width: u32,
-    height: u32,
-    outputs: Vec<String>,
-    filter: FilterType,
-) -> ProcessingResult {
-    let (sender, receiver) = channel::channel();
-    let (stop_sender, stop_receiver) = mpsc::channel();
-    thread::spawn(move || {
-        animate(
-            gif_buf,
-            outputs,
-            width,
-            height,
-            filter,
-            sender,
-            stop_receiver,
-        )
-    });
-    ProcessingResult::Gif((receiver, stop_sender))
+        let mut i = 0;
+        while i < self.on_going_animations.len() {
+            if self.on_going_animations[i].send(outputs.clone()).is_err() {
+                self.on_going_animations.remove(i);
+            } else {
+                i += 1;
+            }
+        }
+        //We check if we can open and read the image before sending it, so these should never fail
+        let img_buf = image::io::Reader::open(&path)
+            .expect("Failed to open image, though this should be impossible...");
+        match img_buf.format() {
+            Some(ImageFormat::Gif) => self.process_gif(img_buf, width, height, outputs, filter),
+
+            None => unreachable!("Unsupported format. This also should be impossible..."),
+            _ => {
+                let img = img_buf
+                    .decode()
+                    .expect("Img decoding failed, though this should be impossible...");
+                let img = img_resize_compress(img, width, height, filter);
+                debug!("Finished image processing!");
+                Some((outputs, img))
+            }
+        }
+    }
+
+    fn process_gif(
+        &mut self,
+        gif_buf: Reader<BufReader<std::fs::File>>,
+        width: u32,
+        height: u32,
+        outputs: Vec<String>,
+        filter: FilterType,
+    ) -> ProcessingResult {
+        let sender = self.frame_sender.clone();
+        let (stop_sender, stop_receiver) = mpsc::channel();
+        self.on_going_animations.push(stop_sender);
+        thread::spawn(move || {
+            animate(
+                gif_buf,
+                outputs,
+                width,
+                height,
+                filter,
+                sender,
+                stop_receiver,
+            )
+        });
+        None
+    }
 }
 
 fn animate(

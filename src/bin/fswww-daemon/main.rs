@@ -28,7 +28,6 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
     rc::Rc,
-    sync::mpsc,
 };
 
 mod img_processor;
@@ -300,101 +299,74 @@ fn make_tmp_files() {
 }
 
 fn run_main_loop(bgs: &Rc<RefCell<Vec<Background>>>, queue: EventQueue, display: &Display) {
-    let mut event_loop = calloop::EventLoop::<(
-        bool,
-        Option<channel::Channel<(Vec<String>, Vec<u8>)>>,
-        Vec<mpsc::Sender<Vec<String>>>,
-    )>::try_new()
-    .unwrap();
+    let (frame_sender, frame_receiver) = calloop::channel::channel();
+    let mut processor = img_processor::Processor::new(frame_sender);
+
+    let mut event_loop = calloop::EventLoop::<calloop::LoopSignal>::try_new().unwrap();
 
     let signals = Signals::new(&[Signal::SIGUSR1, Signal::SIGUSR2]).unwrap();
     let event_handle = event_loop.handle();
     event_handle
-        .insert_source(
-            signals,
-            |s, _, (running, new_channel, anim_senders)| match s.signal() {
-                Signal::SIGUSR1 => {
-                    let mut bgs_ref = bgs.borrow_mut();
-                    if let Some((outputs, filter, img)) = decode_usr1_msg(&mut bgs_ref) {
-                        let mut i = 0;
-                        while i < anim_senders.len() {
-                            if anim_senders[i].send(outputs.clone()).is_err() {
-                                anim_senders.remove(i);
-                            } else {
-                                i += 1;
+        .insert_source(signals, |s, _, loop_signal| match s.signal() {
+            Signal::SIGUSR1 => {
+                let mut bgs_ref = bgs.borrow_mut();
+                if let Some((outputs, filter, img)) = decode_usr1_msg(&mut bgs_ref) {
+                    for result in send_request_to_processor(
+                        &mut bgs_ref,
+                        outputs,
+                        filter,
+                        &img,
+                        &mut processor,
+                    ) {
+                        match result {
+                            Some(msg) => {
+                                debug!("Received img as processing result");
+                                handle_recv_msg(&mut bgs_ref, msg);
                             }
-                        }
-                        for result in send_request_to_processor(&mut bgs_ref, outputs, filter, &img)
-                        {
-                            match result {
-                                ProcessingResult::Img(msg) => {
-                                    debug!("Received img as processing result");
-                                    handle_recv_msg(&mut bgs_ref, msg);
-                                }
-                                ProcessingResult::Gif((channel, sender)) => {
-                                    debug!("Received gif as processing result");
-                                    *new_channel = Some(channel);
-                                    anim_senders.push(sender);
-                                }
-                            }
+                            None => debug!("Sent a gif, received none as processing result"),
                         }
                     }
+                    send_answer(true);
                 }
-                Signal::SIGUSR2 => *running = false,
-                _ => (),
-            },
-        )
+            }
+            Signal::SIGUSR2 => loop_signal.stop(),
+            _ => (),
+        })
+        .unwrap();
+
+    event_handle
+        .insert_source(frame_receiver, |evt, _, loop_signal| match evt {
+            channel::Event::Msg(msg) => handle_recv_msg(&mut bgs.borrow_mut(), msg),
+            channel::Event::Closed => loop_signal.stop(),
+        })
         .unwrap();
 
     WaylandSource::new(queue)
         .quick_insert(event_handle)
         .unwrap();
 
+    let mut loop_signal = event_loop.get_signal();
     send_answer(true);
-
-    let mut v: Vec<mpsc::Sender<Vec<String>>> = Vec::new();
-    loop {
-        // This is ugly, let's hope that some version of drain_filter() gets stabilized soon
-        // https://github.com/rust-lang/rust/issues/43244
-        {
-            let mut bgs = bgs.borrow_mut();
-            let mut i = 0;
-            while i != bgs.len() {
-                if bgs[i].handle_events() {
-                    bgs.remove(i);
-                } else {
-                    i += 1;
+    event_loop
+        .run(None, &mut loop_signal, |_| {
+            // This is ugly, let's hope that some version of drain_filter() gets stabilized soon
+            // https://github.com/rust-lang/rust/issues/43244
+            {
+                let mut bgs = bgs.borrow_mut();
+                let mut i = 0;
+                while i != bgs.len() {
+                    if bgs[i].handle_events() {
+                        bgs.remove(i);
+                    } else {
+                        i += 1;
+                    }
                 }
             }
-        }
-
-        let mut shared_data = (true, None, v.clone());
-        event_loop
-            .dispatch(None, &mut shared_data)
-            .expect("Error during event loop!");
-
-        if !shared_data.0 {
-            break;
-        }
-
-        if let Some(channel) = shared_data.1 {
-            let event_handle = event_loop.handle();
-            event_handle
-                .insert_source(channel, |evt, _, (_, new_channel, _old_channels)| {
-                    *new_channel = None;
-                    let mut bgs = bgs.borrow_mut();
-                    match evt {
-                        channel::Event::Msg(msg) => handle_recv_msg(&mut bgs, msg),
-                        channel::Event::Closed => (), //event_handle.kill(evt), //TODO: remove this source from loop
-                    }
-                })
-                .unwrap();
-        }
-        v = shared_data.2;
-        if let Err(e) = display.flush() {
-            error!("Couldn't flush display: {}", e);
-        }
-    }
+            if let Err(e) = display.flush() {
+                error!("Couldn't flush display: {}", e);
+            }
+        })
+        .expect("Event loop closed unexpectedly.");
 }
 
 ///The format for the message is as follows:
@@ -453,6 +425,7 @@ fn send_request_to_processor(
     mut outputs: Vec<String>,
     filter: FilterType,
     img: &Path,
+    processor: &mut img_processor::Processor,
 ) -> Vec<ProcessingResult> {
     let mut processing_results = Vec::new();
     while !outputs.is_empty() {
@@ -474,12 +447,7 @@ fn send_request_to_processor(
 
         //NOTE: IF THERE ARE MULTIPLE MONITORS WITH DIFFERENT SIZE, THIS WILL CALCULATE
         //THEM IN SEQUENCE, WHICH WE DON'T REALLY WANT
-        processing_results.push(img_processor::processor_loop((
-            out_same_dim,
-            dim,
-            filter,
-            img,
-        )));
+        processing_results.push(processor.process((out_same_dim, dim, filter, img)));
     }
     processing_results
 }
@@ -502,7 +470,6 @@ fn handle_recv_msg(bgs: &mut RefMut<Vec<Background>>, msg: (Vec<String>, Vec<u8>
             bg.draw(&img);
         }
     }
-    send_answer(true);
 }
 
 fn send_answer(ok: bool) {
