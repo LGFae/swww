@@ -213,7 +213,7 @@ pub fn main() {
     let _listner_handle =
         env.listen_for_outputs(move |output, info, _| output_handler(output, info));
 
-    run_main_loop(&bgs, queue, &display);
+    run_main_loop(bgs, queue, display);
 
     info!("Finished running event loop.");
 
@@ -298,7 +298,7 @@ fn make_tmp_files() {
     }
 }
 
-fn run_main_loop(bgs: &Rc<RefCell<Vec<Background>>>, queue: EventQueue, display: &Display) {
+fn run_main_loop(bgs: Rc<RefCell<Vec<Background>>>, queue: EventQueue, display: Display) {
     let (frame_sender, frame_receiver) = calloop::channel::channel();
     let mut processor = processor::Processor::new(frame_sender);
 
