@@ -30,8 +30,8 @@ use std::{
     rc::Rc,
 };
 
-mod img_processor;
-use img_processor::ProcessingResult;
+mod processor;
+use processor::ProcessingResult;
 mod wayland;
 
 const TMP_DIR: &str = "/tmp/fswww";
@@ -300,7 +300,7 @@ fn make_tmp_files() {
 
 fn run_main_loop(bgs: &Rc<RefCell<Vec<Background>>>, queue: EventQueue, display: &Display) {
     let (frame_sender, frame_receiver) = calloop::channel::channel();
-    let mut processor = img_processor::Processor::new(frame_sender);
+    let mut processor = processor::Processor::new(frame_sender);
 
     let mut event_loop = calloop::EventLoop::<calloop::LoopSignal>::try_new().unwrap();
 
@@ -425,7 +425,7 @@ fn send_request_to_processor(
     mut outputs: Vec<String>,
     filter: FilterType,
     img: &Path,
-    processor: &mut img_processor::Processor,
+    processor: &mut processor::Processor,
 ) -> Vec<ProcessingResult> {
     let mut processing_results = Vec::new();
     while !outputs.is_empty() {

@@ -5,7 +5,6 @@ use image::{AnimationDecoder, ImageFormat};
 use log::{debug, info};
 
 use smithay_client_toolkit::reexports::calloop::channel::Sender;
-use smithay_client_toolkit::reexports::calloop::channel::{self, Channel};
 
 use std::io::BufReader;
 use std::time::{Duration, Instant};
