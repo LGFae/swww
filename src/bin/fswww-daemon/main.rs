@@ -225,27 +225,30 @@ pub fn main() {
 
 fn make_logger() {
     #[cfg(debug_assertions)]
-    let config = simplelog::ConfigBuilder::new()
-        .set_thread_level(LevelFilter::Info) //let me see where the processing is happenning
-        .set_time_format_str("%H:%M:%S%.f") //let me see those nanoseconds
-        .build();
-    #[cfg(debug_assertions)]
-    TermLogger::init(
-        LevelFilter::Debug,
-        config,
-        TerminalMode::Stderr,
-        ColorChoice::AlwaysAnsi,
-    )
-    .expect("Failed to initialize logger. Cancelling...");
+    {
+        let config = simplelog::ConfigBuilder::new()
+            .set_thread_level(LevelFilter::Info) //let me see where the processing is happenning
+            .set_time_format_str("%H:%M:%S%.f") //let me see those nanoseconds
+            .build();
+        TermLogger::init(
+            LevelFilter::Debug,
+            config,
+            TerminalMode::Stderr,
+            ColorChoice::AlwaysAnsi,
+        )
+        .expect("Failed to initialize logger. Cancelling...");
+    }
 
     //For the release version, we log to a file, only warnings and errors, using the default config
     #[cfg(not(debug_assertions))]
-    simplelog::WriteLogger::init(
-        LevelFilter::Warn,
-        simplelog::Config::default(),
-        fs::File::create(Path::new(TMP_DIR).join(TMP_LOG)).unwrap(),
-    )
-    .expect("Failed to initialize logger. Cancelling...");
+    {
+        simplelog::WriteLogger::init(
+            LevelFilter::Warn,
+            simplelog::Config::default(),
+            fs::File::create(Path::new(TMP_DIR).join(TMP_LOG)).unwrap(),
+        )
+        .expect("Failed to initialize logger. Cancelling...");
+    }
 }
 
 fn create_backgrounds(
