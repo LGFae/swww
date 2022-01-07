@@ -136,9 +136,38 @@ impl Background {
             .buffer(width, height, stride, wl_shm::Format::Argb8888)
         {
             Ok((canvas, buffer)) => {
+                canvas.copy_from_slice(img);
+                info!("Copied img to buffer.");
+
+                // Attach the buffer to the surface and mark the entire surface as damaged
+                self.surface.attach(Some(&buffer), 0, 0);
+                self.surface
+                    .damage_buffer(0, 0, width as i32, height as i32);
+
+                // Finally, commit the surface
+                self.surface.commit();
+            }
+            Err(e) => warn!(
+                "Failed to create buffer from mempoll: {}. Image won't be drawn...",
+                e
+            ),
+        }
+    }
+
+    ///For now, same as draw, but decompresses the sent image first
+    fn animate(&mut self, frame: &[u8]) {
+        let stride = 4 * self.dimensions.0 as i32;
+        let width = self.dimensions.0 as i32;
+        let height = self.dimensions.1 as i32;
+
+        match self
+            .pool
+            .buffer(width, height, stride, wl_shm::Format::Argb8888)
+        {
+            Ok((canvas, buffer)) => {
                 self.decompressor.init();
-                miniz_oxide::inflate::core::decompress(&mut self.decompressor, img, canvas, 0, 4);
-                info!("Decompressed img.");
+                miniz_oxide::inflate::core::decompress(&mut self.decompressor, frame, canvas, 0, 4);
+                info!("Decompressed frame.");
 
                 // Attach the buffer to the surface and mark the entire surface as damaged
                 self.surface.attach(Some(&buffer), 0, 0);
@@ -190,7 +219,7 @@ pub fn main() {
 
     let (env, display, queue) = wayland::make_wayland_environment();
 
-    let bgs = Rc::new(RefCell::new(Vec::new()));
+    let mut bgs = Rc::new(RefCell::new(Vec::new()));
 
     let layer_shell = env.require_global::<zwlr_layer_shell_v1::ZwlrLayerShellV1>();
 
@@ -211,7 +240,8 @@ pub fn main() {
     let _listner_handle =
         env.listen_for_outputs(move |output, info, _| output_handler(output, info));
 
-    run_main_loop(bgs, queue, display);
+    //NOTE: we can't move these into the function because it causes a segfault
+    run_main_loop(&mut bgs, queue, &display);
 
     info!("Finished running event loop.");
 
@@ -296,7 +326,8 @@ fn make_tmp_files() {
     }
 }
 
-fn run_main_loop(bgs: Rc<RefCell<Vec<Background>>>, queue: EventQueue, display: Display) {
+///bgs and display can't be moved into here because it causes a segfault
+fn run_main_loop(bgs: &mut Rc<RefCell<Vec<Background>>>, queue: EventQueue, display: &Display) {
     let (frame_sender, frame_receiver) = calloop::channel::channel();
     let mut processor = processor::Processor::new(frame_sender);
 
@@ -316,13 +347,8 @@ fn run_main_loop(bgs: Rc<RefCell<Vec<Background>>>, queue: EventQueue, display: 
                         &img,
                         &mut processor,
                     ) {
-                        match result {
-                            Some(msg) => {
-                                debug!("Received img as processing result");
-                                handle_recv_msg(&mut bgs_ref, msg);
-                            }
-                            None => debug!("Sent a gif, received none as processing result"),
-                        }
+                        debug!("Received img as processing result");
+                        handle_recv_msg(&mut bgs_ref, &result);
                     }
                     send_answer(true);
                 }
@@ -334,7 +360,7 @@ fn run_main_loop(bgs: Rc<RefCell<Vec<Background>>>, queue: EventQueue, display: 
 
     event_handle
         .insert_source(frame_receiver, |evt, _, loop_signal| match evt {
-            channel::Event::Msg(msg) => handle_recv_msg(&mut bgs.borrow_mut(), msg),
+            channel::Event::Msg(msg) => handle_recv_msg(&mut bgs.borrow_mut(), &msg),
             channel::Event::Closed => loop_signal.stop(),
         })
         .unwrap();
@@ -363,6 +389,7 @@ fn run_main_loop(bgs: Rc<RefCell<Vec<Background>>>, queue: EventQueue, display: 
             }
         })
         .expect("Event loop closed unexpectedly.");
+    drop(event_loop);
 }
 
 ///The format for the message is as follows:
@@ -459,7 +486,7 @@ fn get_filter_from_str(s: &str) -> FilterType {
     }
 }
 
-fn handle_recv_msg(bgs: &mut RefMut<Vec<Background>>, msg: (Vec<String>, Vec<u8>)) {
+fn handle_recv_msg(bgs: &mut RefMut<Vec<Background>>, msg: &(Vec<String>, Vec<u8>)) {
     let (outputs, img) = msg;
     for bg in bgs.iter_mut() {
         if outputs.contains(&bg.output_name) {

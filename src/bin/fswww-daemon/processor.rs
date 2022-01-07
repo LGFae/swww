@@ -10,7 +10,7 @@ use std::io::BufReader;
 use std::time::{Duration, Instant};
 use std::{path::Path, sync::mpsc, thread};
 
-pub type ProcessingResult = Option<(Vec<String>, Vec<u8>)>;
+pub type ProcessingResult = (Vec<String>, Vec<u8>);
 
 use miniz_oxide::deflate;
 
@@ -46,19 +46,12 @@ impl Processor {
         //We check if we can open and read the image before sending it, so these should never fail
         let img_buf = image::io::Reader::open(&path)
             .expect("Failed to open image, though this should be impossible...");
-        match img_buf.format() {
-            Some(ImageFormat::Gif) => self.process_gif(img_buf, width, height, outputs, filter),
-
-            None => unreachable!("Unsupported format. This also should be impossible..."),
-            _ => {
-                let img = img_buf
-                    .decode()
-                    .expect("Img decoding failed, though this should be impossible...");
-                let img = img_resize_compress(img, width, height, filter);
-                debug!("Finished image processing!");
-                Some((outputs, img))
-            }
-        }
+        let img = img_buf
+            .decode()
+            .expect("Img decoding failed, though this should be impossible...");
+        let img = img_resize_compress(img, width, height, filter);
+        debug!("Finished image processing!");
+        (outputs, img)
     }
 
     fn process_gif(
@@ -68,7 +61,7 @@ impl Processor {
         height: u32,
         outputs: Vec<String>,
         filter: FilterType,
-    ) -> ProcessingResult {
+    ) {
         let sender = self.frame_sender.clone();
         let (stop_sender, stop_receiver) = mpsc::channel();
         self.on_going_animations.push(stop_sender);
@@ -83,7 +76,6 @@ impl Processor {
                 stop_receiver,
             )
         });
-        None
     }
 }
 
@@ -193,5 +185,6 @@ fn img_resize_compress(
 
     // The ARGB is 'little endian', so here we must  put the order
     // of bytes 'in reverse', so it needs to be BGRA.
-    deflate::compress_to_vec(&resized_img.into_bgra8().into_raw(), 6)
+    resized_img.into_bgra8().into_raw()
+    //deflate::compress_to_vec(&resized_img.into_bgra8().into_raw(), 6)
 }
