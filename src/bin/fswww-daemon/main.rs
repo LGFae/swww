@@ -348,7 +348,7 @@ fn run_main_loop(bgs: &mut Rc<RefCell<Vec<Background>>>, queue: EventQueue, disp
                         &mut processor,
                     ) {
                         debug!("Received img as processing result");
-                        handle_recv_msg(&mut bgs_ref, &result);
+                        handle_recv_img(&mut bgs_ref, &result);
                     }
                     send_answer(true);
                 }
@@ -360,7 +360,7 @@ fn run_main_loop(bgs: &mut Rc<RefCell<Vec<Background>>>, queue: EventQueue, disp
 
     event_handle
         .insert_source(frame_receiver, |evt, _, loop_signal| match evt {
-            channel::Event::Msg(msg) => handle_recv_msg(&mut bgs.borrow_mut(), &msg),
+            channel::Event::Msg(msg) => handle_recv_frame(&mut bgs.borrow_mut(), &msg),
             channel::Event::Closed => loop_signal.stop(),
         })
         .unwrap();
@@ -486,11 +486,20 @@ fn get_filter_from_str(s: &str) -> FilterType {
     }
 }
 
-fn handle_recv_msg(bgs: &mut RefMut<Vec<Background>>, msg: &(Vec<String>, Vec<u8>)) {
+fn handle_recv_img(bgs: &mut RefMut<Vec<Background>>, msg: &(Vec<String>, Vec<u8>)) {
     let (outputs, img) = msg;
     for bg in bgs.iter_mut() {
         if outputs.contains(&bg.output_name) {
-            bg.draw(&img);
+            bg.draw(img);
+        }
+    }
+}
+
+fn handle_recv_frame(bgs: &mut RefMut<Vec<Background>>, msg: &(Vec<String>, Vec<u8>)) {
+    let (outputs, frame) = msg;
+    for bg in bgs.iter_mut() {
+        if outputs.contains(&bg.output_name) {
+            bg.animate(frame);
         }
     }
 }
