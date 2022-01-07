@@ -46,17 +46,25 @@ impl Processor {
         //We check if we can open and read the image before sending it, so these should never fail
         let img_buf = image::io::Reader::open(&path)
             .expect("Failed to open image, though this should be impossible...");
+        let format = img_buf.format();
         let img = img_buf
             .decode()
             .expect("Img decoding failed, though this should be impossible...");
-        let img = img_resize_compress(img, width, height, filter);
+        let img = img_resize(img, width, height, filter);
+
+        //TODO: Also do apng and maybe try to find a way that doesn't clone stuff like this
+        if format == Some(ImageFormat::Gif) {
+            self.process_gif(path, &img, width, height, outputs.clone(), filter);
+        }
+
         debug!("Finished image processing!");
         (outputs, img)
     }
 
     fn process_gif(
         &mut self,
-        gif_buf: Reader<BufReader<std::fs::File>>,
+        gif_path: &Path,
+        first_frame: &[u8],
         width: u32,
         height: u32,
         outputs: Vec<String>,
@@ -65,9 +73,14 @@ impl Processor {
         let sender = self.frame_sender.clone();
         let (stop_sender, stop_receiver) = mpsc::channel();
         self.on_going_animations.push(stop_sender);
+
+        let gif_buf = image::io::Reader::open(gif_path).unwrap();
+        let compressed = deflate::compress_to_vec(first_frame, 6);
+
         thread::spawn(move || {
             animate(
                 gif_buf,
+                compressed,
                 outputs,
                 width,
                 height,
@@ -81,6 +94,7 @@ impl Processor {
 
 fn animate(
     gif: Reader<BufReader<std::fs::File>>,
+    first_frame: Vec<u8>,
     mut outputs: Vec<String>,
     width: u32,
     height: u32,
@@ -93,45 +107,55 @@ fn animate(
         .into_frames();
 
     let mut cached_frames = Vec::new();
-    //first loop
-    let mut now = Instant::now();
-    while let Some(frame) = frames.next() {
-        let frame = frame.unwrap();
-        let (dur_num, dur_div) = frame.delay().numer_denom_ms();
+
+    //The first frame should always exist, the second might not
+    let mut frame = frames.next().unwrap();
+    if let Some(f) = frames.next() {
+        let (dur_num, dur_div) = frame.unwrap().delay().numer_denom_ms();
         let duration = Duration::from_millis((dur_num / dur_div).into());
+        cached_frames.push((first_frame, duration));
+        frame = f;
+    } else {
+        return; //This means we had only a static image anyway
+    }
 
-        let img = img_resize_compress(
-            image::DynamicImage::ImageRgba8(frame.into_buffer()),
-            width,
-            height,
-            filter,
-        );
-        cached_frames.push((img.clone(), duration));
+    let mut now = Instant::now();
+    loop {
+        {
+            let frame = frame.unwrap();
+            let (dur_num, dur_div) = frame.delay().numer_denom_ms();
+            let duration = Duration::from_millis((dur_num / dur_div).into());
 
-        match receiver.recv_timeout(duration.saturating_sub(now.elapsed())) {
-            Ok(out_to_remove) => {
-                outputs.retain(|o| !out_to_remove.contains(o));
-                if outputs.is_empty() {
+            let img_buf = image::DynamicImage::ImageRgba8(frame.into_buffer());
+            let img = img_resize(img_buf, width, height, filter);
+            let compressed = deflate::compress_to_vec(&img, 6);
+
+            cached_frames.push((compressed.clone(), duration));
+
+            match receiver.recv_timeout(duration.saturating_sub(now.elapsed())) {
+                Ok(out_to_remove) => {
+                    outputs.retain(|o| !out_to_remove.contains(o));
+                    if outputs.is_empty() {
+                        return;
+                    }
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    debug!("Receiver disconnected! Stopping animation...");
                     return;
                 }
-            }
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                debug!("Receiver disconnected! Stopping animation...");
-                return;
-            }
-            Err(mpsc::RecvTimeoutError::Timeout) => (),
-        };
-        sender
-            .send((outputs.clone(), img))
-            .unwrap_or_else(|_| return);
-        now = Instant::now();
+                Err(mpsc::RecvTimeoutError::Timeout) => (),
+            };
+            sender
+                .send((outputs.clone(), compressed))
+                .unwrap_or_else(|_| return);
+        }
+        if let Some(f) = frames.next() {
+            frame = f;
+            now = Instant::now();
+        } else {
+            break; // We've seen and cached all the frames
+        }
     }
-
-    //If there was only one frame, we leave immediatelly, since no animation is necessary
-    if cached_frames.len() == 1 {
-        return;
-    }
-
     loop_animation(&cached_frames, outputs, sender, receiver);
 }
 
@@ -163,12 +187,7 @@ fn loop_animation(
     }
 }
 
-fn img_resize_compress(
-    img: image::DynamicImage,
-    width: u32,
-    height: u32,
-    filter: FilterType,
-) -> Vec<u8> {
+fn img_resize(img: image::DynamicImage, width: u32, height: u32, filter: FilterType) -> Vec<u8> {
     let img_dimensions = img.dimensions();
     debug!("Output dimensions: width: {} height: {}", width, height);
     debug!(
@@ -186,5 +205,4 @@ fn img_resize_compress(
     // The ARGB is 'little endian', so here we must  put the order
     // of bytes 'in reverse', so it needs to be BGRA.
     resized_img.into_bgra8().into_raw()
-    //deflate::compress_to_vec(&resized_img.into_bgra8().into_raw(), 6)
 }
