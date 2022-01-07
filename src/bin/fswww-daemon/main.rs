@@ -138,8 +138,6 @@ impl Background {
             Ok((canvas, buffer)) => {
                 self.decompressor.init();
                 miniz_oxide::inflate::core::decompress(&mut self.decompressor, img, canvas, 0, 4);
-                //let img = miniz_oxide::inflate::decompress_to_vec(img).unwrap();
-                //canvas.copy_from_slice(&img[0..]);
                 info!("Decompressed img.");
 
                 // Attach the buffer to the surface and mark the entire surface as damaged
@@ -349,8 +347,6 @@ fn run_main_loop(bgs: Rc<RefCell<Vec<Background>>>, queue: EventQueue, display: 
     send_answer(true);
     event_loop
         .run(None, &mut loop_signal, |_| {
-            // This is ugly, let's hope that some version of drain_filter() gets stabilized soon
-            // https://github.com/rust-lang/rust/issues/43244
             {
                 let mut bgs = bgs.borrow_mut();
                 let mut i = 0;
