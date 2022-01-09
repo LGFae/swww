@@ -1,28 +1,28 @@
-use lz4_flex;
+//! # Compression Strategy
+//!
+//! For every pixel, we drop the alpha part; I don't think anyone will use transparency for a
+//! background (nor if it even makes sense)
+//!
+//! For what's left, we store only the difference from the last frame to this one. We do that as
+//! follows:
+//! * We store a byte header, which indicate which pixels changed. For example, 1010 0000 would
+//! mean that, from the current position, pixels 1 and 2 and 5 and 6 changed.
+//! * After the header, we store the pixels we indicated.
+//!
+//! NOTE THAT EVERY BIT IN THE HEADER CORRESPONDS TO 2, NOT 1, PIXELS.
+//!
+//! Finally, after all that, we use Lz4 to compress the result.
+//!
+//! # Decompressing
+//!
+//! For decompression, we must do everything backwards:
+//! * First we decompress with Lz4
+//! * Then we replace in the frame the difference we stored before.
+//!
+//! Note that the frame itself has 4 byte pixels, so take that into account when copying the
+//! difference.
 
-/*
- * TO TEST:
- *  Try to increase the size of the 'chunks', to something larger.
- *  For exemple, if byte at pos i is different, it is fairly likely that
- *  byte at i+1 is also different
- *  Perhaps grouping our searches like this will allow for better compression.
- *  Maybe try to go in a 2x2 pixel square.
- *  This DID work, for the base case. Next we should test the 2x2 pixel square. Or maybe 3x3?
- *
- *  Also: store only u8 -> transform the u32 into a [u8;4] and store that.
- *  So the vector will end up a simple Vec<u8>. We then get the u32 from that,
- *  transform it into an usize
- *
- *  NEW_IDEA: set a bit 1 if the pixel at the next position changed. So, we will have a u8 header:
- *
- *                      0000 0100
- *
- *  The above means that the bit at the 6th position changed, but not the rest, so we will be
- *  reading the bit at pos 6 next.
- *
- *  Finally: for the compression, paralelism might help
- *
- * */
+use lz4_flex;
 
 fn diff_byte_header(prev: &[u8], curr: &[u8]) -> Vec<u8> {
     let mut vec = Vec::new();
@@ -142,7 +142,8 @@ mod tests {
         );
     }
     #[test]
-    fn should_compress_and_decompress_to_eq_bit_header_small() {
+    //Use this when annoying problems show up
+    fn should_compress_and_decompress_to_small() {
         let frame1 = [1, 2, 3, 4, 5, 6, 7, 8];
         let frame2 = [1, 2, 3, 4, 8, 7, 6, 5];
         let compreesed = diff_byte_header(&frame1, &frame2);
@@ -164,7 +165,7 @@ mod tests {
     }
 
     #[test]
-    fn should_compress_and_decompress_to_same_info_for_bit_header() {
+    fn should_compress_and_decompress_to_same_info() {
         for _ in 0..10 {
             let mut original = Vec::with_capacity(20);
             for _ in 0..20 {
