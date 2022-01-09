@@ -12,8 +12,6 @@ use std::{path::Path, sync::mpsc, thread};
 
 pub type ProcessingResult = (Vec<String>, Vec<u8>);
 
-use miniz_oxide::deflate;
-
 pub struct Processor {
     frame_sender: Sender<(Vec<String>, Vec<u8>)>,
     on_going_animations: Vec<mpsc::Sender<Vec<String>>>,
@@ -75,7 +73,8 @@ impl Processor {
         self.on_going_animations.push(stop_sender);
 
         let gif_buf = image::io::Reader::open(gif_path).unwrap();
-        let compressed = deflate::compress_to_vec(first_frame, 6);
+        let mut compressed = deflate::compress_to_vec(first_frame, 6);
+        compressed.shrink_to_fit();
 
         thread::spawn(move || {
             animate(
@@ -128,7 +127,8 @@ fn animate(
 
             let img_buf = image::DynamicImage::ImageRgba8(frame.into_buffer());
             let img = img_resize(img_buf, width, height, filter);
-            let compressed = deflate::compress_to_vec(&img, 6);
+            let mut compressed = deflate::compress_to_vec(&img, 6);
+            compressed.shrink_to_fit();
 
             cached_frames.push((compressed.clone(), duration));
 
@@ -156,6 +156,7 @@ fn animate(
             break; // We've seen and cached all the frames
         }
     }
+    cached_frames.shrink_to_fit();
     loop_animation(&cached_frames, outputs, sender, receiver);
 }
 
