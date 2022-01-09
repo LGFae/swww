@@ -12,6 +12,8 @@ use std::{path::Path, sync::mpsc, thread};
 
 pub type ProcessingResult = (Vec<String>, Vec<u8>);
 
+pub mod comp_decomp;
+
 pub struct Processor {
     frame_sender: Sender<(Vec<String>, Vec<u8>)>,
     on_going_animations: Vec<mpsc::Sender<Vec<String>>>,
@@ -73,13 +75,13 @@ impl Processor {
         self.on_going_animations.push(stop_sender);
 
         let gif_buf = image::io::Reader::open(gif_path).unwrap();
-        let mut compressed = deflate::compress_to_vec(first_frame, 6);
-        compressed.shrink_to_fit();
+
+        let first_frame = first_frame.to_vec();
 
         thread::spawn(move || {
             animate(
                 gif_buf,
-                compressed,
+                first_frame,
                 outputs,
                 width,
                 height,
@@ -105,59 +107,78 @@ fn animate(
         .expect("Couldn't decode gif, though this should be impossible...")
         .into_frames();
 
+    //The first frame should always exist
+    let duration_first_frame = frames.next().unwrap().unwrap().delay().numer_denom_ms();
+    let duration_first_frame =
+        Duration::from_millis((duration_first_frame.0 / duration_first_frame.1).into());
+
     let mut cached_frames = Vec::new();
 
-    //The first frame should always exist, the second might not
-    let mut frame = frames.next().unwrap();
-    if let Some(f) = frames.next() {
-        let (dur_num, dur_div) = frame.unwrap().delay().numer_denom_ms();
-        let duration = Duration::from_millis((dur_num / dur_div).into());
-        cached_frames.push((first_frame, duration));
-        frame = f;
-    } else {
-        return; //This means we had only a static image anyway
-    }
-
+    let mut canvas = first_frame.clone();
     let mut now = Instant::now();
-    loop {
-        {
-            let frame = frame.unwrap();
-            let (dur_num, dur_div) = frame.delay().numer_denom_ms();
-            let duration = Duration::from_millis((dur_num / dur_div).into());
+    while let Some(frame) = frames.next() {
+        let frame = frame.unwrap();
+        let (dur_num, dur_div) = frame.delay().numer_denom_ms();
+        let duration = Duration::from_millis((dur_num / dur_div).into());
+        let img = img_resize(
+            image::DynamicImage::ImageRgba8(frame.into_buffer()),
+            width,
+            height,
+            filter,
+        );
+        let mut compressed_frame = comp_decomp::mixed_comp(&canvas, &img);
+        comp_decomp::mixed_decomp(&mut canvas, &compressed_frame);
+        compressed_frame.shrink_to_fit();
 
-            let img_buf = image::DynamicImage::ImageRgba8(frame.into_buffer());
-            let img = img_resize(img_buf, width, height, filter);
-            let mut compressed = deflate::compress_to_vec(&img, 6);
-            compressed.shrink_to_fit();
+        cached_frames.push((compressed_frame.clone(), duration));
 
-            cached_frames.push((compressed.clone(), duration));
-
-            match receiver.recv_timeout(duration.saturating_sub(now.elapsed())) {
-                Ok(out_to_remove) => {
-                    outputs.retain(|o| !out_to_remove.contains(o));
-                    if outputs.is_empty() {
-                        return;
-                    }
-                }
-                Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    debug!("Receiver disconnected! Stopping animation...");
+        match receiver.recv_timeout(duration.saturating_sub(now.elapsed())) {
+            Ok(out_to_remove) => {
+                outputs.retain(|o| !out_to_remove.contains(o));
+                if outputs.is_empty() {
                     return;
                 }
-                Err(mpsc::RecvTimeoutError::Timeout) => (),
-            };
-            sender
-                .send((outputs.clone(), compressed))
-                .unwrap_or_else(|_| return);
-        }
-        if let Some(f) = frames.next() {
-            frame = f;
-            now = Instant::now();
-        } else {
-            break; // We've seen and cached all the frames
-        }
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                debug!("Receiver disconnected! Stopping animation...");
+                return;
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => (),
+        };
+        sender
+            .send((outputs.clone(), compressed_frame))
+            .unwrap_or_else(|_| return);
+        now = Instant::now();
     }
-    cached_frames.shrink_to_fit();
-    loop_animation(&cached_frames, outputs, sender, receiver);
+    //Add the first frame we got earlier:
+    cached_frames.push((
+        comp_decomp::mixed_comp(&canvas, &first_frame),
+        duration_first_frame,
+    ));
+    if cached_frames.len() == 1 {
+        return; //This means we only had a static image anyway
+    } else {
+        cached_frames.shrink_to_fit();
+        let duration = cached_frames.last().unwrap().1;
+        match receiver.recv_timeout(duration.saturating_sub(now.elapsed())) {
+            Ok(out_to_remove) => {
+                outputs.retain(|o| !out_to_remove.contains(o));
+                if outputs.is_empty() {
+                    return;
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                debug!("Receiver disconnected! Stopping animation...");
+                return;
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => (),
+        };
+        sender
+            .send((outputs.clone(), cached_frames.last().unwrap().0.clone()))
+            .unwrap_or_else(|_| return);
+
+        loop_animation(&cached_frames, outputs, sender, receiver);
+    }
 }
 
 fn loop_animation(

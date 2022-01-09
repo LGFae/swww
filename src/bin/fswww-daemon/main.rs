@@ -55,7 +55,6 @@ struct Background {
     next_render_event: Rc<Cell<Option<RenderEvent>>>,
     pool: AutoMemPool,
     dimensions: (u32, u32),
-    decompressor: miniz_oxide::inflate::core::DecompressorOxide,
 }
 
 impl Background {
@@ -101,14 +100,12 @@ impl Background {
         // Commit so that the server will send a configure event
         surface.commit();
 
-        let decompressor = miniz_oxide::inflate::core::DecompressorOxide::default();
         Some(Self {
             surface,
             layer_surface,
             next_render_event,
             pool,
             output_name,
-            decompressor,
             dimensions: (0, 0),
         })
     }
@@ -165,8 +162,7 @@ impl Background {
             .buffer(width, height, stride, wl_shm::Format::Argb8888)
         {
             Ok((canvas, buffer)) => {
-                self.decompressor.init();
-                miniz_oxide::inflate::core::decompress(&mut self.decompressor, frame, canvas, 0, 4);
+                processor::comp_decomp::mixed_decomp(canvas, frame);
                 info!("Decompressed frame.");
 
                 // Attach the buffer to the surface and mark the entire surface as damaged
