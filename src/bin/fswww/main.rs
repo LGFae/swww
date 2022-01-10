@@ -53,26 +53,7 @@ impl std::fmt::Display for Filter {
 ///Supports animated gifs and putting different stuff in different monitors. I also did my best to
 ///make it as resource efficient as possible.
 enum Fswww {
-    ///Initialize the daemon. Exits if there is already a daemon running.
-    Init {
-        ///Don't fork the daemon. This will keep it running in the current terminal.
-        ///
-        ///Note this doesn't really have any advantage for a release build, as all loging
-        ///for release builds are redirected to /tmp/fswww/log.
-        ///
-        ///Also, fswww waits for a signal from the daemon to indicate it initalized successfully,
-        ///and running something like <fswww init --no-daemon &>, though it will sent the process
-        ///to the background, will fail to receive that message properly. Furthermore, in this
-        ///case you would have 2 processes running in the background, not one: the original parent
-        ///fswww and the child fswww-daemon.
-        #[structopt(long)]
-        no_daemon: bool,
-    },
-
-    ///Kills the daemon
-    Kill,
-
-    /// Send an img for the daemon to display
+    /// Send an image (or animated gif) for the daemon to display
     Img {
         /// Path to the image to display
         #[structopt(parse(from_os_str))]
@@ -100,6 +81,25 @@ enum Fswww {
         #[structopt(short, long, default_value = "Lanczos3")]
         filter: Filter,
     },
+
+    ///Initialize the daemon. Exits if there is already a daemon running.
+    Init {
+        ///Don't fork the daemon. This will keep it running in the current terminal.
+        ///
+        ///The only advantage of this would be seeing the logging real time. Even then, for release
+        ///builds we only log warnings and errors, so you won't be seeing much.
+        ///
+        ///Also, fswww waits for a signal from the daemon to indicate it initalized successfully,
+        ///and running something like <fswww init --no-daemon &>, though it will sent the process
+        ///to the background, will fail to receive that message properly. Furthermore, in this
+        ///case you would have 2 processes running in the background, not one: the original parent
+        ///fswww and the child fswww-daemon.
+        #[structopt(long)]
+        no_daemon: bool,
+    },
+
+    ///Kills the daemon
+    Kill,
 }
 
 fn spawn_daemon(no_daemon: bool) -> Result<(), String> {
