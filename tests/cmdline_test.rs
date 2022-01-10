@@ -10,17 +10,22 @@ const TEST_IMGS: [&str; 3] = [
     "test_images/test2.jpg",
 ];
 
+/// # HOW TO TO RUN THESE TESTS
+///
+/// Make sure fswww-daemon is running in a different terminal. You should track its log there to
+/// see if anything weird pops up. Then, run `cargo test`.
+///
+/// By the time they end, they should automatically kill the daemon.
+#[ignore]
 fn main() {
-    initialization();
     sending_imgs();
     sending_img_that_does_not_exist();
     sending_imgs_with_filter();
-    sending_img_to_individual_monitors();
+    let output = query_outputs();
+    sending_img_to_individual_monitors(&output);
+    sending_img_to_monitor_that_does_not_exist();
     killing_daemon();
-}
-
-fn initialization() {
-    cmd().arg("init").assert().success();
+    cmd().arg("query").assert().failure(); //daemon is dead, so this should fail
 }
 
 fn sending_imgs() {
@@ -33,9 +38,30 @@ fn sending_img_that_does_not_exist() {
     cmd().arg("img").arg("I don't exist").assert().failure();
 }
 
-fn sending_img_to_individual_monitors() {
-    //For this, we need to implement the query functionallity
+fn query_outputs() -> String {
+    let output = cmd()
+        .arg("query")
+        .arg("I don't exist")
+        .output()
+        .expect("Query failed!");
+    //For some reason, the thing is in stderr, even though we are printing to
+    //stdout
+    let stdout = String::from_utf8(output.stderr).unwrap();
+    println!("Query result: {}", stdout);
+    stdout.split_once(' ').unwrap().0.to_string()
 }
+
+fn sending_img_to_individual_monitors(output: &str) {
+    cmd()
+        .arg("img")
+        .arg(TEST_IMGS[0])
+        .arg("-o")
+        .arg(output)
+        .assert()
+        .success();
+}
+
+fn sending_img_to_monitor_that_does_not_exist() {}
 
 fn sending_imgs_with_filter() {
     for filter in ["Nearest", "Triangle", "CatmullRom", "Gaussian", "Lanczos3"] {
