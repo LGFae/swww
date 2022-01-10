@@ -137,13 +137,22 @@ fn main() -> Result<(), String> {
             } else {
                 return Err("There seems to already be another instance running...".to_string());
             }
-
             if no_daemon {
                 //in this case, when the daemon stops we are done
                 return Ok(());
             }
         }
-        Fswww::Kill => kill()?,
+        Fswww::Kill => {
+            kill()?;
+            wait_for_response()?;
+            let socket_path = get_socket_path();
+            if let Err(e) = std::fs::remove_file(socket_path) {
+                return Err(format!("{}", e));
+            } else {
+                println!("Stopped daemon and removed socket.");
+                return Ok(());
+            }
+        }
         Fswww::Img {
             file,
             outputs,
@@ -208,16 +217,20 @@ fn send_request(request: &str) -> Result<(), String> {
 }
 
 fn get_socket() -> Result<UnixStream, String> {
+    let path = get_socket_path();
+
+    match UnixStream::connect(path) {
+        Ok(socket) => Ok(socket),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+fn get_socket_path() -> PathBuf {
     let runtime_dir = if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
         dir
     } else {
         "/tmp/fswww".to_string()
     };
     let runtime_dir = Path::new(&runtime_dir);
-    let socket = runtime_dir.join("fswww.socket");
-
-    match UnixStream::connect(socket) {
-        Ok(socket) => Ok(socket),
-        Err(e) => Err(e.to_string()),
-    }
+    runtime_dir.join("fswww.socket")
 }

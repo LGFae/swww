@@ -336,7 +336,6 @@ fn run_main_loop(
                         error!("Failed to read socket: {}", e);
                         return Err(e);
                     };
-
                     let mut bgs = bgs.borrow_mut();
                     if let Some((outputs, filter, img)) = decode_socket_msg(&mut bgs, &buf) {
                         for result in send_request_to_processor(
@@ -349,10 +348,10 @@ fn run_main_loop(
                             debug!("Received img as processing result");
                             handle_recv_img(&mut bgs, &result);
                         }
-                        send_answer(true, &listener);
                     } else {
                         loop_signal.stop()
                     }
+                    send_answer(true, &listener);
                     Ok(calloop::PostAction::Continue)
                 }
                 Err(e) => Err(e),
@@ -383,7 +382,6 @@ fn run_main_loop(
             }
         })
         .expect("Event loop closed unexpectedly.");
-    drop(event_loop);
 }
 
 ///The format for the message is as follows:
