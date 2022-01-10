@@ -31,6 +31,13 @@ mod processor;
 use processor::ProcessingResult;
 mod wayland;
 
+///These correspond to the subcommands of fswww that involve talking to the daemon
+enum Request {
+    Die,
+    Img((Vec<String>, FilterType, PathBuf)),
+    Query,
+}
+
 #[derive(PartialEq, Copy, Clone)]
 enum RenderEvent {
     Configure { width: u32, height: u32 },
@@ -325,7 +332,7 @@ fn run_main_loop(
         .unwrap();
 
     //TODO: this is a problem. We send back the 'ok' despite the fact that initialization can still fail
-    send_answer(true, &listener);
+    send_answer(Ok(""), &listener);
     event_handle
         .insert_source(
             calloop::generic::Generic::new(listener, calloop::Interest::READ, calloop::Mode::Level),
@@ -337,21 +344,33 @@ fn run_main_loop(
                         return Err(e);
                     };
                     let mut bgs = bgs.borrow_mut();
-                    if let Some((outputs, filter, img)) = decode_socket_msg(&mut bgs, &buf) {
-                        for result in send_request_to_processor(
-                            &mut bgs,
-                            outputs,
-                            filter,
-                            &img,
-                            &mut processor,
-                        ) {
-                            debug!("Received img as processing result");
-                            handle_recv_img(&mut bgs, &result);
+                    let request = decode_socket_msg(&mut bgs, &buf);
+                    let mut answer = "".to_string();
+                    match request {
+                        Request::Die => loop_signal.stop(),
+                        Request::Img((outputs, filter, img)) => {
+                            for result in send_request_to_processor(
+                                &mut bgs,
+                                outputs,
+                                filter,
+                                &img,
+                                &mut processor,
+                            ) {
+                                debug!("Received img as processing result");
+                                handle_recv_img(&mut bgs, &result);
+                            }
                         }
-                    } else {
-                        loop_signal.stop()
+                        Request::Query => {
+                            for bg in bgs.iter() {
+                                answer = answer
+                                    + &format!(
+                                        "{} - Dimensions: {}x{}\n",
+                                        bg.output_name, bg.dimensions.0, bg.dimensions.1
+                                    );
+                            }
+                        }
                     }
-                    send_answer(true, &listener);
+                    send_answer(Ok(&answer), &listener);
                     Ok(calloop::PostAction::Continue)
                 }
                 Err(e) => Err(e),
@@ -389,41 +408,40 @@ fn run_main_loop(
 ///The first line contains the filter to use
 ///The second contains the name of the outputs to put the img in
 ///The third contains the path to the image
-fn decode_socket_msg(
-    bgs: &mut RefMut<Vec<Background>>,
-    msg: &str,
-) -> Option<(Vec<String>, FilterType, PathBuf)> {
+fn decode_socket_msg(bgs: &mut RefMut<Vec<Background>>, msg: &str) -> Request {
     let mut lines = msg.lines();
+    match lines.next().unwrap() {
+        "__DIE__" => Request::Die,
+        "__QUERY__" => Request::Query,
+        "__IMG__" => {
+            let filter = get_filter_from_str(lines.next().unwrap());
+            let outputs = lines.next().unwrap();
 
-    let first_line = lines.next().unwrap();
-    if first_line == "__DIE__" {
-        return None;
-    }
-    let filter = get_filter_from_str(first_line);
-    let outputs = lines.next().unwrap();
+            let img = lines.next().unwrap();
+            let img = Path::new(img).to_path_buf();
 
-    let img = lines.next().unwrap();
-    let img = Path::new(img).to_path_buf();
-
-    //First, let's eliminate outputs with names that don't exist:
-    let mut real_outputs: Vec<String> = Vec::with_capacity(bgs.len());
-    //An empty line means all outputs
-    if outputs.is_empty() {
-        for bg in bgs.iter() {
-            real_outputs.push(bg.output_name.to_owned());
-        }
-    } else {
-        for output in outputs.split(',') {
-            for bg in bgs.iter() {
-                let output = output.to_string();
-                if output == bg.output_name && !real_outputs.contains(&output) {
-                    real_outputs.push(output);
+            //First, let's eliminate outputs with names that don't exist:
+            let mut real_outputs: Vec<String> = Vec::with_capacity(bgs.len());
+            //An empty line means all outputs
+            if outputs.is_empty() {
+                for bg in bgs.iter() {
+                    real_outputs.push(bg.output_name.to_owned());
+                }
+            } else {
+                for output in outputs.split(',') {
+                    for bg in bgs.iter() {
+                        let output = output.to_string();
+                        if output == bg.output_name && !real_outputs.contains(&output) {
+                            real_outputs.push(output);
+                        }
+                    }
                 }
             }
+            debug!("Requesting img for outputs: {:?}", real_outputs);
+            Request::Img((real_outputs, filter, img))
         }
+        _ => todo!(),
     }
-    debug!("Requesting img for outputs: {:?}", real_outputs);
-    Some((real_outputs, filter, img))
 }
 
 fn send_request_to_processor(
@@ -487,7 +505,7 @@ fn handle_recv_frame(bgs: &mut RefMut<Vec<Background>>, msg: &(Vec<String>, Vec<
     }
 }
 
-fn send_answer(ok: bool, listener: &UnixListener) {
+fn send_answer(ok: Result<&str, &str>, listener: &UnixListener) {
     let mut socket;
     match listener.accept() {
         Ok((s, _)) => socket = s,
@@ -499,8 +517,11 @@ fn send_answer(ok: bool, listener: &UnixListener) {
             return ();
         }
     }
-    let answer = if ok { "Ok" } else { "Err" };
-    if let Err(e) = socket.write_all(answer.as_bytes()) {
-        error!("Failed to send answer back: {}", e);
+    let send_result = match ok {
+        Ok(msg) => socket.write_all(format!("Ok\n{}", msg).as_bytes()),
+        Err(err) => socket.write_all(format!("Err\n{}", err).as_bytes()),
+    };
+    if let Err(e) = send_result {
+        error!("Error sending answer back: {}", e);
     }
 }

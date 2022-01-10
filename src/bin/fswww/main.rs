@@ -100,6 +100,11 @@ enum Fswww {
 
     ///Kills the daemon
     Kill,
+
+    ///Asks the daemon to print output information (names and dimensions). You may use this to find
+    ///out valid values for the <fswww-img --outputs> option. If you want more detailed information
+    ///about your outputs, I would recommed trying wlr-randr.
+    Query,
 }
 
 fn spawn_daemon(no_daemon: bool) -> Result<(), String> {
@@ -158,6 +163,7 @@ fn main() -> Result<(), String> {
             outputs,
             filter,
         } => send_img(file, outputs.unwrap_or("".to_string()), filter)?,
+        Fswww::Query => send_request("__QUERY__")?,
     }
 
     wait_for_response()
@@ -174,7 +180,7 @@ fn send_img(path: PathBuf, outputs: String, filter: Filter) -> Result<(), String
         }
     };
     let img_path_str = abs_path.to_str().unwrap();
-    let msg = format!("{}\n{}\n{}\n", filter, outputs, img_path_str);
+    let msg = format!("__IMG__\n{}\n{}\n{}\n", filter, outputs, img_path_str);
     send_request(&msg)?;
 
     Ok(())
@@ -187,7 +193,10 @@ fn wait_for_response() -> Result<(), String> {
             let mut buf = String::with_capacity(100);
             match socket.read_to_string(&mut buf) {
                 Ok(_) => {
-                    if buf == "Ok" {
+                    if buf.starts_with("Ok") {
+                        if buf.len() > 2 {
+                            print!("{}", &buf[2..]);
+                        }
                         Ok(())
                     } else {
                         Err(format!("ERROR: daemon sent back: {}", buf))
