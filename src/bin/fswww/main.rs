@@ -1,21 +1,13 @@
 use fork;
 use image;
-use nix::{
-    libc,
-    sys::signal::{self, SigHandler, Signal},
-    unistd::{self, Pid},
-};
 use std::{
-    convert::TryFrom,
-    fs,
+    io::{Read, Write},
+    os::unix::net::UnixStream,
     path::{Path, PathBuf},
     process::Command,
+    time::Duration,
 };
 use structopt::StructOpt;
-
-const TMP_DIR: &str = "/tmp/fswww";
-const IN_FILE: &str = "in";
-const PID_FILE: &str = "pid";
 
 #[derive(Debug)]
 enum Filter {
@@ -140,17 +132,15 @@ fn main() -> Result<(), String> {
     let opts = Fswww::from_args();
     match opts {
         Fswww::Init { no_daemon } => {
-            if get_daemon_pid().is_err() {
+            if get_socket().is_err() {
                 spawn_daemon(no_daemon)?;
             } else {
                 return Err("There seems to already be another instance running...".to_string());
             }
+
             if no_daemon {
                 //in this case, when the daemon stops we are done
                 return Ok(());
-            } else {
-                //Otherwise, we need to wait for the daemon to say all is well
-                send_request(&format!("{}\n", std::process::id()))?;
             }
         }
         Fswww::Kill => kill()?,
@@ -175,97 +165,59 @@ fn send_img(path: PathBuf, outputs: String, filter: Filter) -> Result<(), String
         }
     };
     let img_path_str = abs_path.to_str().unwrap();
-    let msg = format!(
-        "{}\n{}\n{}\n{}\n",
-        std::process::id(),
-        filter,
-        outputs,
-        img_path_str
-    );
+    let msg = format!("{}\n{}\n{}\n", filter, outputs, img_path_str);
     send_request(&msg)?;
 
     Ok(())
 }
 
-extern "C" fn handle_sigusr(signal: libc::c_int) {
-    let signal = Signal::try_from(signal).unwrap();
-    if signal == Signal::SIGUSR1 {
-        println!("Success!");
-    } else if signal == Signal::SIGUSR2 {
-        eprintln!("FAILED...");
-    }
-}
-
 fn wait_for_response() -> Result<(), String> {
-    let handler = SigHandler::Handler(handle_sigusr);
-    unsafe {
-        signal::signal(signal::SIGUSR1, handler)
-            .expect("Couldn't register signal handler for usr1");
-        signal::signal(signal::SIGUSR2, handler)
-            .expect("Couldn't register signal handler for usr2");
+    let mut socket = get_socket()?;
+    match socket.set_read_timeout(Some(Duration::from_secs(10))) {
+        Ok(()) => {
+            let mut buf = String::with_capacity(100);
+            match socket.read_to_string(&mut buf) {
+                Ok(_) => {
+                    if buf == "Ok" {
+                        Ok(())
+                    } else {
+                        Err(format!("ERROR: daemon sent back: {}", buf))
+                    }
+                }
+                Err(e) => Err(e.to_string()),
+            }
+        }
+        Err(e) => Err(e.to_string()),
     }
-    let time_slept = unistd::sleep(10);
-    if time_slept == 0 {
-        return Err("Timeout waiting for daemon!".to_string());
-    }
-    Ok(())
 }
 
 fn kill() -> Result<(), String> {
-    let pid = get_daemon_pid()?;
-
-    let msg = format!("{}\n", std::process::id());
-    fs::write("/tmp/fswww/in", msg)
-        .expect("Couldn't write to /tmp/fswww/in. Did you delete the file?");
-
-    signal::kill(Pid::from_raw(pid as i32), signal::SIGUSR2)
-        .expect("Failed to send signal to kill daemon...");
-
-    Ok(())
+    let mut socket = get_socket()?;
+    match socket.write(b"__DIE__") {
+        Ok(_) => Ok(()),
+        Err(e) => Err(e.to_string()),
+    }
 }
 
-//TODO: Proper error handling (no need to panic for most of these, just return the error)
 fn send_request(request: &str) -> Result<(), String> {
-    let dir_path = Path::new(TMP_DIR);
-    if !dir_path.exists() {
-        fs::create_dir(dir_path).expect("Failed to create /tmp/fswww");
+    let mut socket = get_socket()?;
+    match socket.write(request.as_bytes()) {
+        Ok(_) => Ok(()),
+        Err(e) => Err(e.to_string()),
     }
-    let pid = get_daemon_pid()?;
-    let in_file = dir_path.join(IN_FILE);
-    if !in_file.exists() {
-        fs::File::create(&in_file).unwrap();
-    }
-    fs::write(in_file, request).expect("Couldn't write to /tmp/fswww/in");
-
-    signal::kill(Pid::from_raw(pid as i32), signal::SIGUSR1).expect("Failed to send signal.");
-    Ok(())
 }
 
-fn get_daemon_pid() -> Result<u32, String> {
-    let pid_file_path = Path::new(TMP_DIR).join(PID_FILE);
-    if !pid_file_path.exists() {
-        return Err(format!(
-            "pid file {}/{} doesn't exist. Are you sure the daemon is running?",
-            TMP_DIR, PID_FILE
-        ));
+fn get_socket() -> Result<UnixStream, String> {
+    let runtime_dir = if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
+        dir
+    } else {
+        "/tmp/fswww".to_string()
+    };
+    let runtime_dir = Path::new(&runtime_dir);
+    let socket = runtime_dir.join("fswww.socket");
+
+    match UnixStream::connect(socket) {
+        Ok(socket) => Ok(socket),
+        Err(e) => Err(e.to_string()),
     }
-    let pid = fs::read_to_string(pid_file_path).expect("Failed to read pid file");
-
-    //if the daemon exits unexpectably, the pid file will exist, but the pid in the file will no
-    //longer be valid, and we might send the signal to the wrong process! So we check for that.
-    let proc_file = "/proc/".to_owned() + &pid + "/cmdline";
-    let program = fs::read_to_string(&proc_file)
-        .expect(&("Couldn't read ".to_owned() + &proc_file + " to check if pid is correct")); //TODO: BETTER MESSAGE IF PROBLEM IS MISSING FILE
-
-    //NOTE: since all calls to fswww (except --help) demand a subcommand, this will always have at
-    //least two elements
-    let mut args = program.split('\0');
-    if !args.next().unwrap().ends_with("fswww-daemon") {
-        return Err(format!(
-            "Pid in {}/{} refers a different program than the fswww daemon. It was probably terminated abnormaly and is no longer running.",
-            TMP_DIR, PID_FILE
-
-               ));
-    }
-    Ok(pid.parse().unwrap())
 }

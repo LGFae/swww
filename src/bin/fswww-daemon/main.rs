@@ -1,6 +1,5 @@
 use image::imageops::FilterType;
 use log::{debug, error, info, warn};
-use nix::{sys::signal, unistd::Pid};
 use simplelog::{ColorChoice, LevelFilter, TermLogger, TerminalMode};
 use structopt::StructOpt;
 
@@ -8,10 +7,7 @@ use smithay_client_toolkit::{
     environment::Environment,
     output::{with_output_info, OutputInfo},
     reexports::{
-        calloop::{
-            self, channel,
-            signals::{Signal, Signals},
-        },
+        calloop::{self, channel},
         client::protocol::{wl_output, wl_shm, wl_surface},
         client::{Attached, Display, EventQueue, Main},
         protocols::wlr::unstable::layer_shell::v1::client::{
@@ -25,7 +21,8 @@ use smithay_client_toolkit::{
 use std::{
     cell::{Cell, RefCell, RefMut},
     fs,
-    io::Write,
+    io::{Read, Write},
+    os::unix::net::UnixListener,
     path::{Path, PathBuf},
     rc::Rc,
 };
@@ -33,14 +30,6 @@ use std::{
 mod processor;
 use processor::ProcessingResult;
 mod wayland;
-
-const TMP_DIR: &str = "/tmp/fswww";
-const TMP_PID: &str = "pid";
-const TMP_IN: &str = "in";
-const TMP_OUT: &str = "out";
-
-#[cfg(not(debug_assertions))]
-const TMP_LOG: &str = "log";
 
 #[derive(PartialEq, Copy, Clone)]
 enum RenderEvent {
@@ -195,22 +184,24 @@ impl Drop for Background {
 ///You should never have to interact directly with the daemon, but use fswww init to start it
 ///instead. fswww will automatically fork the process for you, unless you run it with the
 ///--no-daemon option.
+///
 ///Note that, if, for some reason, you decide to run fswww-daemon manually yourself, there is no
 ///option to fork it; you may only pass -h or --help to see this message, or -V or --version to see
-///the version you are running. Note also there is no advantage to running the daemon this way, as
-///you will fail receive the confirmation message the daemon sends revealing initialization went ok
-///that fswww waits for, and you won't really see any extra information, as loging is redirected to
-/// /tmp/fswww/log by default in release builds.
+///the version you are running. The only advantage of running the daemon this way is to see its
+///log, and even then, in the release version we only log warnings and errors, so you won't be
+///seeing much.
 struct Daemon {}
 
 pub fn main() {
     Daemon::from_args();
 
-    make_tmp_files(); //Must make this first because the file we log to is in there
+    let listener = make_socket(); //Must make this first because the file we log to is in there
+    listener.set_nonblocking(true).unwrap();
+
     make_logger();
-    info!(
-        "Made temporary files in {} and initalized logger. Starting daemon...",
-        TMP_DIR
+    debug!(
+        "Made socket in {:?} and initalized logger. Starting daemon...",
+        listener.local_addr().unwrap()
     );
 
     let (env, display, queue) = wayland::make_wayland_environment();
@@ -237,13 +228,8 @@ pub fn main() {
         env.listen_for_outputs(move |output, info, _| output_handler(output, info));
 
     //NOTE: we can't move these into the function because it causes a segfault
-    run_main_loop(&mut bgs, queue, &display);
-
-    info!("Finished running event loop.");
-
-    send_answer(true); //in order to send the answer, we read the in file for the pid of the caller
-    info!("Removing... /tmp/fswww directory");
-    fs::remove_dir_all("/tmp/fswww").expect("Failed to remove /tmp/fswww directory.");
+    run_main_loop(&mut bgs, queue, &display, listener);
+    info!("Finished running event loop. Exiting...");
 }
 
 fn make_logger() {
@@ -262,13 +248,13 @@ fn make_logger() {
         .expect("Failed to initialize logger. Cancelling...");
     }
 
-    //For the release version, we log to a file, only warnings and errors, using the default config
     #[cfg(not(debug_assertions))]
     {
-        simplelog::WriteLogger::init(
+        simplelog::TermLogger::init(
             LevelFilter::Warn,
             simplelog::Config::default(),
-            fs::File::create(Path::new(TMP_DIR).join(TMP_LOG)).unwrap(),
+            TerminalMode::Stderr,
+            ColorChoice::Auto,
         )
         .expect("Failed to initialize logger. Cancelling...");
     }
@@ -299,60 +285,37 @@ fn create_backgrounds(
     }
 }
 
-///Returns the log file. If anything fails, we panic, since the normal functions
-///of the program depend on these files.
-fn make_tmp_files() {
-    let dir_path = Path::new(TMP_DIR);
-    if !dir_path.exists() {
-        fs::create_dir(dir_path).unwrap();
-    }
-    let pid_path = dir_path.join(TMP_PID);
-    let mut pid_file = fs::File::create(pid_path).unwrap();
-    let pid = std::process::id();
-    pid_file.write_all(pid.to_string().as_bytes()).unwrap();
+fn make_socket() -> UnixListener {
+    let runtime_dir = if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
+        dir
+    } else {
+        "/tmp/fswww".to_string()
+    };
 
-    //These two should only be made if they don't exist already
-    //Also we don't make the log file here, since it only needs to be made when
-    //the logger writes to it (release builds)
-    for file in [TMP_IN, TMP_OUT] {
-        let path = dir_path.join(file);
-        if !path.exists() {
-            fs::File::create(path).unwrap();
-        }
+    let runtime_dir = Path::new(&runtime_dir);
+
+    if !runtime_dir.exists() {
+        fs::create_dir(runtime_dir).expect("Failed to create runtime dir...");
     }
+
+    let socket = runtime_dir.join("fswww.socket");
+
+    UnixListener::bind(socket).expect("Couldn't bind socket")
 }
 
 ///bgs and display can't be moved into here because it causes a segfault
-fn run_main_loop(bgs: &mut Rc<RefCell<Vec<Background>>>, queue: EventQueue, display: &Display) {
+fn run_main_loop(
+    bgs: &mut Rc<RefCell<Vec<Background>>>,
+    queue: EventQueue,
+    display: &Display,
+    listener: UnixListener,
+) {
     let (frame_sender, frame_receiver) = calloop::channel::channel();
     let mut processor = processor::Processor::new(frame_sender);
 
     let mut event_loop = calloop::EventLoop::<calloop::LoopSignal>::try_new().unwrap();
 
-    let signals = Signals::new(&[Signal::SIGUSR1, Signal::SIGUSR2]).unwrap();
     let event_handle = event_loop.handle();
-    event_handle
-        .insert_source(signals, |s, _, loop_signal| match s.signal() {
-            Signal::SIGUSR1 => {
-                let mut bgs_ref = bgs.borrow_mut();
-                if let Some((outputs, filter, img)) = decode_usr1_msg(&mut bgs_ref) {
-                    for result in send_request_to_processor(
-                        &mut bgs_ref,
-                        outputs,
-                        filter,
-                        &img,
-                        &mut processor,
-                    ) {
-                        debug!("Received img as processing result");
-                        handle_recv_img(&mut bgs_ref, &result);
-                    }
-                    send_answer(true);
-                }
-            }
-            Signal::SIGUSR2 => loop_signal.stop(),
-            _ => (),
-        })
-        .unwrap();
 
     event_handle
         .insert_source(frame_receiver, |evt, _, loop_signal| match evt {
@@ -361,12 +324,47 @@ fn run_main_loop(bgs: &mut Rc<RefCell<Vec<Background>>>, queue: EventQueue, disp
         })
         .unwrap();
 
+    //TODO: this is a problem. We send back the 'ok' despite the fact that initialization can still fail
+    send_answer(true, &listener);
+    event_handle
+        .insert_source(
+            calloop::generic::Generic::new(listener, calloop::Interest::READ, calloop::Mode::Level),
+            |_, listener, loop_signal| match listener.accept() {
+                Ok((mut socket, _)) => {
+                    let mut buf = String::with_capacity(100);
+                    if let Err(e) = socket.read_to_string(&mut buf) {
+                        error!("Failed to read socket: {}", e);
+                        return Err(e);
+                    };
+
+                    let mut bgs = bgs.borrow_mut();
+                    if let Some((outputs, filter, img)) = decode_socket_msg(&mut bgs, &buf) {
+                        for result in send_request_to_processor(
+                            &mut bgs,
+                            outputs,
+                            filter,
+                            &img,
+                            &mut processor,
+                        ) {
+                            debug!("Received img as processing result");
+                            handle_recv_img(&mut bgs, &result);
+                        }
+                        send_answer(true, &listener);
+                    } else {
+                        loop_signal.stop()
+                    }
+                    Ok(calloop::PostAction::Continue)
+                }
+                Err(e) => Err(e),
+            },
+        )
+        .unwrap();
+
     WaylandSource::new(queue)
         .quick_insert(event_handle)
         .unwrap();
 
     let mut loop_signal = event_loop.get_signal();
-    send_answer(true);
     event_loop
         .run(None, &mut loop_signal, |_| {
             {
@@ -390,53 +388,44 @@ fn run_main_loop(bgs: &mut Rc<RefCell<Vec<Background>>>, queue: EventQueue, disp
 
 ///The format for the message is as follows:
 ///
-///The first line contains the pid of the process that made the request
-///The second line contains the filter to use
-///The third contains the name of the outputs to put the img in
-///The fourth contains the path to the image
-fn decode_usr1_msg(
+///The first line contains the filter to use
+///The second contains the name of the outputs to put the img in
+///The third contains the path to the image
+fn decode_socket_msg(
     bgs: &mut RefMut<Vec<Background>>,
+    msg: &str,
 ) -> Option<(Vec<String>, FilterType, PathBuf)> {
-    match fs::read_to_string(Path::new(TMP_DIR).join(TMP_IN)) {
-        Ok(content) => {
-            let mut lines = content.lines();
+    let mut lines = msg.lines();
 
-            let _ = lines.next();
-            let filter = get_filter_from_str(lines.next().unwrap());
+    let first_line = lines.next().unwrap();
+    if first_line == "__DIE__" {
+        return None;
+    }
+    let filter = get_filter_from_str(first_line);
+    let outputs = lines.next().unwrap();
 
-            let outputs = lines.next().unwrap();
+    let img = lines.next().unwrap();
+    let img = Path::new(img).to_path_buf();
 
-            let img = lines.next().unwrap();
-            let img = Path::new(img).to_path_buf();
-
-            //First, let's eliminate outputs with names that don't exist:
-            let mut real_outputs: Vec<String> = Vec::with_capacity(bgs.len());
-            //An empty line means all outputs
-            if outputs.is_empty() {
-                for bg in bgs.iter() {
-                    real_outputs.push(bg.output_name.to_owned());
-                }
-            } else {
-                for output in outputs.split(',') {
-                    for bg in bgs.iter() {
-                        let output = output.to_string();
-                        if output == bg.output_name && !real_outputs.contains(&output) {
-                            real_outputs.push(output);
-                        }
-                    }
+    //First, let's eliminate outputs with names that don't exist:
+    let mut real_outputs: Vec<String> = Vec::with_capacity(bgs.len());
+    //An empty line means all outputs
+    if outputs.is_empty() {
+        for bg in bgs.iter() {
+            real_outputs.push(bg.output_name.to_owned());
+        }
+    } else {
+        for output in outputs.split(',') {
+            for bg in bgs.iter() {
+                let output = output.to_string();
+                if output == bg.output_name && !real_outputs.contains(&output) {
+                    real_outputs.push(output);
                 }
             }
-            debug!("Requesting img for outputs: {:?}", real_outputs);
-            Some((real_outputs, filter, img))
-        }
-        Err(e) => {
-            error!(
-                "Failed to read sent msg, even though this should be impossible {}",
-                e
-            );
-            None
         }
     }
+    debug!("Requesting img for outputs: {:?}", real_outputs);
+    Some((real_outputs, filter, img))
 }
 
 fn send_request_to_processor(
@@ -500,41 +489,20 @@ fn handle_recv_frame(bgs: &mut RefMut<Vec<Background>>, msg: &(Vec<String>, Vec<
     }
 }
 
-fn send_answer(ok: bool) {
-    let pid = if let Ok(in_file) = fs::read_to_string(Path::new(TMP_DIR).join(TMP_IN)) {
-        let pid_str = match in_file.lines().next() {
-            Some(str) => str,
-            None => return, //This can happen if we called the daemon directly
-        };
-        let proc_file = "/proc/".to_owned() + pid_str + "/cmdline";
-        let program;
-        match fs::read_to_string(&proc_file) {
-            Ok(p) => program = p.split('\0').next().unwrap().to_owned(),
-            Err(_) => return,
-        }
-        if !program.ends_with("fswww") {
+fn send_answer(ok: bool, listener: &UnixListener) {
+    let mut socket;
+    match listener.accept() {
+        Ok((s, _)) => socket = s,
+        Err(e) => {
             error!(
-                "Pid in {}/{} doesn't belong to a fswww process.",
-                TMP_DIR, TMP_IN
+                "Failed to get socket stream while sending answer back: {}",
+                e
             );
-            return;
+            return ();
         }
-        pid_str.parse().unwrap()
-    } else {
-        error!(
-            "Failed to read {}/{} for pid of calling process.",
-            TMP_DIR, TMP_IN
-        );
-        return;
-    };
-
-    if ok {
-        if let Err(e) = signal::kill(Pid::from_raw(pid), signal::SIGUSR1) {
-            warn!("Failed to send signal back indicating success: {}", e);
-        }
-    } else {
-        if let Err(e) = signal::kill(Pid::from_raw(pid), signal::SIGUSR2) {
-            error!("Failed to send signal back indicating failure: {}", e);
-        }
+    }
+    let answer = if ok { "Ok" } else { "Err" };
+    if let Err(e) = socket.write_all(answer.as_bytes()) {
+        error!("Failed to send answer back: {}", e);
     }
 }
