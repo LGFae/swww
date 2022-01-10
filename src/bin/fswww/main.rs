@@ -186,6 +186,14 @@ fn send_img(path: PathBuf, outputs: String, filter: Filter) -> Result<(), String
     Ok(())
 }
 
+fn kill() -> Result<(), String> {
+    let mut socket = get_socket()?;
+    match socket.write(b"__DIE__") {
+        Ok(_) => Ok(()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
 fn wait_for_response() -> Result<(), String> {
     let mut socket = get_socket()?;
     match socket.set_read_timeout(Some(Duration::from_secs(10))) {
@@ -205,14 +213,6 @@ fn wait_for_response() -> Result<(), String> {
                 Err(e) => Err(e.to_string()),
             }
         }
-        Err(e) => Err(e.to_string()),
-    }
-}
-
-fn kill() -> Result<(), String> {
-    let mut socket = get_socket()?;
-    match socket.write(b"__DIE__") {
-        Ok(_) => Ok(()),
         Err(e) => Err(e.to_string()),
     }
 }
