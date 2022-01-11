@@ -194,9 +194,9 @@ fn wait_for_response() -> Result<(), String> {
             let mut buf = String::with_capacity(100);
             match socket.read_to_string(&mut buf) {
                 Ok(_) => {
-                    if buf.starts_with("Ok") {
-                        if buf.len() > 2 {
-                            print!("{}", &buf[2..]);
+                    if buf.starts_with("Ok\n") {
+                        if buf.len() > 3 {
+                            print!("{}", &buf[3..]);
                         }
                         Ok(())
                     } else {
