@@ -203,7 +203,6 @@ pub fn main() {
     Daemon::from_args();
 
     let listener = make_socket(); //Must make this first because the file we log to is in there
-    listener.set_nonblocking(true).unwrap();
 
     make_logger();
     debug!(
@@ -332,7 +331,9 @@ fn run_main_loop(
         .unwrap();
 
     //TODO: this is a problem. We send back the 'ok' despite the fact that initialization can still fail
+    listener.set_nonblocking(false).unwrap();
     send_answer(Ok(""), &listener);
+    listener.set_nonblocking(true).unwrap();
     event_handle
         .insert_source(
             calloop::generic::Generic::new(listener, calloop::Interest::READ, calloop::Mode::Level),
@@ -507,6 +508,7 @@ fn handle_recv_frame(bgs: &mut RefMut<Vec<Background>>, msg: &(Vec<String>, Vec<
 
 fn send_answer(ok: Result<&str, &str>, listener: &UnixListener) {
     let mut socket;
+
     match listener.accept() {
         Ok((s, _)) => socket = s,
         Err(e) => {

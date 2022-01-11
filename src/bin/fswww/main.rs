@@ -116,20 +116,13 @@ fn spawn_daemon(no_daemon: bool) -> Result<(), String> {
             return Err(spawn_err.to_string());
         };
     }
-    match fork::fork() {
+    match fork::daemon(false, false) {
         Ok(fork::Fork::Child) => {
-            if let Ok(fork::Fork::Child) = fork::daemon(false, false) {
-                cmd.output().expect(spawn_err);
-                Ok(())
-            } else {
-                Err("Couldn't daemonize forked process!".to_string())
-            }
-        }
-        Ok(fork::Fork::Parent(pid)) => {
-            println!("Daemon pid = {}", pid);
+            cmd.output().expect(spawn_err);
             Ok(())
         }
-        Err(_) => Err("Coulnd't fork process!".to_string()),
+        Ok(fork::Fork::Parent(_)) => Ok(()),
+        Err(_) => Err("Couldn't daemonize forked process!".to_string()),
     }
 }
 
@@ -228,9 +221,20 @@ fn send_request(request: &str) -> Result<(), String> {
 fn get_socket() -> Result<UnixStream, String> {
     let path = get_socket_path();
 
-    match UnixStream::connect(path) {
+    match UnixStream::connect(&path) {
         Ok(socket) => Ok(socket),
-        Err(e) => Err(e.to_string()),
+        Err(e) => match e.kind() {
+            //This could happen during initialization, in which case we just wait
+            //a little bit and try again
+            std::io::ErrorKind::NotFound => {
+                std::thread::sleep(Duration::from_millis(100));
+                match UnixStream::connect(&path) {
+                    Ok(socket) => Ok(socket),
+                    Err(e) => Err(e.to_string()),
+                }
+            }
+            _ => Err(e.to_string()),
+        },
     }
 }
 
