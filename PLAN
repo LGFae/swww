@@ -26,13 +26,14 @@ These are the steps we will take while developing this program:
 
 	Come up with a way to make storing the frames info more memory efficient.  DONE
 	
+	Make QUERY command. This will allow for better automated testing. DONE
+
+	Use socket instead of files for IPC. DONE
+
+	Fix initialization failure: when initializing, if we send a message right after, the daemon fails to receive the message and everything goes to shit
+
 	LOGGING: Improve messages and time. Very important for later.
 
-	CHECK if simple mempoll works. REALLY check it, throughly. Use only one buffer, if it does.
-
-	Make QUERY command. This will allow for better automated testing.
-
-	Use fifo files for IPC (check if it even works). This should simplify much of the internal logic (no more signals).
 
 LONG TERM:
 	Make the transition effects when switching rendered files
@@ -42,7 +43,7 @@ LONG TERM:
 	Write logic to make transition between 2 gifs smoother.
 
 	Write a custom compression/decompression algorithm, making use of what we
-	know about the nature of the information (i.e they are 8888 images)
+	know about the nature of the information (i.e they are 8888 images) DONE
 
 UNSURE:
 	With all this done, adapt communication procedure to allow for streams
