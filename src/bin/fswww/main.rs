@@ -116,13 +116,17 @@ fn spawn_daemon(no_daemon: bool) -> Result<(), String> {
             return Err(spawn_err.to_string());
         };
     }
-    match fork::daemon(false, false) {
-        Ok(fork::Fork::Child) => {
-            cmd.output().expect(spawn_err);
-            Ok(())
-        }
+    match fork::fork() {
+        Ok(fork::Fork::Child) => match fork::daemon(false, false) {
+            Ok(fork::Fork::Child) => {
+                cmd.output().expect(spawn_err);
+                Ok(())
+            }
+            Ok(fork::Fork::Parent(_)) => Ok(()),
+            Err(_) => Err("Couldn't daemonize forked process!".to_string()),
+        },
         Ok(fork::Fork::Parent(_)) => Ok(()),
-        Err(_) => Err("Couldn't daemonize forked process!".to_string()),
+        Err(_) => Err("Couldn't create child process.".to_string()),
     }
 }
 
