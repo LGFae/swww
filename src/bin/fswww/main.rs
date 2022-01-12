@@ -134,10 +134,9 @@ fn main() -> Result<(), String> {
                 return Err("There seems to already be another instance running...".to_string());
             }
             if no_daemon {
-                //in this case, when the daemon stops we are done
-                return Ok(());
+                return Ok(()); //in this case, when the daemon stops we are done
             } else {
-                send_request("__INIT__")?;
+                send_request("__INIT__")?; //otherwise, we wait for the daemon's response
             }
         }
         Fswww::Kill => {
