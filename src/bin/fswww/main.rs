@@ -227,7 +227,10 @@ fn send_request(request: &str) -> Result<(), String> {
     Err("Failed to send request: ".to_string() + &error)
 }
 
-///Always sets connection to nonblocking
+///Always sets connection to nonblocking. This is because the daemon will always listen to
+///connections in a nonblocking fashion, so it makes sense to make this the standard for the whole
+///program. The only difference is that we will have to make timeouts manually by trying to connect
+///several times in a row, waiting some time between every attempt.
 fn get_socket() -> Result<UnixStream, String> {
     let path = get_socket_path();
     let mut error = String::new();
