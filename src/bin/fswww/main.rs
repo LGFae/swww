@@ -189,56 +189,64 @@ fn kill() -> Result<(), String> {
 
 fn wait_for_response() -> Result<(), String> {
     let mut socket = get_socket()?;
-    match socket.set_read_timeout(Some(Duration::from_secs(10))) {
-        Ok(()) => {
-            let mut buf = String::with_capacity(100);
-            match socket.read_to_string(&mut buf) {
-                Ok(_) => {
-                    if buf.starts_with("Ok\n") {
-                        if buf.len() > 3 {
-                            print!("{}", &buf[3..]);
-                        }
-                        Ok(())
-                    } else {
-                        Err(format!("ERROR: daemon sent back: {}", buf))
+    let mut buf = String::with_capacity(100);
+    let mut error = String::new();
+
+    for _ in 0..20 {
+        match socket.read_to_string(&mut buf) {
+            Ok(_) => {
+                if buf.starts_with("Ok\n") {
+                    if buf.len() > 3 {
+                        print!("{}", &buf[3..]);
                     }
+                    return Ok(());
+                } else {
+                    return Err(format!("ERROR: daemon sent back: {}", buf));
                 }
-                Err(e) => Err(e.to_string()),
             }
+            Err(e) => error = e.to_string(),
         }
-        Err(e) => Err(e.to_string()),
+        std::thread::sleep(Duration::from_millis(500));
     }
+
+    Err("Error while waiting for response: ".to_string() + &error)
 }
 
 fn send_request(request: &str) -> Result<(), String> {
     let mut socket = get_socket()?;
-    if let Err(_) = socket.write(request.as_bytes()) {
-        std::thread::sleep(Duration::from_millis(100));
-        if let Err(e) = socket.write(request.as_bytes()) {
-            return Err(e.to_string());
+    let mut error = String::new();
+
+    for _ in 0..5 {
+        match socket.write_all(request.as_bytes()) {
+            Ok(_) => return Ok(()),
+            Err(e) => error = e.to_string(),
         }
+        std::thread::sleep(Duration::from_millis(100));
     }
-    Ok(())
+    Err("Failed to send request: ".to_string() + &error)
 }
 
+///Always sets connection to nonblocking
 fn get_socket() -> Result<UnixStream, String> {
     let path = get_socket_path();
-
-    match UnixStream::connect(&path) {
-        Ok(socket) => Ok(socket),
-        Err(e) => match e.kind() {
-            //This could happen during initialization, in which case we just wait
-            //a little bit and try again
-            std::io::ErrorKind::NotFound => {
-                std::thread::sleep(Duration::from_millis(100));
-                match UnixStream::connect(&path) {
-                    Ok(socket) => Ok(socket),
-                    Err(e) => Err(e.to_string()),
+    let mut error = String::new();
+    //We try to connect 5 fives, waiting 100 milis in between
+    for _ in 0..5 {
+        match UnixStream::connect(&path) {
+            Ok(socket) => {
+                if let Err(e) = socket.set_nonblocking(true) {
+                    return Err(format!(
+                        "Failed to set nonblocking connection: {}",
+                        e.to_string()
+                    ));
                 }
+                return Ok(socket);
             }
-            _ => Err(e.to_string()),
-        },
+            Err(e) => error = e.to_string(),
+        }
+        std::thread::sleep(Duration::from_millis(100));
     }
+    Err("Failed to connect to socket: ".to_string() + &error)
 }
 
 fn get_socket_path() -> PathBuf {
