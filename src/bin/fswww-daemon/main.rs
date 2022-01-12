@@ -425,7 +425,7 @@ fn decode_socket_msg<'a>(bgs: &mut RefMut<Vec<Background>>, msg: &str) -> Result
     match lines.next() {
         Some(cmd) => match cmd {
             "__INIT__" => Ok(Request::Init),
-            "__DIE__" => Ok(Request::Kill),
+            "__KILL__" => Ok(Request::Kill),
             "__QUERY__" => Ok(Request::Query),
             "__IMG__" => {
                 let filter = lines.next();

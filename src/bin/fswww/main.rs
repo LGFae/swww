@@ -180,7 +180,7 @@ fn send_img(path: PathBuf, outputs: String, filter: Filter) -> Result<(), String
 
 fn kill() -> Result<(), String> {
     let mut socket = get_socket()?;
-    match socket.write(b"__DIE__") {
+    match socket.write(b"__KILL__") {
         Ok(_) => Ok(()),
         Err(e) => Err(e.to_string()),
     }
