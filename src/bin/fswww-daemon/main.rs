@@ -348,8 +348,8 @@ fn run_main_loop(
                     let request = decode_socket_msg(&mut bgs, &buf);
                     let mut answer = "".to_string();
                     match request {
-                        Request::Die => loop_signal.stop(),
-                        Request::Img((outputs, filter, img)) => {
+                        Ok(Request::Die) => loop_signal.stop(),
+                        Ok(Request::Img((outputs, filter, img))) => {
                             for result in send_request_to_processor(
                                 &mut bgs,
                                 outputs,
@@ -361,7 +361,7 @@ fn run_main_loop(
                                 handle_recv_img(&mut bgs, &result);
                             }
                         }
-                        Request::Query => {
+                        Ok(Request::Query) => {
                             for bg in bgs.iter() {
                                 answer = answer
                                     + &format!(
@@ -369,6 +369,11 @@ fn run_main_loop(
                                         bg.output_name, bg.dimensions.0, bg.dimensions.1
                                     );
                             }
+                        }
+                        Err(e) => {
+                            let error = format!("{}\nRequest sent:\n{}", e, &buf);
+                            send_answer(Err(&error), &listener);
+                            return Ok(calloop::PostAction::Continue);
                         }
                     }
                     send_answer(Ok(&answer), &listener);
@@ -384,24 +389,24 @@ fn run_main_loop(
         .unwrap();
 
     let mut loop_signal = event_loop.get_signal();
-    event_loop
-        .run(None, &mut loop_signal, |_| {
-            {
-                let mut bgs = bgs.borrow_mut();
-                let mut i = 0;
-                while i != bgs.len() {
-                    if bgs[i].handle_events() {
-                        bgs.remove(i);
-                    } else {
-                        i += 1;
-                    }
+    if let Err(e) = event_loop.run(None, &mut loop_signal, |_| {
+        {
+            let mut bgs = bgs.borrow_mut();
+            let mut i = 0;
+            while i != bgs.len() {
+                if bgs[i].handle_events() {
+                    bgs.remove(i);
+                } else {
+                    i += 1;
                 }
             }
-            if let Err(e) = display.flush() {
-                error!("Couldn't flush display: {}", e);
-            }
-        })
-        .expect("Event loop closed unexpectedly.");
+        }
+        if let Err(e) = display.flush() {
+            error!("Couldn't flush display: {}", e);
+        }
+    }) {
+        error!("Event loop closed unexpectedly: {}", e);
+    }
 }
 
 ///The format for the message is as follows:
@@ -409,39 +414,49 @@ fn run_main_loop(
 ///The first line contains the filter to use
 ///The second contains the name of the outputs to put the img in
 ///The third contains the path to the image
-fn decode_socket_msg(bgs: &mut RefMut<Vec<Background>>, msg: &str) -> Request {
+fn decode_socket_msg<'a>(bgs: &mut RefMut<Vec<Background>>, msg: &str) -> Result<Request, &'a str> {
     let mut lines = msg.lines();
-    match lines.next().unwrap() {
-        "__DIE__" => Request::Die,
-        "__QUERY__" => Request::Query,
-        "__IMG__" => {
-            let filter = get_filter_from_str(lines.next().unwrap());
-            let outputs = lines.next().unwrap();
+    let error = "Request has the wrong format!";
+    match lines.next() {
+        Some(cmd) => match cmd {
+            "__DIE__" => Ok(Request::Die),
+            "__QUERY__" => Ok(Request::Query),
+            "__IMG__" => {
+                let filter = lines.next();
+                let outputs = lines.next();
+                let img = lines.next();
 
-            let img = lines.next().unwrap();
-            let img = Path::new(img).to_path_buf();
-
-            //First, let's eliminate outputs with names that don't exist:
-            let mut real_outputs: Vec<String> = Vec::with_capacity(bgs.len());
-            //An empty line means all outputs
-            if outputs.is_empty() {
-                for bg in bgs.iter() {
-                    real_outputs.push(bg.output_name.to_owned());
+                if filter.is_none() || outputs.is_none() || img.is_none() {
+                    return Err(error);
                 }
-            } else {
-                for output in outputs.split(',') {
+
+                let filter = get_filter_from_str(filter.unwrap());
+                let img = Path::new(img.unwrap()).to_path_buf();
+                let outputs = outputs.unwrap();
+
+                //First, let's eliminate outputs with names that don't exist:
+                let mut real_outputs: Vec<String> = Vec::with_capacity(bgs.len());
+                //An empty line means all outputs
+                if outputs.is_empty() {
                     for bg in bgs.iter() {
-                        let output = output.to_string();
-                        if output == bg.output_name && !real_outputs.contains(&output) {
-                            real_outputs.push(output);
+                        real_outputs.push(bg.output_name.to_owned());
+                    }
+                } else {
+                    for output in outputs.split(',') {
+                        for bg in bgs.iter() {
+                            let output = output.to_string();
+                            if output == bg.output_name && !real_outputs.contains(&output) {
+                                real_outputs.push(output);
+                            }
                         }
                     }
                 }
+                debug!("Requesting img for outputs: {:?}", real_outputs);
+                Ok(Request::Img((real_outputs, filter, img)))
             }
-            debug!("Requesting img for outputs: {:?}", real_outputs);
-            Request::Img((real_outputs, filter, img))
-        }
-        _ => todo!(),
+            _ => Err(error),
+        },
+        None => Err(error),
     }
 }
 

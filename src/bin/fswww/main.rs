@@ -212,6 +212,9 @@ fn wait_for_response() -> Result<(), String> {
 
 fn send_request(request: &str) -> Result<(), String> {
     let mut socket = get_socket()?;
+    if let Err(e) = socket.set_write_timeout(Some(Duration::from_secs(1))) {
+        return Err(format!("Couldn't set write timeout: {}", e));
+    }
     match socket.write(request.as_bytes()) {
         Ok(_) => Ok(()),
         Err(e) => Err(e.to_string()),
