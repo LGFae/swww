@@ -387,6 +387,12 @@ fn run_main_loop(
         .quick_insert(event_handle)
         .unwrap();
 
+    //IMPORTANT: For here on out, any failures must NOT result in a panic. We need to exit cleanly.
+    //If it's unrecoverable, we should also delete the socket. Note that on normal exit the cleanup
+    //happens at the calling fswww instance (because we can't send back an answer after we've
+    //removed the socket. So we can only assure the user the socket has been removed in the fswww
+    //client).
+
     let mut loop_signal = event_loop.get_signal();
     if let Err(e) = event_loop.run(None, &mut loop_signal, |_| {
         {
