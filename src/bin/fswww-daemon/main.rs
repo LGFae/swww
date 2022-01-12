@@ -35,6 +35,7 @@ mod wayland;
 enum Request {
     Die,
     Img((Vec<String>, FilterType, PathBuf)),
+    Init,
     Query,
 }
 
@@ -330,9 +331,6 @@ fn run_main_loop(
         })
         .unwrap();
 
-    //TODO: this is a problem. We send back the 'ok' despite the fact that initialization can still fail
-    listener.set_nonblocking(false).unwrap();
-    send_answer(Ok(""), &listener);
     listener.set_nonblocking(true).unwrap();
     event_handle
         .insert_source(
@@ -361,6 +359,7 @@ fn run_main_loop(
                                 handle_recv_img(&mut bgs, &result);
                             }
                         }
+                        Ok(Request::Init) => send_answer(Ok(""), &listener),
                         Ok(Request::Query) => {
                             for bg in bgs.iter() {
                                 answer = answer
@@ -419,6 +418,7 @@ fn decode_socket_msg<'a>(bgs: &mut RefMut<Vec<Background>>, msg: &str) -> Result
     let error = "Request has the wrong format!";
     match lines.next() {
         Some(cmd) => match cmd {
+            "__INIT__" => Ok(Request::Init),
             "__DIE__" => Ok(Request::Die),
             "__QUERY__" => Ok(Request::Query),
             "__IMG__" => {
@@ -534,6 +534,7 @@ fn send_answer(ok: Result<&str, &str>, listener: &UnixListener) {
             return ();
         }
     }
+
     let send_result = match ok {
         Ok(msg) => socket.write_all(format!("Ok\n{}", msg).as_bytes()),
         Err(err) => socket.write_all(format!("Err\n{}", err).as_bytes()),

@@ -142,6 +142,8 @@ fn main() -> Result<(), String> {
             if no_daemon {
                 //in this case, when the daemon stops we are done
                 return Ok(());
+            } else {
+                send_request("__INIT__")?;
             }
         }
         Fswww::Kill => {
@@ -204,15 +206,16 @@ fn wait_for_response() -> Result<(), String> {
                         print!("{}", &buf[3..]);
                     }
                     return Ok(());
+                } else if buf.starts_with("Err\n") {
+                    return Err(format!("daemon sent back: {}", &buf[4..]));
                 } else {
-                    return Err(format!("ERROR: daemon sent back: {}", buf));
+                    return Err(format!("daemon returned a badly formatted answer: {}", buf));
                 }
             }
             Err(e) => error = e.to_string(),
         }
         std::thread::sleep(Duration::from_millis(500));
     }
-
     Err("Error while waiting for response: ".to_string() + &error)
 }
 
