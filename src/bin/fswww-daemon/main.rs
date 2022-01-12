@@ -319,9 +319,7 @@ fn run_main_loop(
 ) {
     let (frame_sender, frame_receiver) = calloop::channel::channel();
     let mut processor = processor::Processor::new(frame_sender);
-
     let mut event_loop = calloop::EventLoop::<calloop::LoopSignal>::try_new().unwrap();
-
     let event_handle = event_loop.handle();
 
     event_handle
@@ -335,50 +333,8 @@ fn run_main_loop(
     event_handle
         .insert_source(
             calloop::generic::Generic::new(listener, calloop::Interest::READ, calloop::Mode::Level),
-            |_, listener, loop_signal| match listener.accept() {
-                Ok((mut socket, _)) => {
-                    let mut buf = String::with_capacity(100);
-                    if let Err(e) = socket.read_to_string(&mut buf) {
-                        error!("Failed to read socket: {}", e);
-                        return Err(e);
-                    };
-                    let mut bgs = bgs.borrow_mut();
-                    let request = decode_socket_msg(&mut bgs, &buf);
-                    let mut answer = "".to_string();
-                    match request {
-                        Ok(Request::Kill) => loop_signal.stop(),
-                        Ok(Request::Img((outputs, filter, img))) => {
-                            for result in send_request_to_processor(
-                                &mut bgs,
-                                outputs,
-                                filter,
-                                &img,
-                                &mut processor,
-                            ) {
-                                debug!("Received img as processing result");
-                                handle_recv_img(&mut bgs, &result);
-                            }
-                        }
-                        Ok(Request::Init) => send_answer(Ok(""), &listener),
-                        Ok(Request::Query) => {
-                            for bg in bgs.iter() {
-                                answer = answer
-                                    + &format!(
-                                        "{} - Dimensions: {}x{}\n",
-                                        bg.output_name, bg.dimensions.0, bg.dimensions.1
-                                    );
-                            }
-                        }
-                        Err(e) => {
-                            let error = format!("{}\nRequest sent:\n{}", e, &buf);
-                            send_answer(Err(&error), &listener);
-                            return Ok(calloop::PostAction::Continue);
-                        }
-                    }
-                    send_answer(Ok(&answer), &listener);
-                    Ok(calloop::PostAction::Continue)
-                }
-                Err(e) => Err(e),
+            |_, listener, loop_signal| {
+                recv_socket_msg(bgs.borrow_mut(), listener, loop_signal, &mut processor)
             },
         )
         .unwrap();
@@ -411,6 +367,54 @@ fn run_main_loop(
         }
     }) {
         error!("Event loop closed unexpectedly: {}", e);
+    }
+}
+
+fn recv_socket_msg(
+    mut bgs: RefMut<Vec<Background>>,
+    listener: &UnixListener,
+    loop_signal: &calloop::LoopSignal,
+    processor: &mut processor::Processor,
+) -> Result<calloop::PostAction, std::io::Error> {
+    match listener.accept() {
+        Ok((mut socket, _)) => {
+            let mut buf = String::with_capacity(100);
+            if let Err(e) = socket.read_to_string(&mut buf) {
+                error!("Failed to read socket: {}", e);
+                return Err(e);
+            };
+            let request = decode_socket_msg(&mut bgs, &buf);
+            let mut answer = "".to_string();
+            match request {
+                Ok(Request::Kill) => loop_signal.stop(),
+                Ok(Request::Img((outputs, filter, img))) => {
+                    for result in
+                        send_request_to_processor(&mut bgs, outputs, filter, &img, processor)
+                    {
+                        debug!("Received img as processing result");
+                        handle_recv_img(&mut bgs, &result);
+                    }
+                }
+                Ok(Request::Init) => send_answer(Ok(""), &listener), //TODO: THIS IS UNNECESSARY
+                Ok(Request::Query) => {
+                    for bg in bgs.iter() {
+                        answer = answer
+                            + &format!(
+                                "{} - Dimensions: {}x{}\n",
+                                bg.output_name, bg.dimensions.0, bg.dimensions.1
+                            );
+                    }
+                }
+                Err(e) => {
+                    let error = format!("{}\nRequest sent:\n{}", e, &buf);
+                    send_answer(Err(&error), &listener);
+                    return Ok(calloop::PostAction::Continue);
+                }
+            }
+            send_answer(Ok(&answer), &listener);
+            Ok(calloop::PostAction::Continue)
+        }
+        Err(e) => Err(e),
     }
 }
 
