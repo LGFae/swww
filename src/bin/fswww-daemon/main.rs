@@ -383,8 +383,8 @@ fn recv_socket_msg(
                 error!("Failed to read socket: {}", e);
                 return Err(e);
             };
-            let request = decode_socket_msg(&mut bgs, &buf);
-            let mut answer = "".to_string();
+            let request = decode_request(&mut bgs, &buf);
+            let mut answer = "".to_string(); //TODO: MAKE ANSWER TYPE RESULT ITSELF
             match request {
                 Ok(Request::Kill) => loop_signal.stop(),
                 Ok(Request::Img((outputs, filter, img))) => {
@@ -406,8 +406,8 @@ fn recv_socket_msg(
                     }
                 }
                 Err(e) => {
-                    let error = format!("{}\nRequest sent:\n{}", e, &buf);
-                    send_answer(Err(&error), &listener);
+                    answer = e;
+                    send_answer(Err(&answer), &listener);
                     return Ok(calloop::PostAction::Continue);
                 }
             }
@@ -423,9 +423,8 @@ fn recv_socket_msg(
 ///The first line contains the filter to use
 ///The second contains the name of the outputs to put the img in
 ///The third contains the path to the image
-fn decode_socket_msg<'a>(bgs: &mut RefMut<Vec<Background>>, msg: &str) -> Result<Request, &'a str> {
+fn decode_request(bgs: &mut RefMut<Vec<Background>>, msg: &str) -> Result<Request, String> {
     let mut lines = msg.lines();
-    let error = "Request has the wrong format!";
     match lines.next() {
         Some(cmd) => match cmd {
             "__INIT__" => Ok(Request::Init),
@@ -437,14 +436,13 @@ fn decode_socket_msg<'a>(bgs: &mut RefMut<Vec<Background>>, msg: &str) -> Result
                 let img = lines.next();
 
                 if filter.is_none() || outputs.is_none() || img.is_none() {
-                    return Err(error);
+                    return Err("badly formatted request".to_string());
                 }
 
                 let filter = get_filter_from_str(filter.unwrap());
                 let img = Path::new(img.unwrap()).to_path_buf();
                 let outputs = outputs.unwrap();
 
-                //First, let's eliminate outputs with names that don't exist:
                 let mut real_outputs: Vec<String> = Vec::with_capacity(bgs.len());
                 //An empty line means all outputs
                 if outputs.is_empty() {
@@ -453,20 +451,27 @@ fn decode_socket_msg<'a>(bgs: &mut RefMut<Vec<Background>>, msg: &str) -> Result
                     }
                 } else {
                     for output in outputs.split(',') {
+                        let output = output.to_string();
+                        let mut exists = false;
                         for bg in bgs.iter() {
-                            let output = output.to_string();
-                            if output == bg.output_name && !real_outputs.contains(&output) {
-                                real_outputs.push(output);
+                            if output == bg.output_name {
+                                exists = true;
                             }
+                        }
+
+                        if !exists {
+                            return Err(format!("output {} doesn't exist", output));
+                        } else if !real_outputs.contains(&output) {
+                            real_outputs.push(output);
                         }
                     }
                 }
                 debug!("Requesting img for outputs: {:?}", real_outputs);
                 Ok(Request::Img((real_outputs, filter, img)))
             }
-            _ => Err(error),
+            _ => Err(format!("unrecognized command: {}", cmd)),
         },
-        None => Err(error),
+        None => Err("empty request!".to_string()),
     }
 }
 
@@ -494,9 +499,6 @@ fn send_request_to_processor(
             "Sending message to processor: {:?}",
             (&out_same_dim, dim, img.to_path_buf())
         );
-
-        //NOTE: IF THERE ARE MULTIPLE MONITORS WITH DIFFERENT SIZE, THIS WILL CALCULATE
-        //THEM IN SEQUENCE, WHICH WE DON'T REALLY WANT
         processing_results.push(processor.process((out_same_dim, dim, filter, img)));
     }
     processing_results
