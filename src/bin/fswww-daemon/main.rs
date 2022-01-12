@@ -33,7 +33,7 @@ mod wayland;
 
 ///These correspond to the subcommands of fswww that involve talking to the daemon
 enum Request {
-    Die,
+    Kill,
     Img((Vec<String>, FilterType, PathBuf)),
     Init,
     Query,
@@ -346,7 +346,7 @@ fn run_main_loop(
                     let request = decode_socket_msg(&mut bgs, &buf);
                     let mut answer = "".to_string();
                     match request {
-                        Ok(Request::Die) => loop_signal.stop(),
+                        Ok(Request::Kill) => loop_signal.stop(),
                         Ok(Request::Img((outputs, filter, img))) => {
                             for result in send_request_to_processor(
                                 &mut bgs,
@@ -419,7 +419,7 @@ fn decode_socket_msg<'a>(bgs: &mut RefMut<Vec<Background>>, msg: &str) -> Result
     match lines.next() {
         Some(cmd) => match cmd {
             "__INIT__" => Ok(Request::Init),
-            "__DIE__" => Ok(Request::Die),
+            "__DIE__" => Ok(Request::Kill),
             "__QUERY__" => Ok(Request::Query),
             "__IMG__" => {
                 let filter = lines.next();
