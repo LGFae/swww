@@ -189,7 +189,7 @@ impl Drop for Background {
 #[structopt(name = "fswww-daemon")]
 ///The fswww daemon
 ///
-///You should never have to interact directly with the daemon, but use fswww init to start it
+///You shouldn't have to interact directly with the daemon, but use fswww init to start it
 ///instead. fswww will automatically fork the process for you, unless you run it with the
 ///--no-daemon option.
 ///
@@ -197,7 +197,7 @@ impl Drop for Background {
 ///option to fork it; you may only pass -h or --help to see this message, or -V or --version to see
 ///the version you are running. The only advantage of running the daemon this way is to see its
 ///log, and even then, in the release version we only log warnings and errors, so you won't be
-///seeing much.
+///seeing much (hopefully).
 struct Daemon {}
 
 pub fn main() {

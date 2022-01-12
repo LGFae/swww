@@ -87,13 +87,7 @@ enum Fswww {
         ///Don't fork the daemon. This will keep it running in the current terminal.
         ///
         ///The only advantage of this would be seeing the logging real time. Even then, for release
-        ///builds we only log warnings and errors, so you won't be seeing much.
-        ///
-        ///Also, fswww waits for a signal from the daemon to indicate it initalized successfully,
-        ///and running something like <fswww init --no-daemon &>, though it will sent the process
-        ///to the background, will fail to receive that message properly. Furthermore, in this
-        ///case you would have 2 processes running in the background, not one: the original parent
-        ///fswww and the child fswww-daemon.
+        ///builds we only log warnings and errors, so you won't be seeing much (ideally).
         #[structopt(long)]
         no_daemon: bool,
     },
