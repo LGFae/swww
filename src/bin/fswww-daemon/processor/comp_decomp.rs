@@ -89,11 +89,13 @@ fn diff_byte_header_copy_onto(buf: &mut [u8], diff: &[u8]) {
     }
 }
 
+///Compresses by first doing our custom bitpacking compression, and then using lz4
 pub fn mixed_comp(prev: &[u8], curr: &[u8]) -> Vec<u8> {
     let bit_pack = diff_byte_header(prev, curr);
     lz4_flex::compress_prepend_size(&bit_pack)
 }
 
+///Decompresses by first undoing lz4, then undoing our custom bitpacking
 pub fn mixed_decomp(buf: &mut [u8], diff: &[u8]) {
     let diff = lz4_flex::decompress_size_prepended(diff).unwrap();
     diff_byte_header_copy_onto(buf, &diff);
