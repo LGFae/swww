@@ -39,15 +39,8 @@ fn sending_img_that_does_not_exist() {
 }
 
 fn query_outputs() -> String {
-    let output = cmd()
-        .arg("query")
-        .arg("I don't exist")
-        .output()
-        .expect("Query failed!");
-    //For some reason, the thing is in stderr, even though we are printing to
-    //stdout
-    let stdout = String::from_utf8(output.stderr).unwrap();
-    println!("Query result: {}", stdout);
+    let output = cmd().arg("query").output().expect("Query failed!");
+    let stdout = String::from_utf8(output.stdout).unwrap();
     stdout.split_once(' ').unwrap().0.to_string()
 }
 
@@ -61,7 +54,15 @@ fn sending_img_to_individual_monitors(output: &str) {
         .success();
 }
 
-fn sending_img_to_monitor_that_does_not_exist() {}
+fn sending_img_to_monitor_that_does_not_exist() {
+    cmd()
+        .arg("img")
+        .arg(TEST_IMGS[0])
+        .arg("-o")
+        .arg("AHOY")
+        .assert()
+        .failure();
+}
 
 fn sending_imgs_with_filter() {
     for filter in ["Nearest", "Triangle", "CatmullRom", "Gaussian", "Lanczos3"] {
