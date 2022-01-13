@@ -384,7 +384,7 @@ fn recv_socket_msg(
                 return Err(e);
             };
             let request = decode_request(&mut bgs, &buf);
-            let mut answer = "".to_string(); //TODO: MAKE ANSWER TYPE RESULT ITSELF
+            let mut answer = Ok(String::new());
             match request {
                 Ok(Request::Kill) => loop_signal.stop(),
                 Ok(Request::Img((outputs, filter, img))) => {
@@ -395,23 +395,11 @@ fn recv_socket_msg(
                         handle_recv_img(&mut bgs, &result);
                     }
                 }
-                Ok(Request::Init) => send_answer(Ok(""), &listener), //TODO: THIS IS UNNECESSARY
-                Ok(Request::Query) => {
-                    for bg in bgs.iter() {
-                        answer = answer
-                            + &format!(
-                                "{} - Dimensions: {}x{}\n",
-                                bg.output_name, bg.dimensions.0, bg.dimensions.1
-                            );
-                    }
-                }
-                Err(e) => {
-                    answer = e;
-                    send_answer(Err(&answer), &listener);
-                    return Ok(calloop::PostAction::Continue);
-                }
+                Ok(Request::Init) => (),
+                Ok(Request::Query) => answer = Ok(outputs_name_and_dim(&mut bgs)),
+                Err(e) => answer = Err(e),
             }
-            send_answer(Ok(&answer), &listener);
+            send_answer(answer, &listener);
             Ok(calloop::PostAction::Continue)
         }
         Err(e) => Err(e),
@@ -533,7 +521,18 @@ fn handle_recv_frame(bgs: &mut RefMut<Vec<Background>>, msg: &(Vec<String>, Vec<
     }
 }
 
-fn send_answer(ok: Result<&str, &str>, listener: &UnixListener) {
+fn outputs_name_and_dim(bgs: &mut RefMut<Vec<Background>>) -> String {
+    let mut str = String::new();
+    for bg in bgs.iter() {
+        str += &format!(
+            "{} - Dimensions: {}x{}\n",
+            bg.output_name, bg.dimensions.0, bg.dimensions.1
+        );
+    }
+    str
+}
+
+fn send_answer(ok: Result<String, String>, listener: &UnixListener) {
     let mut socket;
 
     match listener.accept() {
