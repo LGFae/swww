@@ -148,7 +148,7 @@ impl Background {
         }
     }
 
-    ///For now, same as draw, but decompresses the sent image first
+    ///Same as draw, but decompresses the sent image first
     fn animate(&mut self, frame: &[u8]) {
         let stride = 4 * self.dimensions.0 as i32;
         let width = self.dimensions.0 as i32;
