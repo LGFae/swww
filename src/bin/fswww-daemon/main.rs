@@ -257,7 +257,7 @@ fn make_logger() {
 
     #[cfg(not(debug_assertions))]
     {
-        simplelog::TermLogger::init(
+        TermLogger::init(
             LevelFilter::Warn,
             simplelog::Config::default(),
             TerminalMode::Stderr,
