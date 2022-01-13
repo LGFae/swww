@@ -177,7 +177,7 @@ fn animate(
             .send((outputs.clone(), cached_frames.last().unwrap().0.clone()))
             .unwrap_or_else(|_| return);
 
-        loop_animation(&cached_frames, outputs, sender, receiver);
+        loop_animation(&cached_frames, outputs, sender, receiver, now);
     }
 }
 
@@ -186,9 +186,9 @@ fn loop_animation(
     mut outputs: Vec<String>,
     sender: Sender<(Vec<String>, Vec<u8>)>,
     receiver: mpsc::Receiver<Vec<String>>,
+    mut now: Instant,
 ) {
     info!("Finished caching the frames!");
-    let mut now = Instant::now();
     loop {
         for (cached_img, duration) in cached_frames {
             match receiver.recv_timeout(duration.saturating_sub(now.elapsed())) {
