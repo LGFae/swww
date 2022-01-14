@@ -30,10 +30,10 @@ These are the steps we will take while developing this program:
 
 	Use socket instead of files for IPC. DONE
 
-	Fix initialization failure: when initializing, if we send a message right after, the daemon fails to receive the message and everything goes to shit
+	Fix initialization failure: when initializing, if we send a message right after, the daemon fails to receive the message and everything goes to shit. DONE
 
-	LOGGING: Improve messages and time. Very important for later.
-
+	The processor might fail on some conditions. But the daemon shouldn't
+	be panicking on those. Fix that.
 
 LONG TERM:
 	Make the transition effects when switching rendered files
