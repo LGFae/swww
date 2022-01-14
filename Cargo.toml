@@ -11,7 +11,7 @@ lto = true
 opt-level = 3
 codegen-units = 1
 panic = "abort"
-#strip = "symbols" #enable this once it gets stabilized -- literally next cargo version
+#strip = "symbols" #enable this once it gets stabilized -- literally next rust version, I think
 
 [profile.bench]
 debug = 1
@@ -23,7 +23,6 @@ log = {version = "0.4", features = ["max_level_debug", "release_max_level_warn"]
 simplelog = "^0.11.1"
 fork = "0.1"
 structopt = {version = "0.3", default-features = true}
-nix = "0.23"
 lz4_flex = {version = "0.9" , default-features = false}
 
 [dev-dependencies]
