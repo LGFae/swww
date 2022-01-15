@@ -176,6 +176,7 @@ fn animate(
         sender
             .send((outputs.clone(), cached_frames.last().unwrap().0.clone()))
             .unwrap_or_else(|_| return);
+        now = Instant::now();
 
         loop_animation(&cached_frames, outputs, sender, receiver, now);
     }
