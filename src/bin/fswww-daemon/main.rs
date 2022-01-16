@@ -483,6 +483,7 @@ fn send_request_to_processor(
     processor: &mut processor::Processor,
 ) -> Vec<ProcessorResult> {
     let mut processing_results = Vec::new();
+
     while !outputs.is_empty() {
         let mut out_same_dim = Vec::with_capacity(outputs.len());
         out_same_dim.push(outputs.pop().unwrap());
@@ -502,8 +503,16 @@ fn send_request_to_processor(
             "Sending message to processor: {:?}",
             (&out_same_dim, dim, img.to_path_buf())
         );
-        processing_results.push(processor.process((out_same_dim, dim, filter, img)));
+
+        let result;
+        if old_img.is_some() {
+            result = processor.process((out_same_dim, dim, filter, img, None));
+        } else {
+            result = processor.process((out_same_dim, dim, filter, img, None));
+        }
+        processing_results.push(result);
     }
+
     processing_results
 }
 

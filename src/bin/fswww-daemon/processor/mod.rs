@@ -11,7 +11,20 @@ use std::time::{Duration, Instant};
 use std::{path::Path, sync::mpsc, thread};
 
 pub type ProcessorResult = (Vec<String>, Vec<u8>);
-type ProcessorRequest<'a> = (Vec<String>, (u32, u32), FilterType, &'a Path);
+
+///These represent, in order:
+///Outputs to display img on
+///Dimensions of img
+///Filter to use when scaling
+///Path to img
+///Previous img (if any)
+type ProcessorRequest<'a> = (
+    Vec<String>,
+    (u32, u32),
+    FilterType,
+    &'a Path,
+    Option<Vec<u8>>,
+);
 
 pub mod comp_decomp;
 
