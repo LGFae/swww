@@ -65,13 +65,17 @@ impl Processor {
             .expect("Img decoding failed, though this should be impossible...");
         let img = img_resize(img, width, height, filter);
 
+        if old_img.is_some() {
+            //Don't use threads, also, skip the final img, since we will just send it back from
+            //here anyway
+            //Note this means any transition can last, at most, around 10 sec (the timeout from the
+            //fswww client)
+            info!("There's an old image here! Beginning transition...");
+        }
+
         //TODO: Also do apng
         if format == Some(ImageFormat::Gif) {
             self.process_gif(path, &img, width, height, outputs.clone(), filter);
-        }
-
-        if old_img.is_some() {
-            info!("There's an old image here! Beginning transition...");
         }
 
         debug!("Finished image processing!");
