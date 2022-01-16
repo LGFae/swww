@@ -52,6 +52,7 @@ struct Background {
     next_render_event: Rc<Cell<Option<RenderEvent>>>,
     pool: AutoMemPool,
     dimensions: (u32, u32),
+    img: Option<PathBuf>,
 }
 
 impl Background {
@@ -104,6 +105,7 @@ impl Background {
             pool,
             output_name,
             dimensions: (0, 0),
+            img: None,
         })
     }
 
@@ -392,7 +394,7 @@ fn recv_socket_msg(
                         send_request_to_processor(&mut bgs, outputs, filter, &img, processor)
                     {
                         debug!("Received img as processing result");
-                        handle_recv_img(&mut bgs, &result);
+                        handle_recv_img(&mut bgs, &result, &img);
                     }
                 }
                 Ok(Request::Init) => (),
@@ -484,13 +486,14 @@ fn send_request_to_processor(
     while !outputs.is_empty() {
         let mut out_same_dim = Vec::with_capacity(outputs.len());
         out_same_dim.push(outputs.pop().unwrap());
-        let dim = bgs
+        let bg = bgs
             .iter()
             .find(|bg| bg.output_name == out_same_dim[0])
-            .unwrap()
-            .dimensions;
+            .unwrap();
+        let dim = bg.dimensions;
+        let old_img = &bg.img;
         for bg in bgs.iter().filter(|bg| outputs.contains(&bg.output_name)) {
-            if bg.dimensions == dim {
+            if bg.dimensions == dim || bg.img == *old_img {
                 out_same_dim.push(bg.output_name.clone());
             }
         }
@@ -515,10 +518,15 @@ fn get_filter_from_str(s: &str) -> FilterType {
     }
 }
 
-fn handle_recv_img(bgs: &mut RefMut<Vec<Background>>, msg: &(Vec<String>, Vec<u8>)) {
+fn handle_recv_img(
+    bgs: &mut RefMut<Vec<Background>>,
+    msg: &(Vec<String>, Vec<u8>),
+    img_path: &Path,
+) {
     let (outputs, img) = msg;
     for bg in bgs.iter_mut() {
         if outputs.contains(&bg.output_name) {
+            bg.img = Some(img_path.to_path_buf());
             bg.draw(img);
         }
     }
