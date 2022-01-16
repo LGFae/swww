@@ -427,35 +427,7 @@ fn decode_request(bgs: &mut RefMut<Vec<Background>>, msg: &str) -> Result<Reques
                     return Err("badly formatted request".to_string());
                 }
 
-                let filter = get_filter_from_str(filter.unwrap());
-                let img = Path::new(img.unwrap()).to_path_buf();
-                let outputs = outputs.unwrap();
-
-                let mut real_outputs: Vec<String> = Vec::with_capacity(bgs.len());
-                //An empty line means all outputs
-                if outputs.is_empty() {
-                    for bg in bgs.iter() {
-                        real_outputs.push(bg.output_name.to_owned());
-                    }
-                } else {
-                    for output in outputs.split(',') {
-                        let output = output.to_string();
-                        let mut exists = false;
-                        for bg in bgs.iter() {
-                            if output == bg.output_name {
-                                exists = true;
-                            }
-                        }
-
-                        if !exists {
-                            return Err(format!("output {} doesn't exist", output));
-                        } else if !real_outputs.contains(&output) {
-                            real_outputs.push(output);
-                        }
-                    }
-                }
-                debug!("Requesting img for outputs: {:?}", real_outputs);
-                Ok(Request::Img((real_outputs, filter, img)))
+                build_img_request(bgs, filter.unwrap(), outputs.unwrap(), img.unwrap())
             }
             _ => Err(format!("unrecognized command: {}", cmd)),
         },
@@ -463,6 +435,44 @@ fn decode_request(bgs: &mut RefMut<Vec<Background>>, msg: &str) -> Result<Reques
     }
 }
 
+///Verifies that all outputs exist
+fn build_img_request(
+    bgs: &mut RefMut<Vec<Background>>,
+    filter: &str,
+    outputs: &str,
+    img: &str,
+) -> Result<Request, String> {
+    let filter = get_filter_from_str(filter);
+    let img = Path::new(img).to_path_buf();
+
+    let mut real_outputs: Vec<String> = Vec::with_capacity(bgs.len());
+    //An empty line means all outputs
+    if outputs.is_empty() {
+        for bg in bgs.iter() {
+            real_outputs.push(bg.output_name.to_owned());
+        }
+    } else {
+        for output in outputs.split(',') {
+            let output = output.to_string();
+            let mut exists = false;
+            for bg in bgs.iter() {
+                if output == bg.output_name {
+                    exists = true;
+                }
+            }
+
+            if !exists {
+                return Err(format!("output {} doesn't exist", output));
+            } else if !real_outputs.contains(&output) {
+                real_outputs.push(output);
+            }
+        }
+    }
+    debug!("Requesting img for outputs: {:?}", real_outputs);
+    Ok(Request::Img((real_outputs, filter, img)))
+}
+
+///Returns one result per output with same dimesions and image
 fn send_request_to_processor(
     bgs: &mut RefMut<Vec<Background>>,
     mut outputs: Vec<String>,
