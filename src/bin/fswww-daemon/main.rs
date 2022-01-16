@@ -1,5 +1,5 @@
 use image::imageops::FilterType;
-use log::{debug, error, info, warn};
+use log::{debug, error, info};
 use simplelog::{ColorChoice, LevelFilter, TermLogger, TerminalMode};
 use structopt::StructOpt;
 
@@ -14,7 +14,7 @@ use smithay_client_toolkit::{
             zwlr_layer_shell_v1, zwlr_layer_surface_v1,
         },
     },
-    shm::AutoMemPool,
+    shm::MemPool,
     WaylandSource,
 };
 
@@ -50,7 +50,7 @@ struct Background {
     surface: wl_surface::WlSurface,
     layer_surface: Main<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1>,
     next_render_event: Rc<Cell<Option<RenderEvent>>>,
-    pool: AutoMemPool,
+    pool: MemPool,
     dimensions: (u32, u32),
     img: Option<PathBuf>,
 }
@@ -61,7 +61,7 @@ impl Background {
         output_name: String,
         surface: wl_surface::WlSurface,
         layer_shell: &Attached<zwlr_layer_shell_v1::ZwlrLayerShellV1>,
-        pool: AutoMemPool,
+        pool: MemPool,
     ) -> Option<Self> {
         let layer_surface = layer_shell.get_layer_surface(
             &surface,
@@ -115,6 +115,7 @@ impl Background {
         match self.next_render_event.take() {
             Some(RenderEvent::Closed) => true,
             Some(RenderEvent::Configure { width, height }) => {
+                self.pool.resize((width * height * 4) as usize).unwrap();
                 self.dimensions = (width, height);
                 false
             }
@@ -127,27 +128,21 @@ impl Background {
         let width = self.dimensions.0 as i32;
         let height = self.dimensions.1 as i32;
 
-        match self
+        let buffer = self
             .pool
-            .buffer(width, height, stride, wl_shm::Format::Argb8888)
-        {
-            Ok((canvas, buffer)) => {
-                canvas.copy_from_slice(img);
-                info!("Copied img to buffer.");
+            .buffer(0, width, height, stride, wl_shm::Format::Argb8888);
+        let canvas = self.pool.mmap();
 
-                // Attach the buffer to the surface and mark the entire surface as damaged
-                self.surface.attach(Some(&buffer), 0, 0);
-                self.surface
-                    .damage_buffer(0, 0, width as i32, height as i32);
+        canvas.copy_from_slice(img);
+        info!("Copied img to buffer.");
 
-                // Finally, commit the surface
-                self.surface.commit();
-            }
-            Err(e) => warn!(
-                "Failed to create buffer from mempoll: {}. Image won't be drawn...",
-                e
-            ),
-        }
+        // Attach the buffer to the surface and mark the entire surface as damaged
+        self.surface.attach(Some(&buffer), 0, 0);
+        self.surface
+            .damage_buffer(0, 0, width as i32, height as i32);
+
+        // Finally, commit the surface
+        self.surface.commit();
     }
 
     ///Same as draw, but decompresses the sent image first
@@ -156,27 +151,20 @@ impl Background {
         let width = self.dimensions.0 as i32;
         let height = self.dimensions.1 as i32;
 
-        match self
+        let buffer = self
             .pool
-            .buffer(width, height, stride, wl_shm::Format::Argb8888)
-        {
-            Ok((canvas, buffer)) => {
-                processor::comp_decomp::mixed_decomp(canvas, frame);
-                info!("Decompressed frame.");
+            .buffer(0, width, height, stride, wl_shm::Format::Argb8888);
+        let canvas = self.pool.mmap();
+        processor::comp_decomp::mixed_decomp(canvas, frame);
+        info!("Decompressed frame.");
 
-                // Attach the buffer to the surface and mark the entire surface as damaged
-                self.surface.attach(Some(&buffer), 0, 0);
-                self.surface
-                    .damage_buffer(0, 0, width as i32, height as i32);
+        // Attach the buffer to the surface and mark the entire surface as damaged
+        self.surface.attach(Some(&buffer), 0, 0);
+        self.surface
+            .damage_buffer(0, 0, width as i32, height as i32);
 
-                // Finally, commit the surface
-                self.surface.commit();
-            }
-            Err(e) => warn!(
-                "Failed to create buffer from mempoll: {}. Image won't be drawn...",
-                e
-            ),
-        }
+        // Finally, commit the surface
+        self.surface.commit();
     }
 }
 
@@ -284,7 +272,7 @@ fn create_backgrounds(
         // an output has been created, construct a surface for it
         let surface = env.create_surface().detach();
         let pool = env
-            .create_auto_pool()
+            .create_simple_pool(|_| {})
             .expect("Failed to create a memory pool!");
 
         debug!("New background with output: {:?}", info);
