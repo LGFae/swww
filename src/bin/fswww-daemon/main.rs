@@ -406,7 +406,7 @@ fn recv_socket_msg(
     }
 }
 
-///The format for the message is as follows:
+///The format for the img request is as follows:
 ///
 ///The first line contains the filter to use
 ///The second contains the name of the outputs to put the img in
@@ -490,7 +490,9 @@ fn send_request_to_processor(
             .unwrap()
             .dimensions;
         for bg in bgs.iter().filter(|bg| outputs.contains(&bg.output_name)) {
-            out_same_dim.push(bg.output_name.clone());
+            if bg.dimensions == dim {
+                out_same_dim.push(bg.output_name.clone());
+            }
         }
         outputs.retain(|o| !out_same_dim.contains(o));
         debug!(
