@@ -45,7 +45,9 @@ impl Processor {
         let (width, height) = request.1;
         let filter = request.2;
         let path = request.3;
+        let old_img = request.4;
 
+        //Remove all on going animations associated with these outputs
         let mut i = 0;
         while i < self.on_going_animations.len() {
             if self.on_going_animations[i].send(outputs.clone()).is_err() {
@@ -63,9 +65,13 @@ impl Processor {
             .expect("Img decoding failed, though this should be impossible...");
         let img = img_resize(img, width, height, filter);
 
-        //TODO: Also do apng and maybe try to find a way that doesn't clone stuff like this
+        //TODO: Also do apng
         if format == Some(ImageFormat::Gif) {
             self.process_gif(path, &img, width, height, outputs.clone(), filter);
+        }
+
+        if old_img.is_some() {
+            info!("There's an old image here! Beginning transition...");
         }
 
         debug!("Finished image processing!");

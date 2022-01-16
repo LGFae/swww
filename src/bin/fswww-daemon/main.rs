@@ -166,6 +166,17 @@ impl Background {
         // Finally, commit the surface
         self.surface.commit();
     }
+
+    fn get_current_img(&mut self) -> Option<Vec<u8>> {
+        if self.img.is_some() {
+            let (width, height) = self.dimensions;
+            let mut img = vec![0; (width * height * 4) as usize];
+            img.copy_from_slice(self.pool.mmap());
+            Some(img)
+        } else {
+            None
+        }
+    }
 }
 
 impl Drop for Background {
@@ -475,29 +486,32 @@ fn send_request_to_processor(
     while !outputs.is_empty() {
         let mut out_same_dim = Vec::with_capacity(outputs.len());
         out_same_dim.push(outputs.pop().unwrap());
-        let bg = bgs
-            .iter()
-            .find(|bg| bg.output_name == out_same_dim[0])
-            .unwrap();
-        let dim = bg.dimensions;
-        let old_img = &bg.img;
+
+        let dim;
+        let old_img_path;
+        let old_img;
+        {
+            let bg = bgs
+                .iter_mut()
+                .find(|bg| bg.output_name == out_same_dim[0])
+                .unwrap();
+            dim = bg.dimensions;
+            old_img_path = bg.img.clone();
+            old_img = bg.get_current_img();
+        }
+
         for bg in bgs.iter().filter(|bg| outputs.contains(&bg.output_name)) {
-            if bg.dimensions == dim || bg.img == *old_img {
+            if bg.dimensions == dim && bg.img == old_img_path {
                 out_same_dim.push(bg.output_name.clone());
             }
         }
         outputs.retain(|o| !out_same_dim.contains(o));
+
         debug!(
             "Sending message to processor: {:?}",
             (&out_same_dim, dim, img.to_path_buf())
         );
-
-        let result;
-        if old_img.is_some() {
-            result = processor.process((out_same_dim, dim, filter, img, None));
-        } else {
-            result = processor.process((out_same_dim, dim, filter, img, None));
-        }
+        let result = processor.process((out_same_dim, dim, filter, img, old_img));
         processing_results.push(result);
     }
 
