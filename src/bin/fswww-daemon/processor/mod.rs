@@ -10,7 +10,8 @@ use std::io::BufReader;
 use std::time::{Duration, Instant};
 use std::{path::Path, sync::mpsc, thread};
 
-pub type ProcessingResult = (Vec<String>, Vec<u8>);
+pub type ProcessorResult = (Vec<String>, Vec<u8>);
+type ProcessorRequest<'a> = (Vec<String>, (u32, u32), FilterType, &'a Path);
 
 pub mod comp_decomp;
 
@@ -26,14 +27,11 @@ impl Processor {
             frame_sender,
         }
     }
-    pub fn process(
-        &mut self,
-        msg: (Vec<String>, (u32, u32), FilterType, &Path),
-    ) -> ProcessingResult {
-        let outputs = msg.0;
-        let (width, height) = msg.1;
-        let filter = msg.2;
-        let path = msg.3;
+    pub fn process(&mut self, request: ProcessorRequest) -> ProcessorResult {
+        let outputs = request.0;
+        let (width, height) = request.1;
+        let filter = request.2;
+        let path = request.3;
 
         let mut i = 0;
         while i < self.on_going_animations.len() {

@@ -28,7 +28,7 @@ use std::{
 };
 
 mod processor;
-use processor::ProcessingResult;
+use processor::ProcessorResult;
 mod wayland;
 
 ///These correspond to the subcommands of fswww that involve talking to the daemon
@@ -479,7 +479,7 @@ fn send_request_to_processor(
     filter: FilterType,
     img: &Path,
     processor: &mut processor::Processor,
-) -> Vec<ProcessingResult> {
+) -> Vec<ProcessorResult> {
     let mut processing_results = Vec::new();
     while !outputs.is_empty() {
         let mut out_same_dim = Vec::with_capacity(outputs.len());
