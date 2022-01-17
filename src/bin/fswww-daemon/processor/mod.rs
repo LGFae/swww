@@ -63,23 +63,81 @@ impl Processor {
         let img = img_buf
             .decode()
             .expect("Img decoding failed, though this should be impossible...");
-        let img = img_resize(img, width, height, filter);
+        let img_resized = img_resize(img, width, height, filter);
 
-        if old_img.is_some() {
-            //Don't use threads, also, skip the final img, since we will just send it back from
-            //here anyway
-            //Note this means any transition can last, at most, around 10 sec (the timeout from the
-            //fswww client)
+        let mut transition = None;
+        let img;
+        if let Some(old_img) = old_img {
             info!("There's an old image here! Beginning transition...");
-        }
+            img = self.transition(old_img, &img_resized, &outputs);
+            transition = Some(self.on_going_animations.last().unwrap().clone());
+        } else {
+            img = img_resized.clone()
+        };
 
         //TODO: Also do apng
         if format == Some(ImageFormat::Gif) {
-            self.process_gif(path, &img, width, height, outputs.clone(), filter);
+            self.process_gif(
+                path,
+                &img_resized,
+                width,
+                height,
+                outputs.clone(),
+                filter,
+                transition,
+            );
         }
 
         debug!("Finished image processing!");
         (outputs, img)
+    }
+
+    //We need to:
+    //1 - send back the first version of the img imediately
+    //2 - begin the transition animation in a different thread
+    //3 - at the end of the transition animation, we send the img to process gif if it was
+    //  a gif
+    //
+    fn transition(&mut self, old_img: Vec<u8>, new_img: &[u8], outputs: &[String]) -> Vec<u8> {
+        let sender = self.frame_sender.clone();
+        let (stop_sender, stop_receiver) = mpsc::channel();
+        self.on_going_animations.push(stop_sender);
+
+        let mut done = true;
+        let mut transition_img = Vec::with_capacity(new_img.len());
+        let mut i = 0;
+        for old_pixel in old_img.chunks_exact(4) {
+            for j in 0..3 {
+                let k = i + j;
+                let distance = if old_pixel[j] > new_img[k] {
+                    old_pixel[j] - new_img[k]
+                } else {
+                    new_img[k] - old_pixel[j]
+                };
+                if distance < 20 {
+                    transition_img.push(new_img[k]);
+                } else if old_pixel[j] > new_img[k] {
+                    done = false;
+                    transition_img.push(old_pixel[j] - 20);
+                } else {
+                    done = false;
+                    transition_img.push(old_pixel[j] + 20);
+                }
+            }
+            transition_img.push(old_pixel[3]);
+            i += 4;
+        }
+
+        if !done {
+            let img = transition_img.clone();
+            let new_img = new_img.to_vec();
+            let outputs = outputs.to_vec();
+            thread::spawn(move || {
+                complete_transition(img, new_img, outputs, sender, stop_receiver)
+            });
+        }
+
+        transition_img
     }
 
     fn process_gif(
@@ -90,6 +148,7 @@ impl Processor {
         height: u32,
         outputs: Vec<String>,
         filter: FilterType,
+        transition: Option<mpsc::Sender<Vec<String>>>,
     ) {
         let sender = self.frame_sender.clone();
         let (stop_sender, stop_receiver) = mpsc::channel();
@@ -100,6 +159,11 @@ impl Processor {
         let first_frame = first_frame.to_vec();
 
         thread::spawn(move || {
+            if let Some(transition) = transition {
+                while transition.send(vec![]).is_ok() {
+                    thread::sleep(Duration::from_millis(30));
+                }
+            }
             animate(
                 gif_buf,
                 first_frame,
@@ -112,6 +176,73 @@ impl Processor {
             )
         });
     }
+}
+
+//TODO: Gif animation after transition
+fn complete_transition(
+    mut old_img: Vec<u8>,
+    goal: Vec<u8>,
+    mut outputs: Vec<String>,
+    sender: Sender<(Vec<String>, Vec<u8>)>,
+    receiver: mpsc::Receiver<Vec<String>>,
+) {
+    let mut done = true;
+    let mut now = Instant::now();
+    let duration = Duration::from_millis(30); //A little less than 30 fps
+    loop {
+        let mut transition_img = Vec::with_capacity(goal.len());
+        let mut i = 0;
+        for old_pixel in old_img.chunks_exact(4) {
+            for j in 0..3 {
+                let k = i + j;
+                let distance = if old_pixel[j] > goal[k] {
+                    old_pixel[j] - goal[k]
+                } else {
+                    goal[k] - old_pixel[j]
+                };
+                if distance < 20 {
+                    transition_img.push(goal[k]);
+                } else if old_pixel[j] > goal[k] {
+                    done = false;
+                    transition_img.push(old_pixel[j] - 20);
+                } else {
+                    done = false;
+                    transition_img.push(old_pixel[j] + 20);
+                }
+            }
+            transition_img.push(old_pixel[3]);
+            i += 4;
+        }
+
+        let mut compressed_img = comp_decomp::mixed_comp(&old_img, &transition_img);
+        comp_decomp::mixed_decomp(&mut old_img, &compressed_img);
+        compressed_img.shrink_to_fit();
+
+        match receiver.recv_timeout(duration.saturating_sub(now.elapsed())) {
+            Ok(out_to_remove) => {
+                outputs.retain(|o| !out_to_remove.contains(o));
+                if outputs.is_empty() {
+                    return;
+                }
+                thread::sleep(duration.saturating_sub(now.elapsed()));
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                debug!("Receiver disconnected! Stopping animation...");
+                return;
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => (),
+        };
+        sender
+            .send((outputs.clone(), compressed_img))
+            .unwrap_or_else(|_| return);
+        now = Instant::now();
+        if done {
+            break;
+        } else {
+            done = true;
+        }
+    }
+    info!("Transition has finished!");
 }
 
 fn animate(
