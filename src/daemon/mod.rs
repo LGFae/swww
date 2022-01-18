@@ -365,23 +365,19 @@ fn recv_socket_msg(
             let mut answer = Ok(String::new());
             match request {
                 Ok(Fswww::Kill) => loop_signal.stop(),
-                Ok(Fswww::Img {
-                    outputs,
-                    filter,
-                    file,
-                }) => {
-                    let outputs = get_real_outputs(&mut bgs, &outputs);
+                Ok(Fswww::Img(img)) => {
+                    let outputs = get_real_outputs(&mut bgs, &img.outputs);
                     if outputs.is_empty() {
                         answer = Err("None of the outputs sent are valid.".to_string());
                         send_answer(answer, &listener);
                         return Ok(calloop::PostAction::Continue);
                     }
-                    let filter = get_filter_from_str(&filter.to_string());
+                    let filter = get_filter_from_str(&img.filter.to_string());
                     for result in
-                        send_request_to_processor(&mut bgs, outputs, filter, &file, processor)
+                        send_request_to_processor(&mut bgs, outputs, filter, &img.path, processor)
                     {
                         debug!("Received img as processing result");
-                        handle_recv_img(&mut bgs, &result, &file);
+                        handle_recv_img(&mut bgs, &result, &img.path);
                     }
                 }
                 Ok(Fswww::Init { .. }) => (),

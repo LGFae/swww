@@ -53,33 +53,7 @@ impl std::fmt::Display for Filter {
 ///make it as resource efficient as possible.
 pub enum Fswww {
     /// Send an image (or animated gif) for the daemon to display
-    Img {
-        /// Path to the image to display
-        #[structopt(parse(from_os_str))]
-        file: PathBuf,
-
-        /// Comma separated list of outputs to display the image at. If it isn't set, the image is
-        /// displayed on all outputs
-        #[structopt(short, long, default_value = "")]
-        outputs: String,
-
-        ///Filter to use when scaling images (run fswww img --help to see options).
-        ///
-        ///Available options are:
-        ///
-        ///Nearest | Triangle | CatmullRom | Gaussian | Lanczos3
-        ///
-        ///These are offered by the image crate (https://crates.io/crates/image). 'Nearest' is
-        ///what I recommend for pixel art stuff, and ONLY for pixel art stuff. It is also the
-        ///fastest filter.
-        ///
-        ///For non pixel art stuff, I would usually recommend one of the last three, though some
-        ///experimentation will be necessary to see which one you like best. Also note they are
-        ///all slower than Nearest. For some examples, see
-        ///https://docs.rs/image/0.23.14/image/imageops/enum.FilterType.html.
-        #[structopt(short, long, default_value = "Lanczos3")]
-        filter: Filter,
-    },
+    Img(Img),
 
     /// Initialize the daemon. Exits if there is already a daemon running.
     ///
@@ -100,6 +74,35 @@ pub enum Fswww {
     ///out valid values for the <fswww-img --outputs> option. If you want more detailed information
     ///about your outputs, I would recommed trying wlr-randr.
     Query,
+}
+
+#[derive(Debug, StructOpt)]
+pub struct Img {
+    /// Path to the image to display
+    #[structopt(parse(from_os_str))]
+    pub path: PathBuf,
+
+    /// Comma separated list of outputs to display the image at. If it isn't set, the image is
+    /// displayed on all outputs
+    #[structopt(short, long, default_value = "")]
+    pub outputs: String,
+
+    ///Filter to use when scaling images (run fswww img --help to see options).
+    ///
+    ///Available options are:
+    ///
+    ///Nearest | Triangle | CatmullRom | Gaussian | Lanczos3
+    ///
+    ///These are offered by the image crate (https://crates.io/crates/image). 'Nearest' is
+    ///what I recommend for pixel art stuff, and ONLY for pixel art stuff. It is also the
+    ///fastest filter.
+    ///
+    ///For non pixel art stuff, I would usually recommend one of the last three, though some
+    ///experimentation will be necessary to see which one you like best. Also note they are
+    ///all slower than Nearest. For some examples, see
+    ///https://docs.rs/image/0.23.14/image/imageops/enum.FilterType.html.
+    #[structopt(short, long, default_value = "Lanczos3")]
+    pub filter: Filter,
 }
 
 impl Fswww {
@@ -129,11 +132,7 @@ impl Fswww {
                     return Ok(false);
                 }
             }
-            Fswww::Img {
-                file,
-                outputs,
-                filter,
-            } => send_img(file, outputs, filter),
+            Fswww::Img(img) => send_img(&img),
             Fswww::Query => send_request("__QUERY__"),
         }
     }
@@ -159,11 +158,11 @@ impl std::str::FromStr for Fswww {
                     }
 
                     //Note, these can never fail, since we test them before sending
-                    Ok(Self::Img {
+                    Ok(Self::Img(Img {
                         outputs: outputs.unwrap().to_string(),
                         filter: Filter::from_str(filter.unwrap())?,
-                        file: PathBuf::from_str(file.unwrap()).unwrap(),
-                    })
+                        path: PathBuf::from_str(file.unwrap()).unwrap(),
+                    }))
                 }
                 _ => Err(format!("unrecognized command: {}", cmd)),
             },
@@ -187,18 +186,21 @@ fn spawn_daemon(no_daemon: bool) -> Result<(), String> {
 }
 
 //TODO: saner way of sending stuff
-fn send_img(path: &Path, outputs: &str, filter: &Filter) -> Result<bool, String> {
-    if let Err(e) = image::open(&path) {
-        return Err(format!("Cannot open img {:?}: {}", path, e));
+fn send_img(img: &Img) -> Result<bool, String> {
+    if let Err(e) = image::open(&img.path) {
+        return Err(format!("Cannot open img {:?}: {}", img.path, e));
     }
-    let abs_path = match path.canonicalize() {
+    let abs_path = match img.path.canonicalize() {
         Ok(p) => p,
         Err(e) => {
             return Err(format!("Failed to find absolute path: {}", e));
         }
     };
     let img_path_str = abs_path.to_str().unwrap();
-    let msg = format!("__IMG__\n{}\n{}\n{}\n", filter, outputs, img_path_str);
+    let msg = format!(
+        "__IMG__\n{}\n{}\n{}\n",
+        img.filter, img.outputs, img_path_str
+    );
     send_request(&msg)
 }
 
