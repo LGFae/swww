@@ -24,19 +24,14 @@ use std::{
     os::unix::net::UnixListener,
     path::{Path, PathBuf},
     rc::Rc,
+    str::FromStr,
 };
+
+use crate::cli::Fswww;
 
 mod processor;
 use processor::ProcessorResult;
 mod wayland;
-
-///These correspond to the subcommands of fswww that involve talking to the daemon
-enum Request {
-    Kill,
-    Img((Vec<String>, FilterType, PathBuf)),
-    Init,
-    Query,
-}
 
 #[derive(PartialEq, Copy, Clone)]
 enum RenderEvent {
@@ -366,20 +361,31 @@ fn recv_socket_msg(
                 error!("Failed to read socket: {}", e);
                 return Err(e);
             };
-            let request = decode_request(&mut bgs, &buf);
+            let request = Fswww::from_str(&buf);
             let mut answer = Ok(String::new());
             match request {
-                Ok(Request::Kill) => loop_signal.stop(),
-                Ok(Request::Img((outputs, filter, img))) => {
+                Ok(Fswww::Kill) => loop_signal.stop(),
+                Ok(Fswww::Img {
+                    outputs,
+                    filter,
+                    file,
+                }) => {
+                    let outputs = get_real_outputs(&mut bgs, &outputs);
+                    if outputs.is_empty() {
+                        answer = Err("None of the outputs sent are valid.".to_string());
+                        send_answer(answer, &listener);
+                        return Ok(calloop::PostAction::Continue);
+                    }
+                    let filter = get_filter_from_str(&filter.to_string());
                     for result in
-                        send_request_to_processor(&mut bgs, outputs, filter, &img, processor)
+                        send_request_to_processor(&mut bgs, outputs, filter, &file, processor)
                     {
                         debug!("Received img as processing result");
-                        handle_recv_img(&mut bgs, &result, &img);
+                        handle_recv_img(&mut bgs, &result, &file);
                     }
                 }
-                Ok(Request::Init) => (),
-                Ok(Request::Query) => answer = Ok(outputs_name_and_dim(&mut bgs)),
+                Ok(Fswww::Init { .. }) => (),
+                Ok(Fswww::Query) => answer = Ok(outputs_name_and_dim(&mut bgs)),
                 Err(e) => answer = Err(e),
             }
             send_answer(answer, &listener);
@@ -389,45 +395,9 @@ fn recv_socket_msg(
     }
 }
 
-///The format for the img request is as follows:
-///
-///The first line contains the filter to use
-///The second contains the name of the outputs to put the img in
-///The third contains the path to the image
-fn decode_request(bgs: &mut RefMut<Vec<Background>>, msg: &str) -> Result<Request, String> {
-    let mut lines = msg.lines();
-    match lines.next() {
-        Some(cmd) => match cmd {
-            "__INIT__" => Ok(Request::Init),
-            "__KILL__" => Ok(Request::Kill),
-            "__QUERY__" => Ok(Request::Query),
-            "__IMG__" => {
-                let filter = lines.next();
-                let outputs = lines.next();
-                let img = lines.next();
-
-                if filter.is_none() || outputs.is_none() || img.is_none() {
-                    return Err("badly formatted request".to_string());
-                }
-
-                build_img_request(bgs, filter.unwrap(), outputs.unwrap(), img.unwrap())
-            }
-            _ => Err(format!("unrecognized command: {}", cmd)),
-        },
-        None => Err("empty request!".to_string()),
-    }
-}
-
 ///Verifies that all outputs exist
-fn build_img_request(
-    bgs: &mut RefMut<Vec<Background>>,
-    filter: &str,
-    outputs: &str,
-    img: &str,
-) -> Result<Request, String> {
-    let filter = get_filter_from_str(filter);
-    let img = Path::new(img).to_path_buf();
-
+///Also puts in all outpus if an empty string was offered
+fn get_real_outputs(bgs: &mut RefMut<Vec<Background>>, outputs: &str) -> Vec<String> {
     let mut real_outputs: Vec<String> = Vec::with_capacity(bgs.len());
     //An empty line means all outputs
     if outputs.is_empty() {
@@ -445,14 +415,14 @@ fn build_img_request(
             }
 
             if !exists {
-                return Err(format!("output {} doesn't exist", output));
+                error!("Output {} does not exist!", output);
             } else if !real_outputs.contains(&output) {
                 real_outputs.push(output);
             }
         }
     }
     debug!("Requesting img for outputs: {:?}", real_outputs);
-    Ok(Request::Img((real_outputs, filter, img)))
+    real_outputs
 }
 
 ///Returns one result per output with same dimesions and image
@@ -545,7 +515,7 @@ fn outputs_name_and_dim(bgs: &mut RefMut<Vec<Background>>) -> String {
     str
 }
 
-fn send_answer(ok: Result<String, String>, listener: &UnixListener) {
+fn send_answer(answer: Result<String, String>, listener: &UnixListener) {
     let mut socket;
 
     match listener.accept() {
@@ -559,7 +529,7 @@ fn send_answer(ok: Result<String, String>, listener: &UnixListener) {
         }
     }
 
-    let send_result = match ok {
+    let send_result = match answer {
         Ok(msg) => socket.write_all(format!("Ok\n{}", msg).as_bytes()),
         Err(err) => socket.write_all(format!("Err\n{}", err).as_bytes()),
     };

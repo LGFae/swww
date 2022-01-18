@@ -20,7 +20,7 @@ pub enum Filter {
 impl std::str::FromStr for Filter {
     type Err = String;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn from_str(s: &str) -> Result<Self, String> {
         match s {
             "Nearest" => Ok(Self::Nearest),
             "Triangle" => Ok(Self::Triangle),
@@ -139,20 +139,38 @@ impl Fswww {
     }
 }
 
-//impl std::str::FromStr for Fswww {
-//    type Err = String;
-//
-//    fn from_str(s: &str) -> Result<Self, Self::Err> {
-//        match s {
-//            "Nearest" => Ok(Self::Nearest),
-//            "Triangle" => Ok(Self::Triangle),
-//            "CatmullRom" => Ok(Self::CatmullRom),
-//            "Gaussian" => Ok(Self::Gaussian),
-//            "Lanczos3" => Ok(Self::Lanczos3),
-//            _ => Err("Non existing filter".to_string()),
-//        }
-//    }
-//}
+impl std::str::FromStr for Fswww {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut lines = s.lines();
+        match lines.next() {
+            Some(cmd) => match cmd {
+                "__INIT__" => Ok(Self::Init { no_daemon: false }),
+                "__KILL__" => Ok(Self::Kill),
+                "__QUERY__" => Ok(Self::Query),
+                "__IMG__" => {
+                    let filter = lines.next();
+                    let outputs = lines.next();
+                    let file = lines.next();
+
+                    if filter.is_none() || outputs.is_none() || file.is_none() {
+                        return Err("badly formatted img request".to_string());
+                    }
+
+                    //Note, these can never fail, since we test them before sending
+                    Ok(Self::Img {
+                        outputs: outputs.unwrap().to_string(),
+                        filter: Filter::from_str(filter.unwrap())?,
+                        file: PathBuf::from_str(file.unwrap()).unwrap(),
+                    })
+                }
+                _ => Err(format!("unrecognized command: {}", cmd)),
+            },
+            None => Err("empty request!".to_string()),
+        }
+    }
+}
 
 fn spawn_daemon(no_daemon: bool) -> Result<(), String> {
     if no_daemon {
@@ -168,6 +186,7 @@ fn spawn_daemon(no_daemon: bool) -> Result<(), String> {
     }
 }
 
+//TODO: saner way of sending stuff
 fn send_img(path: &Path, outputs: &str, filter: &Filter) -> Result<bool, String> {
     if let Err(e) = image::open(&path) {
         return Err(format!("Cannot open img {:?}: {}", path, e));
