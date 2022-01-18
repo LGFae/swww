@@ -9,6 +9,8 @@ use std::{
 };
 use structopt::StructOpt;
 
+mod daemon;
+
 #[derive(Debug)]
 enum Filter {
     Nearest,
@@ -102,25 +104,16 @@ enum Fswww {
 }
 
 fn spawn_daemon(no_daemon: bool) -> Result<(), String> {
-    let mut cmd = Command::new("fswww-daemon");
-    let spawn_err =
-        "Failed to initialize fswww-daemon. Are you sure it is installed (and in the PATH)?";
     if no_daemon {
-        if cmd.output().is_err() {
-            return Err(spawn_err.to_string());
-        };
+        daemon::main();
     }
-    match fork::fork() {
-        Ok(fork::Fork::Child) => match fork::daemon(false, false) {
-            Ok(fork::Fork::Child) => {
-                cmd.output().expect(spawn_err);
-                Ok(())
-            }
-            Ok(fork::Fork::Parent(_)) => Ok(()),
-            Err(_) => Err("Couldn't daemonize forked process!".to_string()),
-        },
+    match fork::daemon(false, false) {
+        Ok(fork::Fork::Child) => {
+            daemon::main();
+            Ok(())
+        }
         Ok(fork::Fork::Parent(_)) => Ok(()),
-        Err(_) => Err("Couldn't create child process.".to_string()),
+        Err(_) => Err("Couldn't daemonize process!".to_string()),
     }
 }
 
