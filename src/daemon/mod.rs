@@ -1,4 +1,3 @@
-use image::imageops::FilterType;
 use log::{debug, error, info};
 use simplelog::{ColorChoice, LevelFilter, TermLogger, TerminalMode};
 
@@ -30,7 +29,6 @@ use std::{
 use crate::cli::Fswww;
 
 mod processor;
-use processor::ProcessorResult;
 mod wayland;
 
 #[derive(PartialEq, Copy, Clone)]
@@ -39,7 +37,7 @@ enum RenderEvent {
     Closed,
 }
 
-struct Background {
+pub struct Background {
     output_name: String,
     surface: wl_surface::WlSurface,
     layer_surface: Main<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1>,
@@ -365,21 +363,15 @@ fn recv_socket_msg(
             let mut answer = Ok(String::new());
             match request {
                 Ok(Fswww::Kill) => loop_signal.stop(),
-                Ok(Fswww::Img(img)) => {
-                    let outputs = get_real_outputs(&mut bgs, &img.outputs);
-                    if outputs.is_empty() {
-                        answer = Err("None of the outputs sent are valid.".to_string());
-                        send_answer(answer, &listener);
-                        return Ok(calloop::PostAction::Continue);
+                Ok(Fswww::Img(img)) => match processor.process(&mut bgs, &img) {
+                    Ok(results) => {
+                        for result in results {
+                            debug!("Received img as processing result");
+                            handle_recv_img(&mut bgs, &result, &img.path);
+                        }
                     }
-                    let filter = img.filter.get_image_filter();
-                    for result in
-                        send_request_to_processor(&mut bgs, outputs, filter, &img.path, processor)
-                    {
-                        debug!("Received img as processing result");
-                        handle_recv_img(&mut bgs, &result, &img.path);
-                    }
-                }
+                    Err(e) => answer = Err(e),
+                },
                 Ok(Fswww::Init { .. }) => (),
                 Ok(Fswww::Query) => answer = Ok(outputs_name_and_dim(&mut bgs)),
                 Err(e) => answer = Err(e),
@@ -389,81 +381,6 @@ fn recv_socket_msg(
         }
         Err(e) => Err(e),
     }
-}
-
-///Verifies that all outputs exist
-///Also puts in all outpus if an empty string was offered
-fn get_real_outputs(bgs: &mut RefMut<Vec<Background>>, outputs: &str) -> Vec<String> {
-    let mut real_outputs: Vec<String> = Vec::with_capacity(bgs.len());
-    //An empty line means all outputs
-    if outputs.is_empty() {
-        for bg in bgs.iter() {
-            real_outputs.push(bg.output_name.to_owned());
-        }
-    } else {
-        for output in outputs.split(',') {
-            let output = output.to_string();
-            let mut exists = false;
-            for bg in bgs.iter() {
-                if output == bg.output_name {
-                    exists = true;
-                }
-            }
-
-            if !exists {
-                error!("Output {} does not exist!", output);
-            } else if !real_outputs.contains(&output) {
-                real_outputs.push(output);
-            }
-        }
-    }
-    debug!("Requesting img for outputs: {:?}", real_outputs);
-    real_outputs
-}
-
-///Returns one result per output with same dimesions and image
-fn send_request_to_processor(
-    bgs: &mut RefMut<Vec<Background>>,
-    mut outputs: Vec<String>,
-    filter: FilterType,
-    img: &Path,
-    processor: &mut processor::Processor,
-) -> Vec<ProcessorResult> {
-    let mut processing_results = Vec::new();
-
-    while !outputs.is_empty() {
-        let mut out_same_dim = Vec::with_capacity(outputs.len());
-        out_same_dim.push(outputs.pop().unwrap());
-
-        let dim;
-        let old_img_path;
-        let old_img;
-        {
-            let bg = bgs
-                .iter_mut()
-                .find(|bg| bg.output_name == out_same_dim[0])
-                .unwrap();
-            dim = bg.dimensions;
-            old_img_path = bg.img.clone();
-            old_img = bg.get_current_img();
-        }
-
-        for bg in bgs.iter().filter(|bg| outputs.contains(&bg.output_name)) {
-            if bg.dimensions == dim && bg.img == old_img_path {
-                out_same_dim.push(bg.output_name.clone());
-            }
-        }
-        outputs.retain(|o| !out_same_dim.contains(o));
-
-        debug!(
-            "Sending message to processor: {:?}",
-            (&out_same_dim, dim, img.to_path_buf())
-        );
-        let result = processor.process((out_same_dim, dim, filter, img, old_img));
-        processing_results.push(result);
-    }
-
-    processing_results
 }
 
 fn handle_recv_img(

@@ -2,29 +2,20 @@ use image::gif::GifDecoder;
 use image::io::Reader;
 use image::{self, imageops::FilterType, GenericImageView};
 use image::{AnimationDecoder, ImageFormat};
-use log::{debug, info};
+use log::{debug, error, info};
 
 use smithay_client_toolkit::reexports::calloop::channel::Sender;
 
+use std::cell::RefMut;
 use std::io::BufReader;
 use std::time::{Duration, Instant};
 use std::{path::Path, sync::mpsc, thread};
 
-pub type ProcessorResult = (Vec<String>, Vec<u8>);
+use crate::cli::Img;
 
-///These represent, in order:
-///Outputs to display img on
-///Dimensions of img
-///Filter to use when scaling
-///Path to img
-///Previous img (if any)
-type ProcessorRequest<'a> = (
-    Vec<String>,
-    (u32, u32),
-    FilterType,
-    &'a Path,
-    Option<Vec<u8>>,
-);
+use super::Background;
+
+pub type ProcessorResult = Result<Vec<(Vec<String>, Vec<u8>)>, String>;
 
 pub mod comp_decomp;
 
@@ -40,56 +31,66 @@ impl Processor {
             frame_sender,
         }
     }
-    pub fn process(&mut self, request: ProcessorRequest) -> ProcessorResult {
-        let outputs = request.0;
-        let (width, height) = request.1;
-        let filter = request.2;
-        let path = request.3;
-        let old_img = request.4;
+    pub fn process(&mut self, bgs: &mut RefMut<Vec<Background>>, request: &Img) -> ProcessorResult {
+        let outputs = get_real_outputs(bgs, &request.outputs);
+        if outputs.is_empty() {
+            error!("None of the outputs sent were valid.");
+            return Err("None of the outputs sent are valid.".to_string());
+        }
+        let filter = request.filter.get_image_filter();
+        let path = &request.path;
 
-        //Remove all on going animations associated with these outputs
+        let mut results = Vec::new();
+        for group in get_outputs_groups(bgs, outputs) {
+            let bg = bgs
+                .iter_mut()
+                .find(|bg| bg.output_name == group[0])
+                .unwrap();
+
+            let (width, height) = bg.dimensions;
+            let old_img = bg.get_current_img();
+
+            self.stop_animations(&group);
+            //We check if we can open and read the image before sending it, so these should never fail
+            let img_buf = image::io::Reader::open(path)
+                .expect("Failed to open image, though this should be impossible...");
+            let format = img_buf.format();
+            let img = img_buf
+                .decode()
+                .expect("Img decoding failed, though this should be impossible...");
+            let img_resized = img_resize(img, width, height, filter);
+
+            let mut transition = None;
+            if let Some(old_img) = old_img {
+                info!("There's an old image here! Beginning transition...");
+                results.push((
+                    group.clone(),
+                    self.transition(old_img, &img_resized, &group),
+                ));
+                transition = Some(self.on_going_animations.last().unwrap().clone());
+            } else {
+                results.push((group.clone(), img_resized.clone()));
+            };
+
+            //TODO: Also do apng
+            if format == Some(ImageFormat::Gif) {
+                self.process_gif(path, img_resized, width, height, group, filter, transition);
+            }
+        }
+
+        debug!("Finished image processing!");
+        Ok(results)
+    }
+
+    fn stop_animations(&mut self, to_stop: &[String]) {
         let mut i = 0;
         while i < self.on_going_animations.len() {
-            if self.on_going_animations[i].send(outputs.clone()).is_err() {
+            if self.on_going_animations[i].send(to_stop.to_vec()).is_err() {
                 self.on_going_animations.remove(i);
             } else {
                 i += 1;
             }
         }
-        //We check if we can open and read the image before sending it, so these should never fail
-        let img_buf = image::io::Reader::open(&path)
-            .expect("Failed to open image, though this should be impossible...");
-        let format = img_buf.format();
-        let img = img_buf
-            .decode()
-            .expect("Img decoding failed, though this should be impossible...");
-        let img_resized = img_resize(img, width, height, filter);
-
-        let mut transition = None;
-        let img;
-        if let Some(old_img) = old_img {
-            info!("There's an old image here! Beginning transition...");
-            img = self.transition(old_img, &img_resized, &outputs);
-            transition = Some(self.on_going_animations.last().unwrap().clone());
-        } else {
-            img = img_resized.clone()
-        };
-
-        //TODO: Also do apng
-        if format == Some(ImageFormat::Gif) {
-            self.process_gif(
-                path,
-                &img_resized,
-                width,
-                height,
-                outputs.clone(),
-                filter,
-                transition,
-            );
-        }
-
-        debug!("Finished image processing!");
-        (outputs, img)
     }
 
     //We need to:
@@ -143,7 +144,7 @@ impl Processor {
     fn process_gif(
         &mut self,
         gif_path: &Path,
-        first_frame: &[u8],
+        first_frame: Vec<u8>,
         width: u32,
         height: u32,
         outputs: Vec<String>,
@@ -155,8 +156,6 @@ impl Processor {
         self.on_going_animations.push(stop_sender);
 
         let gif_buf = image::io::Reader::open(gif_path).unwrap();
-
-        let first_frame = first_frame.to_vec();
 
         thread::spawn(move || {
             if let Some(transition) = transition {
@@ -178,7 +177,72 @@ impl Processor {
     }
 }
 
-//TODO: Gif animation after transition
+///Verifies that all outputs exist
+///Also puts in all outpus if an empty string was offered
+fn get_real_outputs(bgs: &mut RefMut<Vec<Background>>, outputs: &str) -> Vec<String> {
+    let mut real_outputs: Vec<String> = Vec::with_capacity(bgs.len());
+    //An empty line means all outputs
+    if outputs.is_empty() {
+        for bg in bgs.iter() {
+            real_outputs.push(bg.output_name.to_owned());
+        }
+    } else {
+        for output in outputs.split(',') {
+            let output = output.to_string();
+            let mut exists = false;
+            for bg in bgs.iter() {
+                if output == bg.output_name {
+                    exists = true;
+                }
+            }
+
+            if !exists {
+                error!("Output {} does not exist!", output);
+            } else if !real_outputs.contains(&output) {
+                real_outputs.push(output);
+            }
+        }
+    }
+    real_outputs
+}
+
+///Returns one result per output with same dimesions and image
+fn get_outputs_groups(
+    bgs: &mut RefMut<Vec<Background>>,
+    mut outputs: Vec<String>,
+) -> Vec<Vec<String>> {
+    let mut outputs_groups = Vec::new();
+
+    while !outputs.is_empty() {
+        let mut out_same_group = Vec::with_capacity(outputs.len());
+        out_same_group.push(outputs.pop().unwrap());
+
+        let dim;
+        let old_img_path;
+        {
+            let bg = bgs
+                .iter_mut()
+                .find(|bg| bg.output_name == out_same_group[0])
+                .unwrap();
+            dim = bg.dimensions;
+            old_img_path = bg.img.clone();
+        }
+
+        for bg in bgs.iter().filter(|bg| outputs.contains(&bg.output_name)) {
+            if bg.dimensions == dim && bg.img == old_img_path {
+                out_same_group.push(bg.output_name.clone());
+            }
+        }
+        outputs.retain(|o| !out_same_group.contains(o));
+        debug!(
+            "Output group: {:?}, {:?}, {:?}",
+            &out_same_group, dim, old_img_path
+        );
+        outputs_groups.push(out_same_group);
+    }
+    outputs_groups
+}
+
 fn complete_transition(
     mut old_img: Vec<u8>,
     goal: Vec<u8>,
