@@ -1,7 +1,6 @@
 use image::imageops::FilterType;
 use log::{debug, error, info};
 use simplelog::{ColorChoice, LevelFilter, TermLogger, TerminalMode};
-use structopt::StructOpt;
 
 use smithay_client_toolkit::{
     environment::Environment,
@@ -186,24 +185,7 @@ impl Drop for Background {
     }
 }
 
-#[derive(Debug, StructOpt)]
-#[structopt(name = "fswww-daemon")]
-///The fswww daemon
-///
-///You shouldn't have to interact directly with the daemon, but use fswww init to start it
-///instead. fswww will automatically fork the process for you, unless you run it with the
-///--no-daemon option.
-///
-///Note that, if, for some reason, you decide to run fswww-daemon manually yourself, there is no
-///option to fork it; you may only pass -h or --help to see this message, or -V or --version to see
-///the version you are running. The only advantage of running the daemon this way is to see its
-///log, and even then, in the release version we only log warnings and errors, so you won't be
-///seeing much (hopefully).
-struct Daemon {}
-
 pub fn main() {
-    Daemon::from_args();
-
     let listener = make_socket(); //Must make this first because the file we log to is in there
 
     make_logger();
