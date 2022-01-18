@@ -44,6 +44,18 @@ impl std::fmt::Display for Filter {
     }
 }
 
+impl Filter {
+    pub fn get_image_filter(&self) -> image::imageops::FilterType {
+        match self {
+            Self::Nearest => image::imageops::FilterType::Nearest,
+            Self::Triangle => image::imageops::FilterType::Triangle,
+            Self::CatmullRom => image::imageops::FilterType::CatmullRom,
+            Self::Gaussian => image::imageops::FilterType::Gaussian,
+            Self::Lanczos3 => image::imageops::FilterType::Lanczos3,
+        }
+    }
+}
+
 #[derive(Debug, StructOpt)]
 #[structopt(name = "fswww")]
 ///The Final Solution to your Wayland Wallpaper Woes

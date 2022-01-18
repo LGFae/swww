@@ -372,7 +372,7 @@ fn recv_socket_msg(
                         send_answer(answer, &listener);
                         return Ok(calloop::PostAction::Continue);
                     }
-                    let filter = get_filter_from_str(&img.filter.to_string());
+                    let filter = img.filter.get_image_filter();
                     for result in
                         send_request_to_processor(&mut bgs, outputs, filter, &img.path, processor)
                     {
@@ -464,17 +464,6 @@ fn send_request_to_processor(
     }
 
     processing_results
-}
-
-fn get_filter_from_str(s: &str) -> FilterType {
-    match s {
-        "Nearest" => FilterType::Nearest,
-        "Triangle" => FilterType::Triangle,
-        "CatmullRom" => FilterType::CatmullRom,
-        "Gaussian" => FilterType::Gaussian,
-        "Lanczos3" => FilterType::Lanczos3,
-        _ => unreachable!(), //This is impossible because we test it before sending
-    }
 }
 
 fn handle_recv_img(
