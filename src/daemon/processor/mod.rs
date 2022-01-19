@@ -7,11 +7,12 @@ use log::{debug, error, info};
 use smithay_client_toolkit::reexports::calloop::channel::Sender;
 
 use std::cell::RefMut;
-use std::io::BufReader;
+use std::io::{BufReader, Read};
+use std::process::Stdio;
 use std::time::{Duration, Instant};
 use std::{path::Path, sync::mpsc, thread};
 
-use crate::cli::Img;
+use crate::cli::{Img, Stream};
 
 use super::Background;
 
@@ -31,6 +32,7 @@ impl Processor {
             frame_sender,
         }
     }
+
     pub fn process(&mut self, bgs: &mut RefMut<Vec<Background>>, request: &Img) -> ProcessorResult {
         let outputs = get_real_outputs(bgs, &request.outputs);
         if outputs.is_empty() {
@@ -92,6 +94,50 @@ impl Processor {
                 i += 1;
             }
         }
+    }
+
+    //TODO: The loop
+    pub fn start_stream(
+        &mut self,
+        bgs: &mut RefMut<Vec<Background>>,
+        request: &Stream,
+    ) -> ProcessorResult {
+        let outputs = get_real_outputs(bgs, &request.outputs);
+        if outputs.is_empty() {
+            error!("None of the outputs sent were valid.");
+            return Err("None of the outputs sent are valid.".to_string());
+        }
+
+        let mut results = Vec::new();
+        for group in get_outputs_groups(bgs, outputs) {
+            let bg = bgs
+                .iter_mut()
+                .find(|bg| bg.output_name == group[0])
+                .unwrap();
+
+            let (width, height) = bg.dimensions;
+            let child = std::process::Command::new(&request.path)
+                .arg(width.to_string())
+                .arg(height.to_string())
+                .stdout(Stdio::piped())
+                .spawn();
+            if let Err(e) = child {
+                return Err(format!("Failed to spawn child process: {}", e));
+            }
+            let mut child = child.unwrap();
+            let stdout = child.stdout.take();
+            if stdout.is_none() {
+                return Err("Couldn't capture child process stdout.".to_string());
+            }
+            let mut stdout = stdout.unwrap();
+
+            let mut stream_reader = vec![0; width as usize * height as usize * 4];
+            match stdout.read_exact(&mut stream_reader) {
+                Ok(()) => results.push((group, stream_reader.clone())),
+                Err(e) => return Err(format!("Failed to read child stdout: {}", e)),
+            };
+        }
+        Ok(results)
     }
 
     fn transition(&mut self, old_img: Vec<u8>, new_img: &[u8], outputs: &[String]) -> Vec<u8> {
@@ -170,6 +216,15 @@ impl Processor {
             )
         });
     }
+}
+
+fn loop_child_process(
+    child: std::process::Child,
+    mut outputs: Vec<String>,
+    stream_reader: Vec<u8>,
+    sender: Sender<(Vec<String>, Vec<u8>)>,
+    receiver: mpsc::Receiver<Vec<String>>,
+) {
 }
 
 ///Verifies that all outputs exist

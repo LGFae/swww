@@ -220,6 +220,21 @@ impl std::str::FromStr for Fswww {
                         no_transition: no_transition.unwrap().parse().unwrap(),
                     }))
                 }
+                "__STREAM__" => {
+                    let file = lines.next();
+                    let outputs = lines.next();
+                    let diff_mode = lines.next();
+
+                    if diff_mode.is_none() || outputs.is_none() || file.is_none() {
+                        return Err("badly formatted img request".to_string());
+                    }
+
+                    Ok(Self::Stream(Stream {
+                        path: PathBuf::from_str(file.unwrap()).unwrap(),
+                        outputs: outputs.unwrap().to_string(),
+                        diff_mode: diff_mode.unwrap().parse().unwrap(),
+                    }))
+                }
                 _ => Err(format!("unrecognized command: {}", cmd)),
             },
             None => Err("empty request!".to_string()),
