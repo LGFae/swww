@@ -83,7 +83,7 @@ impl Processor {
         Ok(results)
     }
 
-    fn stop_animations(&mut self, to_stop: &[String]) {
+    pub fn stop_animations(&mut self, to_stop: &[String]) {
         let mut i = 0;
         while i < self.on_going_animations.len() {
             if self.on_going_animations[i].send(to_stop.to_vec()).is_err() {

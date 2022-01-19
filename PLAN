@@ -34,10 +34,6 @@ These are the steps we will take while developing this program:
 
 	The processor might fail on some conditions. But the daemon shouldn't be panicking on those. Fix that.
 
-LONG TERM:
-	Make the transition effects when switching rendered files DONE
-		When done, communication protocol should be updated to allow for transition effects
-
 UNSURE:
 	With all this done, adapt communication procedure to allow for streams
 

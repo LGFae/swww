@@ -179,9 +179,9 @@ impl Drop for Background {
 }
 
 pub fn main() {
-    let listener = make_socket(); //Must make this first because the file we log to is in there
-
     make_logger();
+
+    let listener = make_socket();
     debug!(
         "Made socket in {:?} and initalized logger. Starting daemon...",
         listener.local_addr().unwrap()
@@ -294,7 +294,7 @@ fn run_main_loop(
     listener: UnixListener,
 ) {
     let (frame_sender, frame_receiver) = calloop::channel::channel();
-    let mut processor = processor::Processor::new(frame_sender);
+    let processor = Rc::new(RefCell::new(processor::Processor::new(frame_sender)));
     let mut event_loop = calloop::EventLoop::<calloop::LoopSignal>::try_new().unwrap();
     let event_handle = event_loop.handle();
 
@@ -310,6 +310,7 @@ fn run_main_loop(
         .insert_source(
             calloop::generic::Generic::new(listener, calloop::Interest::READ, calloop::Mode::Level),
             |_, listener, loop_signal| {
+                let mut processor = processor.borrow_mut();
                 recv_socket_msg(bgs.borrow_mut(), listener, loop_signal, &mut processor)
             },
         )
@@ -332,6 +333,8 @@ fn run_main_loop(
             let mut i = 0;
             while i != bgs.len() {
                 if bgs[i].handle_events() {
+                    let mut processor = processor.borrow_mut();
+                    processor.stop_animations(&[bgs[i].output_name.clone()]);
                     bgs.remove(i);
                 } else {
                     i += 1;
