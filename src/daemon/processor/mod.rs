@@ -175,7 +175,8 @@ impl Processor {
             let new_img = new_img.to_vec();
             let outputs = outputs.to_vec();
             thread::spawn(move || {
-                complete_transition(img, new_img, outputs, sender, stop_receiver)
+                complete_transition(img, new_img, outputs, sender, stop_receiver);
+                info!("Transition has finished!");
             });
         }
 
@@ -213,7 +214,8 @@ impl Processor {
                 filter,
                 sender,
                 stop_receiver,
-            )
+            );
+            info!("Stopped animation.");
         });
     }
 }
@@ -356,7 +358,6 @@ fn complete_transition(
             done = true;
         }
     }
-    info!("Transition has finished!");
 }
 
 fn animate(

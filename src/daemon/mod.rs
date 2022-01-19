@@ -1,4 +1,4 @@
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use simplelog::{ColorChoice, LevelFilter, TermLogger, TerminalMode};
 
 use smithay_client_toolkit::{
@@ -411,6 +411,9 @@ fn handle_recv_img(
 
 fn handle_recv_frame(bgs: &mut RefMut<Vec<Background>>, msg: &(Vec<String>, Vec<u8>)) {
     let (outputs, frame) = msg;
+    if outputs.is_empty() {
+        warn!("Received empty list of outputs from processor, which should be impossible");
+    }
     for bg in bgs.iter_mut() {
         if outputs.contains(&bg.output_name) {
             bg.animate(frame);
