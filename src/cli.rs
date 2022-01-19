@@ -115,6 +115,12 @@ pub struct Img {
     ///https://docs.rs/image/0.23.14/image/imageops/enum.FilterType.html.
     #[structopt(short, long, default_value = "Lanczos3")]
     pub filter: Filter,
+
+    ///By default, fswww will try to smooth transitions between images. If you'd rather the image
+    ///be loaded immediately, you may activate this flag
+    ///
+    #[structopt(long)]
+    pub no_transition: bool,
 }
 
 impl Fswww {
@@ -161,19 +167,20 @@ impl std::str::FromStr for Fswww {
                 "__KILL__" => Ok(Self::Kill),
                 "__QUERY__" => Ok(Self::Query),
                 "__IMG__" => {
-                    let filter = lines.next();
-                    let outputs = lines.next();
                     let file = lines.next();
+                    let outputs = lines.next();
+                    let filter = lines.next();
+                    let no_transition = lines.next();
 
                     if filter.is_none() || outputs.is_none() || file.is_none() {
                         return Err("badly formatted img request".to_string());
                     }
 
-                    //Note, these can never fail, since we test them before sending
                     Ok(Self::Img(Img {
+                        path: PathBuf::from_str(file.unwrap()).unwrap(),
                         outputs: outputs.unwrap().to_string(),
                         filter: Filter::from_str(filter.unwrap())?,
-                        path: PathBuf::from_str(file.unwrap()).unwrap(),
+                        no_transition: no_transition.unwrap().parse().unwrap(),
                     }))
                 }
                 _ => Err(format!("unrecognized command: {}", cmd)),
@@ -197,7 +204,7 @@ fn spawn_daemon(no_daemon: bool) -> Result<(), String> {
     }
 }
 
-//TODO: saner way of sending stuff
+///This tests if the img exsits and can be openned before sending it
 fn send_img(img: &Img) -> Result<bool, String> {
     if let Err(e) = image::open(&img.path) {
         return Err(format!("Cannot open img {:?}: {}", img.path, e));
@@ -210,8 +217,8 @@ fn send_img(img: &Img) -> Result<bool, String> {
     };
     let img_path_str = abs_path.to_str().unwrap();
     let msg = format!(
-        "__IMG__\n{}\n{}\n{}\n",
-        img.filter, img.outputs, img_path_str
+        "__IMG__\n{}\n{}\n{}\n{}\n",
+        img_path_str, img.outputs, img.filter, img.no_transition
     );
     send_request(&msg)
 }

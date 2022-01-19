@@ -10,20 +10,17 @@ const TEST_IMGS: [&str; 3] = [
     "test_images/test2.jpg",
 ];
 
-/// # HOW TO TO RUN THESE TESTS
-///
-/// Make sure fswww-daemon is running in a different terminal. You should track its log there to
-/// see if anything weird pops up. Then, run `cargo test`.
-///
-/// By the time they end, they should automatically kill the daemon.
-#[ignore]
 fn main() {
+    init_daemon();
+    init_daemon_twice();
     sending_imgs();
     sending_img_that_does_not_exist();
     sending_imgs_with_filter();
+    sending_img_with_filter_that_does_not_exist();
     let output = query_outputs();
     sending_img_to_individual_monitors(&output);
     sending_img_to_monitor_that_does_not_exist();
+    sending_img_with_no_transition();
     killing_daemon();
     cmd().arg("query").assert().failure(); //daemon is dead, so this should fail
 }
@@ -32,6 +29,15 @@ fn sending_imgs() {
     for img in TEST_IMGS {
         cmd().arg("img").arg(img).assert().success();
     }
+}
+
+fn init_daemon() {
+    cmd().arg("init").assert().success();
+}
+
+///This should fail since we already have an instance running
+fn init_daemon_twice() {
+    cmd().arg("init").assert().failure();
 }
 
 fn sending_img_that_does_not_exist() {
@@ -74,6 +80,24 @@ fn sending_imgs_with_filter() {
             .assert()
             .success();
     }
+}
+fn sending_img_with_filter_that_does_not_exist() {
+    cmd()
+        .arg("img")
+        .arg(TEST_IMGS[0])
+        .arg("-f")
+        .arg("AHOY")
+        .assert()
+        .failure();
+}
+
+fn sending_img_with_no_transition() {
+    cmd()
+        .arg("img")
+        .arg(TEST_IMGS[0])
+        .arg("--no-transition")
+        .assert()
+        .success();
 }
 
 fn killing_daemon() {

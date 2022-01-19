@@ -61,7 +61,8 @@ impl Processor {
             let img_resized = img_resize(img, width, height, filter);
 
             let mut transition = None;
-            if let Some(old_img) = old_img {
+            if old_img.is_some() && !request.no_transition {
+                let old_img = old_img.unwrap();
                 info!("There's an old image here! Beginning transition...");
                 results.push((
                     group.clone(),
