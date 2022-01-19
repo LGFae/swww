@@ -40,3 +40,5 @@ LONG TERM:
 
 UNSURE:
 	With all this done, adapt communication procedure to allow for streams
+
+PROBLEM: for some reason, memory usage seems to increase unbounded as we switch images during runtime
