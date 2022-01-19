@@ -1,6 +1,6 @@
 use std::{
-    io::{Read, Write},
-    os::unix::net::UnixStream,
+    io::Write,
+    os::unix::{net::UnixStream, prelude::PermissionsExt},
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -86,6 +86,10 @@ pub enum Fswww {
     ///out valid values for the <fswww-img --outputs> option. If you want more detailed information
     ///about your outputs, I would recommed trying wlr-randr.
     Query,
+
+    ///Display an arbitrary stream of bytes, printed by a separate program, as the wallpaper. The
+    ///program will be initialized with the outputs width and height as arguments, in that order.
+    Stream(Stream),
 }
 
 #[derive(Debug, StructOpt)]
@@ -123,6 +127,38 @@ pub struct Img {
     pub no_transition: bool,
 }
 
+#[derive(Debug, StructOpt)]
+pub struct Stream {
+    /// Path to the program that will offer the stream to display
+    #[structopt(parse(from_os_str))]
+    pub path: PathBuf,
+
+    /// Comma separated list of outputs to display the stream at. If it isn't set, the stream will
+    /// be displayed on all outputs
+    #[structopt(short, long, default_value = "")]
+    pub outputs: String,
+
+    /// Set this flag if the program will print the DIFFERENCE between one frame and the last, as
+    /// opposed to simply printing the whole frame everytime. Run --help for extra details.
+    ///
+    /// The format of the byte vector is as follows:
+    ///
+    /// First we have a header byte, that will indicate which of the next pair of bytes must be
+    /// redrawn. For example, assuming we are at the start of the vector, the byte
+    ///
+    /// 1010 0000
+    ///
+    /// would indicate that pixels in position 0, 1, 4 and 5 have changed.
+    ///
+    /// Following the header we have the bytes of the changed pixels. In the example above, we
+    /// would first have the new bytes of pixel in position 0, followed by the new bytes in pixel
+    /// of position 1, followed by those of pixel in position 4, and so on.
+    ///
+    /// After this is done we rinse and repeat for the next group of 16 pixels.
+    #[structopt(short, long)]
+    pub diff_mode: bool,
+}
+
 impl Fswww {
     ///Returns whether we should wait for response or not
     pub fn execute(&self) -> Result<bool, String> {
@@ -141,7 +177,7 @@ impl Fswww {
             }
             Fswww::Kill => {
                 kill()?;
-                wait_for_response()?;
+                super::wait_for_response()?;
                 let socket_path = get_socket_path();
                 if let Err(e) = std::fs::remove_file(socket_path) {
                     return Err(format!("{}", e));
@@ -152,6 +188,7 @@ impl Fswww {
             }
             Fswww::Img(img) => send_img(&img),
             Fswww::Query => send_request("__QUERY__"),
+            Fswww::Stream(stream) => send_stream(&stream),
         }
     }
 }
@@ -223,38 +260,45 @@ fn send_img(img: &Img) -> Result<bool, String> {
     send_request(&msg)
 }
 
+///Tests if file passed exists and is executable
+fn send_stream(stream: &Stream) -> Result<bool, String> {
+    let metadata = std::fs::metadata(&stream.path);
+    if let Err(e) = metadata {
+        return Err(format!(
+            "Cannot read metadata from {:?}: {}",
+            stream.path, e
+        ));
+    }
+    let metadata = metadata.unwrap();
+    if !metadata.is_file() {
+        return Err(format!("{:?} is not a file!", stream.path));
+    }
+    let permissions = metadata.permissions();
+    let is_exe = permissions.mode() & 0o111 != 0;
+    if !is_exe {
+        return Err(format!("File {:?} is not executable!", stream.path));
+    }
+
+    let abs_path = match stream.path.canonicalize() {
+        Ok(p) => p,
+        Err(e) => {
+            return Err(format!("Failed to find absolute path: {}", e));
+        }
+    };
+    let stream_path_str = abs_path.to_str().unwrap();
+    let msg = format!(
+        "__STREAM__\n{}\n{}\n{}\n",
+        stream_path_str, stream.outputs, stream.diff_mode
+    );
+    send_request(&msg)
+}
+
 fn kill() -> Result<(), String> {
     let mut socket = get_socket()?;
     match socket.write(b"__KILL__") {
         Ok(_) => Ok(()),
         Err(e) => Err(e.to_string()),
     }
-}
-
-fn wait_for_response() -> Result<(), String> {
-    let mut socket = get_socket()?;
-    let mut buf = String::with_capacity(100);
-    let mut error = String::new();
-
-    for _ in 0..20 {
-        match socket.read_to_string(&mut buf) {
-            Ok(_) => {
-                if buf.starts_with("Ok\n") {
-                    if buf.len() > 3 {
-                        print!("{}", &buf[3..]);
-                    }
-                    return Ok(());
-                } else if buf.starts_with("Err\n") {
-                    return Err(format!("daemon sent back: {}", &buf[4..]));
-                } else {
-                    return Err(format!("daemon returned a badly formatted answer: {}", buf));
-                }
-            }
-            Err(e) => error = e.to_string(),
-        }
-        std::thread::sleep(Duration::from_millis(500));
-    }
-    Err("Error while waiting for response: ".to_string() + &error)
 }
 
 fn send_request(request: &str) -> Result<bool, String> {

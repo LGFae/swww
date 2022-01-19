@@ -377,6 +377,7 @@ fn recv_socket_msg(
                 },
                 Ok(Fswww::Init { .. }) => (),
                 Ok(Fswww::Query) => answer = Ok(outputs_name_and_dim(&mut bgs)),
+                Ok(Fswww::Stream(stream)) => (),
                 Err(e) => answer = Err(e),
             }
             send_answer(answer, &listener);
