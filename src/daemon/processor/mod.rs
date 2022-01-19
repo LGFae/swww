@@ -93,12 +93,6 @@ impl Processor {
         }
     }
 
-    //We need to:
-    //1 - send back the first version of the img imediately
-    //2 - begin the transition animation in a different thread
-    //3 - at the end of the transition animation, we send the img to process gif if it was
-    //  a gif
-    //
     fn transition(&mut self, old_img: Vec<u8>, new_img: &[u8], outputs: &[String]) -> Vec<u8> {
         let sender = self.frame_sender.clone();
         let (stop_sender, stop_receiver) = mpsc::channel();
