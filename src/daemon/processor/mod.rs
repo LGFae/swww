@@ -342,27 +342,17 @@ fn complete_transition(
         comp_decomp::mixed_decomp(&mut old_img, &compressed_img);
         compressed_img.shrink_to_fit();
 
-        match receiver.recv_timeout(duration.saturating_sub(now.elapsed())) {
-            Ok(out_to_remove) => {
-                outputs.retain(|o| !out_to_remove.contains(o));
-                if outputs.is_empty() {
-                    return;
-                }
-                thread::sleep(duration.saturating_sub(now.elapsed()));
-            }
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                debug!("Receiver disconnected! Stopping animation...");
-                return;
-            }
-            Err(mpsc::RecvTimeoutError::Timeout) => (),
-        };
-        sender
-            .send((outputs.clone(), compressed_img))
-            .unwrap_or_else(|_| return);
-        now = Instant::now();
+        send_frame(
+            compressed_img,
+            &mut outputs,
+            duration.saturating_sub(now.elapsed()),
+            &sender,
+            &receiver,
+        );
         if done {
             break;
         } else {
+            now = Instant::now();
             done = true;
         }
     }
@@ -407,22 +397,13 @@ fn animate(
 
         cached_frames.push((compressed_frame.clone(), duration));
 
-        match receiver.recv_timeout(duration.saturating_sub(now.elapsed())) {
-            Ok(out_to_remove) => {
-                outputs.retain(|o| !out_to_remove.contains(o));
-                if outputs.is_empty() {
-                    return;
-                }
-            }
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                debug!("Receiver disconnected! Stopping animation...");
-                return;
-            }
-            Err(mpsc::RecvTimeoutError::Timeout) => (),
-        };
-        sender
-            .send((outputs.clone(), compressed_frame))
-            .unwrap_or_else(|_| return);
+        send_frame(
+            compressed_frame,
+            &mut outputs,
+            duration.saturating_sub(now.elapsed()),
+            &sender,
+            &receiver,
+        );
         now = Instant::now();
     }
     //Add the first frame we got earlier:
@@ -447,19 +428,13 @@ fn loop_animation(
     info!("Finished caching the frames!");
     loop {
         for (cached_img, duration) in cached_frames {
-            match receiver.recv_timeout(duration.saturating_sub(now.elapsed())) {
-                Ok(out_to_remove) => {
-                    outputs.retain(|o| !out_to_remove.contains(o));
-                    if outputs.is_empty() {
-                        return;
-                    }
-                }
-                Err(mpsc::RecvTimeoutError::Disconnected) => return,
-                Err(mpsc::RecvTimeoutError::Timeout) => (),
-            };
-            sender
-                .send((outputs.clone(), cached_img.clone()))
-                .unwrap_or_else(|_| return);
+            send_frame(
+                cached_img.clone(),
+                &mut outputs,
+                duration.saturating_sub(now.elapsed()),
+                &sender,
+                &receiver,
+            );
             now = Instant::now();
         }
     }
@@ -483,4 +458,28 @@ fn img_resize(img: image::DynamicImage, width: u32, height: u32, filter: FilterT
     // The ARGB is 'little endian', so here we must  put the order
     // of bytes 'in reverse', so it needs to be BGRA.
     resized_img.into_bgra8().into_raw()
+}
+
+///Returns whether the calling function should exit or not
+fn send_frame(
+    frame: Vec<u8>,
+    outputs: &mut Vec<String>,
+    timeout: Duration,
+    sender: &Sender<(Vec<String>, Vec<u8>)>,
+    receiver: &mpsc::Receiver<Vec<String>>,
+) -> bool {
+    match receiver.recv_timeout(timeout) {
+        Ok(out_to_remove) => {
+            outputs.retain(|o| !out_to_remove.contains(o));
+            if outputs.is_empty() {
+                return true;
+            }
+        }
+        Err(mpsc::RecvTimeoutError::Disconnected) => return true,
+        Err(mpsc::RecvTimeoutError::Timeout) => (),
+    };
+    if sender.send((outputs.clone(), frame)).is_err() {
+        return true;
+    }
+    false
 }
