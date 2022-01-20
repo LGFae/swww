@@ -50,7 +50,6 @@ impl Processor {
                 .unwrap();
 
             let (width, height) = bg.dimensions;
-            let old_img = bg.get_current_img();
 
             self.stop_animations(&group);
             //We check if we can open and read the image before sending it, so these should never fail
@@ -63,8 +62,8 @@ impl Processor {
             let img_resized = img_resize(img, width, height, filter);
 
             let mut transition = None;
-            if old_img.is_some() && !request.no_transition {
-                let old_img = old_img.unwrap();
+            if !request.no_transition {
+                let old_img = bg.get_current_img();
                 info!("There's an old image here! Beginning transition...");
                 results.push((
                     group.clone(),

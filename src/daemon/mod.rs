@@ -181,12 +181,8 @@ impl Background {
         self.surface.commit();
     }
 
-    fn get_current_img(&mut self) -> Option<Vec<u8>> {
-        if self.img.is_some() {
-            Some(self.pool.mmap().to_vec())
-        } else {
-            None
-        }
+    fn get_current_img(&mut self) -> Vec<u8> {
+        self.pool.mmap().to_vec()
     }
 }
 
