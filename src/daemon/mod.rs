@@ -107,7 +107,9 @@ impl Background {
         match self.next_render_event.take() {
             Some(RenderEvent::Closed) => true,
             Some(RenderEvent::Configure { width, height }) => {
-                self.pool.resize((width * height * 4) as usize).unwrap();
+                self.pool
+                    .resize(width as usize * height as usize * 4)
+                    .unwrap();
                 self.dimensions = (width, height);
                 false
             }
@@ -130,8 +132,7 @@ impl Background {
 
         // Attach the buffer to the surface and mark the entire surface as damaged
         self.surface.attach(Some(&buffer), 0, 0);
-        self.surface
-            .damage_buffer(0, 0, width as i32, height as i32);
+        self.surface.damage_buffer(0, 0, width, height);
 
         // Finally, commit the surface
         self.surface.commit();
@@ -152,8 +153,7 @@ impl Background {
 
         // Attach the buffer to the surface and mark the entire surface as damaged
         self.surface.attach(Some(&buffer), 0, 0);
-        self.surface
-            .damage_buffer(0, 0, width as i32, height as i32);
+        self.surface.damage_buffer(0, 0, width, height);
 
         // Finally, commit the surface
         self.surface.commit();
