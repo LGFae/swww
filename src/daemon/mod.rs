@@ -107,14 +107,36 @@ impl Background {
         match self.next_render_event.take() {
             Some(RenderEvent::Closed) => true,
             Some(RenderEvent::Configure { width, height }) => {
-                self.pool
-                    .resize(width as usize * height as usize * 4)
-                    .unwrap();
                 self.dimensions = (width, height);
+                let width = width as usize;
+                let height = height as usize;
+                self.pool.resize(width * height * 4).unwrap();
+                self.clear([0, 0, 0]);
                 false
             }
             None => false,
         }
+    }
+
+    fn clear(&mut self, color: [u8; 3]) {
+        let stride = 4 * self.dimensions.0 as i32;
+        let width = self.dimensions.0 as i32;
+        let height = self.dimensions.1 as i32;
+
+        let buffer = self
+            .pool
+            .buffer(0, width, height, stride, wl_shm::Format::Argb8888);
+
+        let canvas = self.pool.mmap();
+        for pixel in canvas.chunks_exact_mut(4) {
+            pixel[0] = color[2];
+            pixel[1] = color[1];
+            pixel[2] = color[0];
+            pixel[3] = 255;
+        }
+        self.surface.attach(Some(&buffer), 0, 0);
+        self.surface.damage_buffer(0, 0, width, height);
+        self.surface.commit();
     }
 
     fn draw(&mut self, img: &[u8]) {
