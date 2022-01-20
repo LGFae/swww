@@ -110,6 +110,7 @@ impl Processor {
 
         let mut results = Vec::new();
         for group in get_outputs_groups(bgs, outputs) {
+            self.stop_animations(&group);
             let bg = bgs
                 .iter_mut()
                 .find(|bg| bg.output_name == group[0])
