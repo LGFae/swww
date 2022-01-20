@@ -8,7 +8,7 @@ use smithay_client_toolkit::reexports::calloop::channel::Sender;
 
 use std::cell::RefMut;
 use std::io::{BufReader, Read};
-use std::process::Stdio;
+use std::process::{ChildStdout, Stdio};
 use std::time::{Duration, Instant};
 use std::{path::Path, sync::mpsc, thread};
 
@@ -221,12 +221,20 @@ impl Processor {
 }
 
 fn loop_child_process(
-    child: std::process::Child,
+    mut child: std::process::Child,
     mut outputs: Vec<String>,
-    stream_reader: Vec<u8>,
+    mut child_stdout: ChildStdout,
+    mut stream_reader: Vec<u8>,
     sender: Sender<(Vec<String>, Vec<u8>)>,
     receiver: mpsc::Receiver<Vec<String>>,
 ) {
+    while let Ok(None) = child.try_wait() {}
+
+    if let Ok(bytes) = child_stdout.read_to_end(&mut stream_reader) {
+        if bytes == stream_reader.len() {
+            //Send the final stuff
+        }
+    };
 }
 
 ///Verifies that all outputs exist
