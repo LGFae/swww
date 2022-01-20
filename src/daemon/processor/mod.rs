@@ -419,13 +419,9 @@ fn animate(
         now = Instant::now();
     }
     //Add the first frame we got earlier:
-    cached_frames.insert(
-        0,
-        (
-            comp_decomp::mixed_comp(&canvas, &first_frame),
-            duration_first_frame,
-        ),
-    );
+    let mut first_frame = comp_decomp::mixed_comp(&canvas, &first_frame);
+    first_frame.shrink_to_fit();
+    cached_frames.insert(0, (first_frame, duration_first_frame));
     if cached_frames.len() == 1 {
         return; //This means we only had a static image anyway
     } else {
