@@ -418,33 +418,17 @@ fn animate(
         now = Instant::now();
     }
     //Add the first frame we got earlier:
-    cached_frames.push((
-        comp_decomp::mixed_comp(&canvas, &first_frame),
-        duration_first_frame,
-    ));
+    cached_frames.insert(
+        0,
+        (
+            comp_decomp::mixed_comp(&canvas, &first_frame),
+            duration_first_frame,
+        ),
+    );
     if cached_frames.len() == 1 {
         return; //This means we only had a static image anyway
     } else {
         cached_frames.shrink_to_fit();
-        let duration = cached_frames.last().unwrap().1;
-        match receiver.recv_timeout(duration.saturating_sub(now.elapsed())) {
-            Ok(out_to_remove) => {
-                outputs.retain(|o| !out_to_remove.contains(o));
-                if outputs.is_empty() {
-                    return;
-                }
-            }
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                debug!("Receiver disconnected! Stopping animation...");
-                return;
-            }
-            Err(mpsc::RecvTimeoutError::Timeout) => (),
-        };
-        sender
-            .send((outputs.clone(), cached_frames.last().unwrap().0.clone()))
-            .unwrap_or_else(|_| return);
-        now = Instant::now();
-
         loop_animation(&cached_frames, outputs, sender, receiver, now);
     }
 }
