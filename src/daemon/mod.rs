@@ -161,10 +161,7 @@ impl Background {
 
     fn get_current_img(&mut self) -> Option<Vec<u8>> {
         if self.img.is_some() {
-            let (width, height) = self.dimensions;
-            let mut img = vec![0; (width * height * 4) as usize];
-            img.copy_from_slice(self.pool.mmap());
-            Some(img)
+            Some(self.pool.mmap().to_vec())
         } else {
             None
         }
