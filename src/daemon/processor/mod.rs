@@ -95,7 +95,6 @@ impl Processor {
         }
     }
 
-    //TODO: The loop
     pub fn start_stream(
         &mut self,
         bgs: &mut RefMut<Vec<Background>>,
@@ -133,9 +132,16 @@ impl Processor {
 
             let mut stream_reader = vec![0; width as usize * height as usize * 4];
             match stdout.read_exact(&mut stream_reader) {
-                Ok(()) => results.push((group, stream_reader.clone())),
+                Ok(()) => results.push((group.clone(), stream_reader.clone())),
                 Err(e) => return Err(format!("Failed to read child stdout: {}", e)),
             };
+
+            let sender = self.frame_sender.clone();
+            let (stop_sender, stop_receiver) = mpsc::channel();
+            self.on_going_animations.push(stop_sender);
+            thread::spawn(|| {
+                loop_child_process(child, group, stdout, stream_reader, sender, stop_receiver)
+            });
         }
         Ok(results)
     }
@@ -228,13 +234,39 @@ fn loop_child_process(
     sender: Sender<(Vec<String>, Vec<u8>)>,
     receiver: mpsc::Receiver<Vec<String>>,
 ) {
-    while let Ok(None) = child.try_wait() {}
+    let dur = Duration::new(0, 0); //This is just for us to send to the send_frame function
+    loop {
+        match child.try_wait() {
+            Ok(None) => match child_stdout.read_exact(&mut stream_reader) {
+                Ok(()) => {
+                    if send_frame(stream_reader.clone(), &mut outputs, dur, &sender, &receiver) {
+                        if let Err(e) = child.kill() {
+                            error!("Error killing child: {}", e);
+                        };
+                        return;
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to read stdout of child process during loop: {}", e);
+                    break;
+                }
+            },
+            Ok(status) => {
+                info!("Child process exited with code: {:?}", status);
+                break;
+            }
+            Err(e) => {
+                error!("Error while waiting for child process: {}", e);
+                break;
+            }
+        }
+    }
 
     if let Ok(bytes) = child_stdout.read_to_end(&mut stream_reader) {
         if bytes == stream_reader.len() {
-            //Send the final stuff
+            send_frame(stream_reader, &mut outputs, dur, &sender, &receiver);
         }
-    };
+    }
 }
 
 ///Verifies that all outputs exist

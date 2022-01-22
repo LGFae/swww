@@ -431,7 +431,13 @@ fn handle_recv_frame(bgs: &mut RefMut<Vec<Background>>, msg: &(Vec<String>, Vec<
     }
     for bg in bgs.iter_mut() {
         if outputs.contains(&bg.output_name) {
-            bg.animate(frame);
+            let (w, h) = bg.dimensions;
+            //If the frame is the size of the entire buffer, then we got an uncompressed img
+            if frame.len() == w as usize * h as usize * 4 {
+                bg.draw(frame);
+            } else {
+                bg.animate(frame);
+            }
         }
     }
 }
