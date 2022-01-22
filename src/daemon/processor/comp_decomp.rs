@@ -41,7 +41,7 @@ fn diff_byte_header(prev: &[u8], curr: &[u8]) -> Vec<u8> {
                     curr[i + 5],
                     curr[i + 6],
                 ]);
-                header |= 0x80 >> (k % 8);
+                header |= 0x80 >> k;
                 break;
             }
         }
