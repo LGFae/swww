@@ -212,7 +212,7 @@ pub fn main() {
 
     let (env, display, queue) = wayland::make_wayland_environment();
 
-    let mut bgs = Rc::new(RefCell::new(Vec::new()));
+    let bgs = Rc::new(RefCell::new(Vec::new()));
 
     let layer_shell = env.require_global::<zwlr_layer_shell_v1::ZwlrLayerShellV1>();
 
@@ -233,8 +233,8 @@ pub fn main() {
     let _listner_handle =
         env.listen_for_outputs(move |output, info, _| output_handler(output, info));
 
-    //NOTE: we can't move these into the function because it causes a segfault
-    run_main_loop(&mut bgs, queue, &display, listener);
+    //NOTE: we can't move display into the function because it causes a segfault
+    run_main_loop(bgs, queue, &display, listener);
     info!("Finished running event loop. Exiting...");
 }
 
@@ -311,7 +311,7 @@ fn make_socket() -> UnixListener {
 
 ///bgs and display can't be moved into here because it causes a segfault
 fn run_main_loop(
-    bgs: &mut Rc<RefCell<Vec<Background>>>,
+    bgs: Rc<RefCell<Vec<Background>>>,
     queue: EventQueue,
     display: &Display,
     listener: UnixListener,
