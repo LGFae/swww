@@ -144,6 +144,10 @@ impl Background {
         let width = self.dimensions.0 as i32;
         let height = self.dimensions.1 as i32;
 
+        info!(
+            "Current state of mempoll for output {}:{:?}",
+            self.output_name, self.pool
+        );
         let buffer = self
             .pool
             .buffer(0, width, height, stride, wl_shm::Format::Argb8888);
@@ -166,6 +170,10 @@ impl Background {
         let width = self.dimensions.0 as i32;
         let height = self.dimensions.1 as i32;
 
+        info!(
+            "Current state of mempoll for output {}:{:?}",
+            self.output_name, self.pool
+        );
         let buffer = self
             .pool
             .buffer(0, width, height, stride, wl_shm::Format::Argb8888);
