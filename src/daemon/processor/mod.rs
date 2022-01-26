@@ -62,16 +62,19 @@ impl Processor {
             let img_resized = img_resize(img, width, height, filter);
 
             let mut transition = None;
+            let old_img = bg.get_current_img();
             if !request.no_transition {
-                let old_img = bg.get_current_img();
                 info!("There's an old image here! Beginning transition...");
                 results.push((
                     group.clone(),
-                    self.transition(old_img, &img_resized, &group),
+                    self.transition(&old_img, &img_resized, &group),
                 ));
                 transition = Some(self.on_going_animations.last().unwrap().clone());
             } else {
-                results.push((group.clone(), img_resized.clone()));
+                results.push((
+                    group.clone(),
+                    comp_decomp::mixed_comp(&old_img, &img_resized),
+                ));
             };
 
             //TODO: Also do apng
@@ -146,7 +149,7 @@ impl Processor {
         Ok(results)
     }
 
-    fn transition(&mut self, old_img: Vec<u8>, new_img: &[u8], outputs: &[String]) -> Vec<u8> {
+    fn transition(&mut self, old_img: &[u8], new_img: &[u8], outputs: &[String]) -> Vec<u8> {
         let sender = self.frame_sender.clone();
         let (stop_sender, stop_receiver) = mpsc::channel();
         self.on_going_animations.push(stop_sender);
@@ -186,7 +189,7 @@ impl Processor {
             });
         }
 
-        transition_img
+        comp_decomp::mixed_comp(&old_img, &transition_img)
     }
 
     fn process_gif(

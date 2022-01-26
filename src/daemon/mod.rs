@@ -152,40 +152,11 @@ impl Background {
             .pool
             .buffer(0, width, height, stride, wl_shm::Format::Argb8888);
         let canvas = self.pool.mmap();
+        processor::comp_decomp::mixed_decomp(canvas, img);
+        info!("Decompressed img.");
 
-        canvas.copy_from_slice(img);
-        info!("Copied img to buffer.");
-
-        // Attach the buffer to the surface and mark the entire surface as damaged
         self.surface.attach(Some(&buffer), 0, 0);
         self.surface.damage_buffer(0, 0, width, height);
-
-        // Finally, commit the surface
-        self.surface.commit();
-    }
-
-    ///Same as draw, but decompresses the sent image first
-    fn animate(&mut self, frame: &[u8]) {
-        let stride = 4 * self.dimensions.0 as i32;
-        let width = self.dimensions.0 as i32;
-        let height = self.dimensions.1 as i32;
-
-        info!(
-            "Current state of mempoll for output {}:{:?}",
-            self.output_name, self.pool
-        );
-        let buffer = self
-            .pool
-            .buffer(0, width, height, stride, wl_shm::Format::Argb8888);
-        let canvas = self.pool.mmap();
-        processor::comp_decomp::mixed_decomp(canvas, frame);
-        info!("Decompressed frame.");
-
-        // Attach the buffer to the surface and mark the entire surface as damaged
-        self.surface.attach(Some(&buffer), 0, 0);
-        self.surface.damage_buffer(0, 0, width, height);
-
-        // Finally, commit the surface
         self.surface.commit();
     }
 
@@ -423,7 +394,7 @@ fn handle_recv_img(
     msg: &(Vec<String>, Vec<u8>),
     img_path: Option<&Path>,
 ) {
-    let (outputs, frame) = msg;
+    let (outputs, img) = msg;
     if outputs.is_empty() {
         warn!("Received empty list of outputs from processor, which should be impossible");
     }
@@ -431,10 +402,8 @@ fn handle_recv_img(
         if outputs.contains(&bg.output_name) {
             if let Some(path) = img_path {
                 bg.img = Some(path.to_path_buf());
-                bg.draw(frame);
-            } else {
-                bg.animate(frame);
             }
+            bg.draw(img);
         }
     }
 }
