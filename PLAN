@@ -1,1 +1,2 @@
+PROBLEM: STREAM must compress result before sending it back!
 PROBLEM: for some reason, memory usage seems to increase unbounded as we switch images during runtime
