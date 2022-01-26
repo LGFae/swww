@@ -323,7 +323,7 @@ fn run_main_loop(
 
     event_handle
         .insert_source(frame_receiver, |evt, _, loop_signal| match evt {
-            channel::Event::Msg(msg) => handle_recv_frame(&mut bgs.borrow_mut(), &msg),
+            channel::Event::Msg(msg) => handle_recv_img(&mut bgs.borrow_mut(), &msg, None),
             channel::Event::Closed => loop_signal.stop(),
         })
         .unwrap();
@@ -393,7 +393,7 @@ fn recv_socket_msg(
                     Ok(results) => {
                         for result in results {
                             debug!("Received img as processing result");
-                            handle_recv_img(&mut bgs, &result, &img.path);
+                            handle_recv_img(&mut bgs, &result, Some(&img.path));
                         }
                     }
                     Err(e) => answer = Err(e),
@@ -404,7 +404,7 @@ fn recv_socket_msg(
                     Ok(results) => {
                         for result in results {
                             debug!("Received img as processing result");
-                            handle_recv_img(&mut bgs, &result, &stream.path);
+                            handle_recv_img(&mut bgs, &result, Some(&stream.path));
                         }
                     }
                     Err(e) => answer = Err(e),
@@ -421,27 +421,16 @@ fn recv_socket_msg(
 fn handle_recv_img(
     bgs: &mut RefMut<Vec<Background>>,
     msg: &(Vec<String>, Vec<u8>),
-    img_path: &Path,
+    img_path: Option<&Path>,
 ) {
-    let (outputs, img) = msg;
-    for bg in bgs.iter_mut() {
-        if outputs.contains(&bg.output_name) {
-            bg.img = Some(img_path.to_path_buf());
-            bg.draw(img);
-        }
-    }
-}
-
-fn handle_recv_frame(bgs: &mut RefMut<Vec<Background>>, msg: &(Vec<String>, Vec<u8>)) {
     let (outputs, frame) = msg;
     if outputs.is_empty() {
         warn!("Received empty list of outputs from processor, which should be impossible");
     }
     for bg in bgs.iter_mut() {
         if outputs.contains(&bg.output_name) {
-            let (w, h) = bg.dimensions;
-            //If the frame is the size of the entire buffer, then we got an uncompressed img
-            if frame.len() == w as usize * h as usize * 4 {
+            if let Some(path) = img_path {
+                bg.img = Some(path.to_path_buf());
                 bg.draw(frame);
             } else {
                 bg.animate(frame);
