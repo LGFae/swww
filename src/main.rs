@@ -20,7 +20,12 @@ fn wait_for_response() -> Result<(), String> {
     let mut buf = String::with_capacity(100);
     let mut error = String::new();
 
-    for _ in 0..20 {
+    #[cfg(debug_assertions)]
+    let tries = 40; //Some operations take a while to respond in debug mode
+    #[cfg(not(debug_assertions))]
+    let tries = 20;
+
+    for _ in 0..tries {
         match socket.read_to_string(&mut buf) {
             Ok(_) => {
                 if buf.starts_with("Ok\n") {
