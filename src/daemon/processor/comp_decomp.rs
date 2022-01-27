@@ -24,41 +24,44 @@
 
 use lz4_flex;
 
+///Note: in its current form, this will panic when len of the arrays is not divisible by 8
 fn diff_byte_header(prev: &[u8], curr: &[u8]) -> Vec<u8> {
-    let mut vec = Vec::new();
+    let mut last_zero_header = 0;
+    let mut vec = Vec::with_capacity(56 + (prev.len() * 49) / 64);
     let mut to_add = Vec::with_capacity(8 * 6);
     let mut header = 0;
     let mut i = 0;
     let mut k = 0;
     for chunk in prev.chunks_exact(8) {
-        for j in 0..3 {
-            if chunk[j] != curr[i + j] || chunk[j + 4] != curr[i + j + 4] {
-                to_add.extend_from_slice(&[
-                    curr[i],
-                    curr[i + 1],
-                    curr[i + 2],
-                    curr[i + 4],
-                    curr[i + 5],
-                    curr[i + 6],
-                ]);
-                header |= 0x80 >> k;
-                break;
-            }
+        if chunk[0..3] != curr[i..i + 3] || chunk[4..7] != curr[i + 4..i + 7] {
+            to_add.extend_from_slice(&curr[i..i + 3]);
+            to_add.extend_from_slice(&curr[i + 4..i + 7]);
+            header |= 0x80 >> k;
         }
+
+        i += 8;
         k += 1;
         if k == 8 {
+            if header == 0 && last_zero_header == 0 {
+                last_zero_header = vec.len();
+            } else if header != 0 && last_zero_header != 0 {
+                last_zero_header = 0;
+            }
             vec.push(header);
             vec.extend_from_slice(&to_add);
             header = 0;
             to_add.clear();
             k = 0;
         }
-        i += 8;
     }
-    //Add whatever's left
-    vec.push(header);
-    vec.extend_from_slice(&to_add);
-
+    if header > 0 {
+        //Add whatever's left
+        vec.push(header);
+        vec.extend_from_slice(&to_add);
+    } else if last_zero_header != 0 {
+        //If there's nothing left, we should remove the trailing 0 headers:
+        vec.truncate(last_zero_header);
+    }
     vec.shrink_to_fit();
     vec
 }
@@ -66,26 +69,18 @@ fn diff_byte_header(prev: &[u8], curr: &[u8]) -> Vec<u8> {
 fn diff_byte_header_copy_onto(buf: &mut [u8], diff: &[u8]) {
     let mut byte_idx = 0;
     let mut pix_idx = 0;
-    let mut to_change = Vec::with_capacity(8);
-
     while byte_idx < diff.len() {
         let header = diff[byte_idx];
+        byte_idx += 1;
         for j in (0..8).rev() {
             if (header >> j) % 2 == 1 {
-                to_change.push(pix_idx);
+                buf[pix_idx * 4..pix_idx * 4 + 3].clone_from_slice(&diff[byte_idx..byte_idx + 3]);
+                buf[pix_idx * 4 + 4..pix_idx * 4 + 7]
+                    .clone_from_slice(&diff[byte_idx + 3..byte_idx + 6]);
+                byte_idx += 6;
             }
             pix_idx += 2;
         }
-        byte_idx += 1;
-        for idx in &to_change {
-            for j in 0..3 {
-                buf[idx * 4 + j] = diff[byte_idx];
-                buf[idx * 4 + j + 4] = diff[byte_idx + 3];
-                byte_idx += 1;
-            }
-            byte_idx += 3;
-        }
-        to_change.clear();
     }
 }
 
@@ -115,10 +110,9 @@ mod tests {
         let diff_copy = diff_byte_header(&original, &copy);
         assert_eq!(
             diff_copy.len(),
-            1,
-            "Since it's equal, it should have only one byte"
+            0,
+            "Since it's equal, it should have no bytes"
         );
-        assert_eq!(diff_copy[0], 0, "Since it's equal, header should be all 0s");
 
         let diff_diff = diff_byte_header(&original, &different);
         assert_eq!(
