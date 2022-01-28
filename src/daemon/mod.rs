@@ -112,6 +112,7 @@ impl Background {
                 let height = height as usize;
                 self.pool.resize(width * height * 4).unwrap();
                 self.clear([0, 0, 0]);
+                info!("Configured output: {}", self.output_name);
                 false
             }
             None => false,
