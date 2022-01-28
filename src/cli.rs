@@ -183,7 +183,8 @@ impl Fswww {
     pub fn execute(&self) -> Result<bool, String> {
         match self {
             Fswww::Clear(clear) => send_clear(&clear),
-
+            //TODO: refactor this so that spawn_daemon already returns the correct result
+            //(including sending the request)
             Fswww::Init { no_daemon } => {
                 if get_socket().is_err() {
                     spawn_daemon(*no_daemon)?;
