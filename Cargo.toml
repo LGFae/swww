@@ -22,6 +22,7 @@ log = {version = "0.4", features = ["max_level_debug", "release_max_level_warn"]
 simplelog = "0.11"
 fork = "0.1"
 structopt = {version = "0.3", default-features = true}
+hex = "0.4"
 lz4_flex = {version = "0.9" , default-features = false}
 
 [dev-dependencies]
