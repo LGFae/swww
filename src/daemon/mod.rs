@@ -111,7 +111,6 @@ impl Background {
                 let width = width as usize;
                 let height = height as usize;
                 self.pool.resize(width * height * 4).unwrap();
-                self.clear([0, 0, 0]);
                 info!("Configured output: {}", self.output_name);
                 false
             }
@@ -135,6 +134,7 @@ impl Background {
             pixel[2] = color[0];
             pixel[3] = 255;
         }
+        info!("Clearing output: {}", self.output_name);
         self.surface.attach(Some(&buffer), 0, 0);
         self.surface.damage_buffer(0, 0, width, height);
         self.surface.commit();
