@@ -371,7 +371,15 @@ fn recv_socket_msg(
                     }
                     Err(e) => answer = Err(e),
                 },
-                Ok(Fswww::Init { .. }) => (),
+                Ok(Fswww::Init { .. }) => {
+                    answer = clear_outputs(
+                        &mut bgs,
+                        Clear {
+                            outputs: "".to_string(),
+                            color: [0, 0, 0],
+                        },
+                    )
+                }
                 Ok(Fswww::Query) => answer = Ok(outputs_name_and_dim(&mut bgs)),
                 Ok(Fswww::Stream(stream)) => match processor.start_stream(&mut bgs, &stream) {
                     Ok(results) => {

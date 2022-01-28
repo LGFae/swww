@@ -284,6 +284,10 @@ impl std::str::FromStr for Fswww {
 
 fn spawn_daemon(no_daemon: bool) -> Result<(), String> {
     if no_daemon {
+        std::thread::spawn(|| {
+            std::thread::sleep(Duration::from_millis(500));
+            send_request("__INIT__").unwrap();
+        });
         daemon::main();
     }
     match fork::daemon(false, false) {
