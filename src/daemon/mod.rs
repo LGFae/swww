@@ -26,7 +26,7 @@ use std::{
     str::FromStr,
 };
 
-use crate::cli::Fswww;
+use crate::cli::{Clear, Fswww};
 
 mod processor;
 mod wayland;
@@ -360,6 +360,7 @@ fn recv_socket_msg(
             let request = Fswww::from_str(&buf);
             let mut answer = Ok(String::new());
             match request {
+                Ok(Fswww::Clear(clear)) => answer = clear_outputs(&mut bgs, clear),
                 Ok(Fswww::Kill) => loop_signal.stop(),
                 Ok(Fswww::Img(img)) => match processor.process(&mut bgs, &img) {
                     Ok(results) => {
@@ -418,6 +419,30 @@ fn outputs_name_and_dim(bgs: &mut RefMut<Vec<Background>>) -> String {
         );
     }
     str
+}
+
+fn clear_outputs(bgs: &mut RefMut<Vec<Background>>, clear: Clear) -> Result<String, String> {
+    let mut bgs_to_change = Vec::with_capacity(bgs.len());
+    if clear.outputs.is_empty() {
+        for bg in bgs.iter_mut() {
+            bgs_to_change.push(bg);
+        }
+    } else {
+        for bg in bgs.iter_mut() {
+            if clear.outputs.contains(&bg.output_name) {
+                bgs_to_change.push(bg);
+            }
+        }
+    }
+    if bgs_to_change.is_empty() {
+        return Err("None of the specified outputs exist!".to_string());
+    }
+
+    for bg in bgs_to_change {
+        bg.clear(clear.color);
+    }
+
+    Ok("".to_string())
 }
 
 fn send_answer(answer: Result<String, String>, listener: &UnixListener) {

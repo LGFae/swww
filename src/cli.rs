@@ -1,3 +1,4 @@
+use hex::{self, FromHex};
 use std::{
     io::Write,
     os::unix::{net::UnixStream, prelude::PermissionsExt},
@@ -64,6 +65,10 @@ impl Filter {
 ///Supports animated gifs and putting different stuff in different monitors. I also did my best to
 ///make it as resource efficient as possible.
 pub enum Fswww {
+    ///Fills the specified outputs with the given color (Defaults to filling all outputs with
+    ///black).
+    Clear(Clear),
+
     /// Send an image (or animated gif) for the daemon to display
     Img(Img),
 
@@ -90,6 +95,20 @@ pub enum Fswww {
     ///Display an arbitrary stream of bytes, printed by a separate program, as the wallpaper. The
     ///program will be initialized with the outputs width and height as arguments, in that order.
     Stream(Stream),
+}
+
+#[derive(Debug, StructOpt)]
+pub struct Clear {
+    /// Color to fill the screen with. Must be given in rrggbb format (note there is no prepended
+    /// '#').
+    #[structopt(parse(try_from_str = <[u8; 3]>::from_hex), default_value = "000000")]
+    pub color: [u8; 3],
+
+    /// Comma separated list of outputs to display the image at. If it isn't set, the image is
+    /// displayed on all outputs
+    #[structopt(short, long, default_value = "")]
+    pub outputs: String,
+    //TODO: Also transition!!
 }
 
 #[derive(Debug, StructOpt)]
@@ -163,6 +182,8 @@ impl Fswww {
     ///Returns whether we should wait for response or not
     pub fn execute(&self) -> Result<bool, String> {
         match self {
+            Fswww::Clear(clear) => send_clear(&clear),
+
             Fswww::Init { no_daemon } => {
                 if get_socket().is_err() {
                     spawn_daemon(*no_daemon)?;
@@ -200,6 +221,25 @@ impl std::str::FromStr for Fswww {
         let mut lines = s.lines();
         match lines.next() {
             Some(cmd) => match cmd {
+                "__CLEAR__" => {
+                    let color = lines.next();
+                    let outputs = lines.next();
+
+                    if color.is_none() || outputs.is_none() {
+                        return Err("badly formatted clear request".to_string());
+                    }
+
+                    let color = <[u8; 3]>::from_hex(color.unwrap());
+                    if let Err(e) = color {
+                        return Err(format!("badly formatted clear request: {}", e));
+                    }
+                    let color = color.unwrap();
+
+                    Ok(Self::Clear(Clear {
+                        outputs: outputs.unwrap().to_string(),
+                        color,
+                    }))
+                }
                 "__INIT__" => Ok(Self::Init { no_daemon: false }),
                 "__KILL__" => Ok(Self::Kill),
                 "__QUERY__" => Ok(Self::Query),
@@ -254,6 +294,15 @@ fn spawn_daemon(no_daemon: bool) -> Result<(), String> {
         Ok(fork::Fork::Parent(_)) => Ok(()),
         Err(_) => Err("Couldn't daemonize process!".to_string()),
     }
+}
+
+fn send_clear(clear: &Clear) -> Result<bool, String> {
+    let msg = format!(
+        "__CLEAR__\n{}\n{}\n",
+        hex::encode(clear.color),
+        clear.outputs
+    );
+    send_request(&msg)
 }
 
 ///This tests if the img exsits and can be openned before sending it
