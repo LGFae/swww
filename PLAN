@@ -1,2 +1,4 @@
 PROBLEM: STREAM must compress result before sending it back!
 PROBLEM: for some reason, memory usage seems to increase unbounded as we switch images during runtime
+
+IDEA: refactor code so that we have a manager struct for the bgs, which will do the job currently given to the processor
