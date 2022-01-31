@@ -107,11 +107,18 @@ impl Background {
         match self.next_render_event.take() {
             Some(RenderEvent::Closed) => true,
             Some(RenderEvent::Configure { width, height }) => {
-                self.dimensions = (width, height);
-                let width = width as usize;
-                let height = height as usize;
-                self.pool.resize(width * height * 4).unwrap();
-                info!("Configured output: {}", self.output_name);
+                if self.dimensions != (width, height) {
+                    self.dimensions = (width, height);
+                    let width = width as usize;
+                    let height = height as usize;
+                    self.pool.resize(width * height * 4).unwrap();
+                    info!("Configured output: {}", self.output_name);
+                } else {
+                    info!(
+                        "Output {} already has correct dimensions.",
+                        self.output_name
+                    );
+                }
                 false
             }
             None => false,
