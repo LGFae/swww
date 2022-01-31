@@ -175,7 +175,7 @@ impl Processor {
                     transition_img.push(old_pixel[j] + 20);
                 }
             }
-            transition_img.push(old_pixel[3]);
+            transition_img.push(255);
             i += 4;
         }
 
