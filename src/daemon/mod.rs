@@ -125,7 +125,7 @@ impl Background {
 
         let buffer = self
             .pool
-            .buffer(0, width, height, stride, wl_shm::Format::Argb8888);
+            .buffer(0, width, height, stride, wl_shm::Format::Xrgb8888);
 
         let canvas = self.pool.mmap();
         for pixel in canvas.chunks_exact_mut(4) {
@@ -151,7 +151,7 @@ impl Background {
         );
         let buffer = self
             .pool
-            .buffer(0, width, height, stride, wl_shm::Format::Argb8888);
+            .buffer(0, width, height, stride, wl_shm::Format::Xrgb8888);
         let canvas = self.pool.mmap();
         processor::comp_decomp::mixed_decomp(canvas, img);
         info!("Decompressed img.");
