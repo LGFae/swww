@@ -377,13 +377,15 @@ fn complete_transition(
         comp_decomp::mixed_decomp(&mut old_img, &compressed_img);
         compressed_img.shrink_to_fit();
 
-        send_frame(
+        if send_frame(
             compressed_img,
             &mut outputs,
             duration.saturating_sub(now.elapsed()),
             &sender,
             &receiver,
-        );
+        ) {
+            break;
+        }
         if done {
             break;
         } else {
@@ -432,13 +434,15 @@ fn animate(
 
         cached_frames.push((compressed_frame.clone(), duration));
 
-        send_frame(
+        if send_frame(
             compressed_frame,
             &mut outputs,
             duration.saturating_sub(now.elapsed()),
             &sender,
             &receiver,
-        );
+        ) {
+            return;
+        };
         now = Instant::now();
     }
     //Add the first frame we got earlier:
@@ -463,13 +467,15 @@ fn loop_animation(
     info!("Finished caching the frames!");
     loop {
         for (cached_img, duration) in cached_frames {
-            send_frame(
+            if send_frame(
                 cached_img.clone(),
                 &mut outputs,
                 duration.saturating_sub(now.elapsed()),
                 &sender,
                 &receiver,
-            );
+            ) {
+                return;
+            };
             now = Instant::now();
         }
     }
