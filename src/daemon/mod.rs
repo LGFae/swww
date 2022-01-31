@@ -125,6 +125,7 @@ impl Background {
         }
     }
 
+    ///'color' argument is in rbg. We copy it correctly to brgx inside the function
     fn clear(&mut self, color: [u8; 3]) {
         let stride = 4 * self.dimensions.0 as i32;
         let width = self.dimensions.0 as i32;
@@ -139,7 +140,6 @@ impl Background {
             pixel[0] = color[2];
             pixel[1] = color[1];
             pixel[2] = color[0];
-            pixel[3] = 255;
         }
         info!("Clearing output: {}", self.output_name);
         self.surface.attach(Some(&buffer), 0, 0);
@@ -168,6 +168,8 @@ impl Background {
         self.surface.commit();
     }
 
+    ///This method is what makes necessary that we use the mempoll, instead of the "easier"
+    ///automempoll
     fn get_current_img(&mut self) -> Vec<u8> {
         self.pool.mmap().to_vec()
     }
@@ -260,7 +262,9 @@ fn create_backgrounds(
         // an output has been created, construct a surface for it
         let surface = env.create_surface().detach();
         let pool = env
-            .create_simple_pool(|_| {})
+            .create_simple_pool(|_dispatch_data| {
+                //do I need to do something here???
+            })
             .expect("Failed to create a memory pool!");
 
         debug!("New background with output: {:?}", info);
