@@ -446,12 +446,15 @@ fn animate(
         now = Instant::now();
     }
     //Add the first frame we got earlier:
-    let mut first_frame = comp_decomp::mixed_comp(&canvas, &first_frame);
-    first_frame.shrink_to_fit();
-    cached_frames.insert(0, (first_frame, duration_first_frame));
+    let mut first_frame_comp = comp_decomp::mixed_comp(&canvas, &first_frame);
+    first_frame_comp.shrink_to_fit();
+    cached_frames.insert(0, (first_frame_comp, duration_first_frame));
     if cached_frames.len() == 1 {
         return; //This means we only had a static image anyway
     } else {
+        drop(first_frame);
+        drop(canvas);
+        drop(frames);
         cached_frames.shrink_to_fit();
         loop_animation(&cached_frames, outputs, sender, receiver, now);
     }
