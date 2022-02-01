@@ -135,7 +135,7 @@ pub struct Img {
     ///For non pixel art stuff, I would usually recommend one of the last three, though some
     ///experimentation will be necessary to see which one you like best. Also note they are
     ///all slower than Nearest. For some examples, see
-    ///https://docs.rs/image/0.23.14/image/imageops/enum.FilterType.html.
+    ///https://docs.rs/image/latest/image/imageops/enum.FilterType.html.
     #[structopt(short, long, default_value = "Lanczos3")]
     pub filter: Filter,
 
