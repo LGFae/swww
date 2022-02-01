@@ -171,8 +171,8 @@ impl Background {
 
     ///This method is what makes necessary that we use the mempoll, instead of the "easier"
     ///automempoll
-    fn get_current_img(&mut self) -> Vec<u8> {
-        self.pool.mmap().to_vec()
+    fn get_current_img(&mut self) -> &[u8] {
+        self.pool.mmap()
     }
 }
 

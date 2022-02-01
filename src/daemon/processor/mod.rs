@@ -64,16 +64,15 @@ impl Processor {
             let mut transition = None;
             let old_img = bg.get_current_img();
             if !request.no_transition {
-                debug!("There's an old image here! Beginning transition...");
                 results.push((
                     group.clone(),
-                    self.transition(&old_img, &img_resized, &group),
+                    self.transition(old_img, &img_resized, &group),
                 ));
                 transition = Some(self.on_going_animations.last().unwrap().clone());
             } else {
                 results.push((
                     group.clone(),
-                    comp_decomp::mixed_comp(&old_img, &img_resized),
+                    comp_decomp::mixed_comp(old_img, &img_resized),
                 ));
             };
 
