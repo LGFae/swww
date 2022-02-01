@@ -78,8 +78,8 @@ pub enum Fswww {
     Init {
         ///Don't fork the daemon. This will keep it running in the current terminal.
         ///
-        ///The only advantage of this would be seeing the logging real time. Even then, for release
-        ///builds we only log warnings and errors, so you won't be seeing much (ideally).
+        ///The only advantage of this would be seeing the logging real time. Note that for release
+        ///builds we only log info, warnings and errors, so you won't be seeing much (ideally).
         #[structopt(long)]
         no_daemon: bool,
     },
