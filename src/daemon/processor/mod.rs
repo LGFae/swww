@@ -61,25 +61,31 @@ impl Processor {
                 .expect("Img decoding failed, though this should be impossible...");
             let img_resized = img_resize(img, width, height, filter);
 
-            let mut transition = None;
             let old_img = bg.get_current_img();
             if !request.no_transition {
                 results.push((
                     group.clone(),
-                    self.transition(old_img, &img_resized, &group),
+                    self.transition(
+                        old_img,
+                        path,
+                        img_resized,
+                        width,
+                        height,
+                        group,
+                        filter,
+                        format,
+                    ),
                 ));
-                transition = Some(self.on_going_animations.last().unwrap().clone());
             } else {
                 results.push((
                     group.clone(),
                     comp_decomp::mixed_comp(old_img, &img_resized),
                 ));
+                //TODO: Also do apng
+                if format == Some(ImageFormat::Gif) {
+                    self.process_gif(path, img_resized, width, height, filter, group);
+                }
             };
-
-            //TODO: Also do apng
-            if format == Some(ImageFormat::Gif) {
-                self.process_gif(path, img_resized, width, height, group, filter, transition);
-            }
         }
 
         debug!("Finished image processing!");
@@ -97,7 +103,17 @@ impl Processor {
         }
     }
 
-    fn transition(&mut self, old_img: &[u8], new_img: &[u8], outputs: &[String]) -> Vec<u8> {
+    fn transition(
+        &mut self,
+        old_img: &[u8],
+        path: &Path,
+        new_img: Vec<u8>,
+        width: u32,
+        height: u32,
+        outputs: Vec<String>,
+        filter: FilterType,
+        format: Option<ImageFormat>,
+    ) -> Vec<u8> {
         let mut done = true;
         let mut transition_img = Vec::with_capacity(new_img.len());
         let mut i = 0;
@@ -124,18 +140,36 @@ impl Processor {
         }
 
         let result = comp_decomp::mixed_comp(&old_img, &transition_img);
-        if !done {
-            let sender = self.frame_sender.clone();
-            let (stop_sender, stop_receiver) = mpsc::channel();
-            self.on_going_animations.push(stop_sender);
-
-            let new_img = new_img.to_vec();
-            let outputs = outputs.to_vec();
-            thread::spawn(move || {
-                complete_transition(transition_img, new_img, outputs, sender, stop_receiver);
-                debug!("Transition has finished!");
-            });
-        }
+        let sender = self.frame_sender.clone();
+        let (stop_sender, stop_receiver) = mpsc::channel();
+        self.on_going_animations.push(stop_sender);
+        let path = path.to_owned();
+        thread::spawn(move || {
+            let mut ani = format == Some(ImageFormat::Gif);
+            if !done {
+                ani &= complete_transition(
+                    transition_img,
+                    &new_img,
+                    outputs.clone(),
+                    &sender,
+                    &stop_receiver,
+                );
+            }
+            debug!("Transition has finished!");
+            if ani {
+                let gif = image::io::Reader::open(path).unwrap();
+                animate(
+                    gif,
+                    new_img,
+                    outputs,
+                    width,
+                    height,
+                    filter,
+                    sender,
+                    stop_receiver,
+                );
+            }
+        });
         result
     }
 
@@ -145,9 +179,8 @@ impl Processor {
         first_frame: Vec<u8>,
         width: u32,
         height: u32,
-        outputs: Vec<String>,
         filter: FilterType,
-        transition: Option<mpsc::Sender<Vec<String>>>,
+        outputs: Vec<String>,
     ) {
         let sender = self.frame_sender.clone();
         let (stop_sender, stop_receiver) = mpsc::channel();
@@ -156,11 +189,6 @@ impl Processor {
         let gif_buf = image::io::Reader::open(gif_path).unwrap();
 
         thread::spawn(move || {
-            if let Some(transition) = transition {
-                while transition.send(vec![]).is_ok() {
-                    thread::sleep(Duration::from_millis(30));
-                }
-            }
             animate(
                 gif_buf,
                 first_frame,
@@ -242,13 +270,14 @@ fn get_outputs_groups(
     outputs_groups
 }
 
+///Returns whether the transition completed or was interrupted
 fn complete_transition(
     mut old_img: Vec<u8>,
-    goal: Vec<u8>,
+    goal: &[u8],
     mut outputs: Vec<String>,
-    sender: Sender<(Vec<String>, Vec<u8>)>,
-    receiver: mpsc::Receiver<Vec<String>>,
-) {
+    sender: &Sender<(Vec<String>, Vec<u8>)>,
+    receiver: &mpsc::Receiver<Vec<String>>,
+) -> bool {
     let mut done = true;
     let mut now = Instant::now();
     let duration = Duration::from_millis(30); //A little less than 30 fps
@@ -288,7 +317,7 @@ fn complete_transition(
             &sender,
             &receiver,
         ) {
-            break;
+            return false;
         }
         if done {
             break;
@@ -298,6 +327,7 @@ fn complete_transition(
             done = true;
         }
     }
+    true
 }
 
 fn animate(
