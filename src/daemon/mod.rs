@@ -112,6 +112,7 @@ impl Background {
                     let width = width as usize;
                     let height = height as usize;
                     self.pool.resize(width * height * 4).unwrap();
+                    self.clear([0, 0, 0]);
                     info!("Configured output: {}", self.output_name);
                 } else {
                     info!(
@@ -317,7 +318,14 @@ fn run_main_loop(
             calloop::generic::Generic::new(listener, calloop::Interest::READ, calloop::Mode::Level),
             |_, listener, loop_signal| {
                 let mut processor = processor.borrow_mut();
-                recv_socket_msg(bgs.borrow_mut(), listener, loop_signal, &mut processor)
+                recv_socket_msg(bgs.borrow_mut(), listener, loop_signal, &mut processor)?;
+
+                //We must flush here because if multiple requests are sent at once the loop might
+                //never be idle, and so the callback in the run function bellow wouldn't be called
+                if let Err(e) = display.flush() {
+                    error!("Couldn't flush display: {}", e);
+                }
+                Ok(calloop::PostAction::Continue)
             },
         )
         .unwrap();
@@ -360,7 +368,7 @@ fn recv_socket_msg(
     listener: &UnixListener,
     loop_signal: &calloop::LoopSignal,
     processor: &mut processor::Processor,
-) -> Result<calloop::PostAction, std::io::Error> {
+) -> Result<(), std::io::Error> {
     match listener.accept() {
         Ok((mut socket, _)) => {
             let mut buf = String::with_capacity(100);
@@ -382,15 +390,7 @@ fn recv_socket_msg(
                     }
                     Err(e) => answer = Err(e),
                 },
-                Ok(Fswww::Init { .. }) => {
-                    answer = clear_outputs(
-                        &mut bgs,
-                        Clear {
-                            outputs: "".to_string(),
-                            color: [0, 0, 0],
-                        },
-                    )
-                }
+                Ok(Fswww::Init { .. }) => (), //This only exists for us to send an answer back
                 Ok(Fswww::Query) => answer = Ok(outputs_name_and_dim(&mut bgs)),
                 Ok(Fswww::Stream(stream)) => match processor.start_stream(&mut bgs, &stream) {
                     Ok(results) => {
@@ -404,7 +404,7 @@ fn recv_socket_msg(
                 Err(e) => answer = Err(e),
             }
             send_answer(answer, &listener);
-            Ok(calloop::PostAction::Continue)
+            Ok(())
         }
         Err(e) => Err(e),
     }
