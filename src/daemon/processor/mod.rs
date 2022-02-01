@@ -150,10 +150,6 @@ impl Processor {
     }
 
     fn transition(&mut self, old_img: &[u8], new_img: &[u8], outputs: &[String]) -> Vec<u8> {
-        let sender = self.frame_sender.clone();
-        let (stop_sender, stop_receiver) = mpsc::channel();
-        self.on_going_animations.push(stop_sender);
-
         let mut done = true;
         let mut transition_img = Vec::with_capacity(new_img.len());
         let mut i = 0;
@@ -179,17 +175,20 @@ impl Processor {
             i += 4;
         }
 
+        let result = comp_decomp::mixed_comp(&old_img, &transition_img);
         if !done {
-            let img = transition_img.clone();
+            let sender = self.frame_sender.clone();
+            let (stop_sender, stop_receiver) = mpsc::channel();
+            self.on_going_animations.push(stop_sender);
+
             let new_img = new_img.to_vec();
             let outputs = outputs.to_vec();
             thread::spawn(move || {
-                complete_transition(img, new_img, outputs, sender, stop_receiver);
+                complete_transition(transition_img, new_img, outputs, sender, stop_receiver);
                 debug!("Transition has finished!");
             });
         }
-
-        comp_decomp::mixed_comp(&old_img, &transition_img)
+        result
     }
 
     fn process_gif(
