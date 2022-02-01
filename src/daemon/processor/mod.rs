@@ -429,8 +429,8 @@ fn animate(
             filter,
         );
         let mut compressed_frame = comp_decomp::mixed_comp(&canvas, &img);
-        comp_decomp::mixed_decomp(&mut canvas, &compressed_frame);
         compressed_frame.shrink_to_fit();
+        canvas = img;
 
         cached_frames.push((compressed_frame.clone(), duration));
 
