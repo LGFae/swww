@@ -347,8 +347,8 @@ fn complete_transition(
     let mut done = true;
     let mut now = Instant::now();
     let duration = Duration::from_millis(30); //A little less than 30 fps
+    let mut transition_img = Vec::with_capacity(goal.len());
     loop {
-        let mut transition_img = Vec::with_capacity(goal.len());
         let mut i = 0;
         for old_pixel in old_img.chunks_exact(4) {
             for j in 0..3 {
@@ -373,8 +373,8 @@ fn complete_transition(
         }
 
         let mut compressed_img = comp_decomp::mixed_comp(&old_img, &transition_img);
-        comp_decomp::mixed_decomp(&mut old_img, &compressed_img);
         compressed_img.shrink_to_fit();
+        comp_decomp::mixed_decomp(&mut old_img, &compressed_img);
 
         if send_frame(
             compressed_img,
@@ -388,6 +388,7 @@ fn complete_transition(
         if done {
             break;
         } else {
+            transition_img.clear();
             now = Instant::now();
             done = true;
         }
