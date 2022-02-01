@@ -502,7 +502,11 @@ fn img_resize(img: image::DynamicImage, width: u32, height: u32, filter: FilterT
 
     // The ARGB is 'little endian', so here we must  put the order
     // of bytes 'in reverse', so it needs to be BGRA.
-    resized_img.into_bgra8().into_raw()
+    let mut result = resized_img.into_rgba8().into_raw();
+    for pixel in result.chunks_exact_mut(4) {
+        pixel.swap(0, 2);
+    }
+    result
 }
 
 ///Returns whether the calling function should exit or not
