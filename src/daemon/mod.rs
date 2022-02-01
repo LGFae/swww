@@ -113,9 +113,9 @@ impl Background {
                     let height = height as usize;
                     self.pool.resize(width * height * 4).unwrap();
                     self.clear([0, 0, 0]);
-                    info!("Configured output: {}", self.output_name);
+                    debug!("Configured output: {}", self.output_name);
                 } else {
-                    info!(
+                    debug!(
                         "Output {} already has correct dimensions.",
                         self.output_name
                     );
@@ -142,7 +142,7 @@ impl Background {
             pixel[1] = color[1];
             pixel[2] = color[0];
         }
-        info!("Clearing output: {}", self.output_name);
+        debug!("Clearing output: {}", self.output_name);
         self.surface.attach(Some(&buffer), 0, 0);
         self.surface.damage_buffer(0, 0, width, height);
         self.surface.commit();
@@ -153,7 +153,7 @@ impl Background {
         let width = self.dimensions.0 as i32;
         let height = self.dimensions.1 as i32;
 
-        info!(
+        debug!(
             "Current state of mempoll for output {}:{:?}",
             self.output_name, self.pool
         );
@@ -162,7 +162,7 @@ impl Background {
             .buffer(0, width, height, stride, wl_shm::Format::Xrgb8888);
         let canvas = self.pool.mmap();
         processor::comp_decomp::mixed_decomp(canvas, img);
-        info!("Decompressed img.");
+        debug!("Decompressed img.");
 
         self.surface.attach(Some(&buffer), 0, 0);
         self.surface.damage_buffer(0, 0, width, height);
@@ -239,7 +239,7 @@ fn make_logger() {
     #[cfg(not(debug_assertions))]
     {
         TermLogger::init(
-            LevelFilter::Warn,
+            LevelFilter::Info,
             simplelog::Config::default(),
             TerminalMode::Stderr,
             ColorChoice::Auto,
@@ -339,6 +339,7 @@ fn run_main_loop(
     //happens at the calling fswww instance (because we can't send back an answer after we've
     //removed the socket. So we can only assure the user the socket has been removed in the fswww
     //client).
+    info!("Initialization succeeded! Starting main loop...");
 
     let mut loop_signal = event_loop.get_signal();
     if let Err(e) = event_loop.run(None, &mut loop_signal, |_| {

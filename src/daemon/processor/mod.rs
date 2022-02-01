@@ -64,7 +64,7 @@ impl Processor {
             let mut transition = None;
             let old_img = bg.get_current_img();
             if !request.no_transition {
-                info!("There's an old image here! Beginning transition...");
+                debug!("There's an old image here! Beginning transition...");
                 results.push((
                     group.clone(),
                     self.transition(&old_img, &img_resized, &group),
@@ -185,7 +185,7 @@ impl Processor {
             let outputs = outputs.to_vec();
             thread::spawn(move || {
                 complete_transition(img, new_img, outputs, sender, stop_receiver);
-                info!("Transition has finished!");
+                debug!("Transition has finished!");
             });
         }
 
@@ -489,10 +489,10 @@ fn img_resize(img: image::DynamicImage, width: u32, height: u32, filter: FilterT
         img_dimensions.0, img_dimensions.1
     );
     let resized_img = if img_dimensions != (width, height) {
-        info!("Image dimensions are different from output's. Resizing...");
+        debug!("Image dimensions are different from output's. Resizing...");
         img.resize_to_fill(width, height, filter)
     } else {
-        info!("Image dimensions are identical to output's. Skipped resize!!");
+        debug!("Image dimensions are identical to output's. Skipped resize!!");
         img
     };
 
