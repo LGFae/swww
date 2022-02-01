@@ -7,12 +7,11 @@ use log::{debug, error, info};
 use smithay_client_toolkit::reexports::calloop::channel::Sender;
 
 use std::cell::RefMut;
-use std::io::{BufReader, Read};
-use std::process::{ChildStdout, Stdio};
+use std::io::BufReader;
 use std::time::{Duration, Instant};
 use std::{path::Path, sync::mpsc, thread};
 
-use crate::cli::{Img, Stream};
+use crate::cli::Img;
 
 use super::Background;
 
@@ -99,57 +98,6 @@ impl Processor {
         }
     }
 
-    pub fn start_stream(
-        &mut self,
-        bgs: &mut RefMut<Vec<Background>>,
-        request: &Stream,
-    ) -> ProcessorResult {
-        let outputs = get_real_outputs(bgs, &request.outputs);
-        if outputs.is_empty() {
-            error!("None of the outputs sent were valid.");
-            return Err("None of the outputs sent are valid.".to_string());
-        }
-
-        let mut results = Vec::new();
-        for group in get_outputs_groups(bgs, outputs) {
-            self.stop_animations(&group);
-            let bg = bgs
-                .iter_mut()
-                .find(|bg| bg.output_name == group[0])
-                .unwrap();
-
-            let (width, height) = bg.dimensions;
-            let child = std::process::Command::new(&request.path)
-                .arg(width.to_string())
-                .arg(height.to_string())
-                .stdout(Stdio::piped())
-                .spawn();
-            if let Err(e) = child {
-                return Err(format!("Failed to spawn child process: {}", e));
-            }
-            let mut child = child.unwrap();
-            let stdout = child.stdout.take();
-            if stdout.is_none() {
-                return Err("Couldn't capture child process stdout.".to_string());
-            }
-            let mut stdout = stdout.unwrap();
-
-            let mut stream_reader = vec![0; width as usize * height as usize * 4];
-            match stdout.read_exact(&mut stream_reader) {
-                Ok(()) => results.push((group.clone(), stream_reader.clone())),
-                Err(e) => return Err(format!("Failed to read child stdout: {}", e)),
-            };
-
-            let sender = self.frame_sender.clone();
-            let (stop_sender, stop_receiver) = mpsc::channel();
-            self.on_going_animations.push(stop_sender);
-            thread::spawn(|| {
-                loop_child_process(child, group, stdout, stream_reader, sender, stop_receiver)
-            });
-        }
-        Ok(results)
-    }
-
     fn transition(&mut self, old_img: &[u8], new_img: &[u8], outputs: &[String]) -> Vec<u8> {
         let mut done = true;
         let mut transition_img = Vec::with_capacity(new_img.len());
@@ -226,49 +174,6 @@ impl Processor {
             );
             info!("Stopped animation.");
         });
-    }
-}
-
-fn loop_child_process(
-    mut child: std::process::Child,
-    mut outputs: Vec<String>,
-    mut child_stdout: ChildStdout,
-    mut stream_reader: Vec<u8>,
-    sender: Sender<(Vec<String>, Vec<u8>)>,
-    receiver: mpsc::Receiver<Vec<String>>,
-) {
-    let dur = Duration::new(0, 0); //This is just for us to send to the send_frame function
-    loop {
-        match child.try_wait() {
-            Ok(None) => match child_stdout.read_exact(&mut stream_reader) {
-                Ok(()) => {
-                    if send_frame(stream_reader.clone(), &mut outputs, dur, &sender, &receiver) {
-                        if let Err(e) = child.kill() {
-                            error!("Error killing child: {}", e);
-                        };
-                        return;
-                    }
-                }
-                Err(e) => {
-                    error!("Failed to read stdout of child process during loop: {}", e);
-                    break;
-                }
-            },
-            Ok(status) => {
-                info!("Child process exited with code: {:?}", status);
-                break;
-            }
-            Err(e) => {
-                error!("Error while waiting for child process: {}", e);
-                break;
-            }
-        }
-    }
-
-    if let Ok(bytes) = child_stdout.read_to_end(&mut stream_reader) {
-        if bytes == stream_reader.len() {
-            send_frame(stream_reader, &mut outputs, dur, &sender, &receiver);
-        }
     }
 }
 
