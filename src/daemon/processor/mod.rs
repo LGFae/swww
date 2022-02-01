@@ -44,6 +44,7 @@ impl Processor {
 
         let mut results = Vec::new();
         for group in get_outputs_groups(bgs, outputs) {
+            self.stop_animations(&group);
             let bg = bgs
                 .iter_mut()
                 .find(|bg| bg.output_name == group[0])
@@ -51,8 +52,8 @@ impl Processor {
 
             let (width, height) = bg.dimensions;
 
-            self.stop_animations(&group);
             //We check if we can open and read the image before sending it, so these should never fail
+            //Note these can't be moved outside the loop without creating some memory overhead
             let img_buf = image::io::Reader::open(path)
                 .expect("Failed to open image, though this should be impossible...");
             let format = img_buf.format();
