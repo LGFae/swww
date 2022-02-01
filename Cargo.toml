@@ -17,7 +17,7 @@ debug = 1
 
 [dependencies]
 smithay-client-toolkit = "0.15"
-image = "0.23"
+image = "0.24"
 log = {version = "0.4", features = ["max_level_debug", "release_max_level_info"]}
 simplelog = "0.11"
 fork = "0.1"

@@ -1,4 +1,4 @@
-use image::gif::GifDecoder;
+use image::codecs::gif::GifDecoder;
 use image::io::Reader;
 use image::{self, imageops::FilterType, GenericImageView};
 use image::{AnimationDecoder, ImageFormat};
@@ -506,6 +506,7 @@ fn img_resize(img: image::DynamicImage, width: u32, height: u32, filter: FilterT
     for pixel in result.chunks_exact_mut(4) {
         pixel.swap(0, 2);
     }
+    result.shrink_to_fit();
     result
 }
 
