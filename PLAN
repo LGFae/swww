@@ -1,4 +1,11 @@
 PROBLEM: STREAM must compress result before sending it back!
+SOLUTION: ditch the stream idea, at least for now
+
 PROBLEM: for some reason, memory usage seems to increase unbounded as we switch images during runtime
+SOLUTION: this doesn't seem that big of an issue
+
+PROBLEM: see that initializaiton completed with --no-daemon
+SOLUTION: during release, log info as well. Say that daemon started with an info. This means rethinking all the info logs and putting them on debug level.
+
 
 IDEA: refactor code so that we have a manager struct for the bgs, which will do the job currently given to the processor
