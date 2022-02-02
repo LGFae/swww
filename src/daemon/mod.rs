@@ -37,7 +37,7 @@ enum RenderEvent {
     Closed,
 }
 
-pub struct Background {
+pub struct Bg {
     output_name: String,
     surface: wl_surface::WlSurface,
     layer_surface: Main<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1>,
@@ -47,7 +47,7 @@ pub struct Background {
     img: Option<PathBuf>,
 }
 
-impl Background {
+impl Bg {
     fn new(
         output: &wl_output::WlOutput,
         output_name: String,
@@ -176,7 +176,7 @@ impl Background {
     }
 }
 
-impl Drop for Background {
+impl Drop for Bg {
     fn drop(&mut self) {
         self.layer_surface.destroy();
         self.surface.destroy();
@@ -252,7 +252,7 @@ fn create_backgrounds(
     output: wl_output::WlOutput,
     info: &OutputInfo,
     env: &Environment<wayland::Env>,
-    bgs: &Rc<RefCell<Vec<Background>>>,
+    bgs: &Rc<RefCell<Vec<Bg>>>,
     layer_shell: &Attached<zwlr_layer_shell_v1::ZwlrLayerShellV1>,
 ) {
     if info.obsolete {
@@ -269,7 +269,7 @@ fn create_backgrounds(
             .expect("Failed to create a memory pool!");
 
         debug!("New background with output: {:?}", info);
-        if let Some(bg) = Background::new(&output, info.name.clone(), surface, layer_shell, pool) {
+        if let Some(bg) = Bg::new(&output, info.name.clone(), surface, layer_shell, pool) {
             (*bgs.borrow_mut()).push(bg);
         }
     }
@@ -295,7 +295,7 @@ fn make_socket() -> UnixListener {
 
 ///bgs and display can't be moved into here because it causes a segfault
 fn run_main_loop(
-    bgs: Rc<RefCell<Vec<Background>>>,
+    bgs: Rc<RefCell<Vec<Bg>>>,
     queue: EventQueue,
     display: &Display,
     listener: UnixListener,
@@ -365,7 +365,7 @@ fn run_main_loop(
 }
 
 fn recv_socket_msg(
-    mut bgs: RefMut<Vec<Background>>,
+    mut bgs: RefMut<Vec<Bg>>,
     listener: &UnixListener,
     loop_signal: &calloop::LoopSignal,
     processor: &mut processor::Processor,
@@ -395,7 +395,7 @@ fn recv_socket_msg(
 }
 
 fn handle_recv_img(
-    bgs: &mut RefMut<Vec<Background>>,
+    bgs: &mut RefMut<Vec<Bg>>,
     msg: &(Vec<String>, Vec<u8>),
     img_path: Option<&Path>,
 ) {
@@ -413,7 +413,7 @@ fn handle_recv_img(
     }
 }
 
-fn outputs_name_and_dim(bgs: &mut RefMut<Vec<Background>>) -> String {
+fn outputs_name_and_dim(bgs: &mut RefMut<Vec<Bg>>) -> String {
     let mut str = String::new();
     for bg in bgs.iter() {
         str += &format!(
@@ -424,7 +424,7 @@ fn outputs_name_and_dim(bgs: &mut RefMut<Vec<Background>>) -> String {
     str
 }
 
-fn clear_outputs(bgs: &mut RefMut<Vec<Background>>, clear: Clear) -> Result<String, String> {
+fn clear_outputs(bgs: &mut RefMut<Vec<Bg>>, clear: Clear) -> Result<String, String> {
     let mut bgs_to_change = Vec::with_capacity(bgs.len());
     if clear.outputs.is_empty() {
         for bg in bgs.iter_mut() {

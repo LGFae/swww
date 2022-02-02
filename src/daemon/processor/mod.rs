@@ -15,7 +15,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use super::Background;
+use super::Bg;
 use crate::cli::Img;
 pub mod comp_decomp;
 
@@ -37,11 +37,7 @@ impl Processor {
         }
     }
 
-    pub fn process(
-        &mut self,
-        bgs: &mut RefMut<Vec<Background>>,
-        request: &Img,
-    ) -> Result<String, String> {
+    pub fn process(&mut self, bgs: &mut RefMut<Vec<Bg>>, request: &Img) -> Result<String, String> {
         let outputs = get_real_outputs(bgs, &request.outputs);
         if outputs.is_empty() {
             error!("None of the outputs sent were valid.");
@@ -157,7 +153,7 @@ impl Drop for Processor {
 
 ///Verifies that all outputs exist
 ///Also puts in all outpus if an empty string was offered
-fn get_real_outputs(bgs: &mut RefMut<Vec<Background>>, outputs: &str) -> Vec<String> {
+fn get_real_outputs(bgs: &mut RefMut<Vec<Bg>>, outputs: &str) -> Vec<String> {
     let mut real_outputs: Vec<String> = Vec::with_capacity(bgs.len());
     //An empty line means all outputs
     if outputs.is_empty() {
@@ -185,10 +181,7 @@ fn get_real_outputs(bgs: &mut RefMut<Vec<Background>>, outputs: &str) -> Vec<Str
 }
 
 ///Returns one result per output with same dimesions and image
-fn get_outputs_groups(
-    bgs: &mut RefMut<Vec<Background>>,
-    mut outputs: Vec<String>,
-) -> Vec<Vec<String>> {
+fn get_outputs_groups(bgs: &mut RefMut<Vec<Bg>>, mut outputs: Vec<String>) -> Vec<Vec<String>> {
     let mut outputs_groups = Vec::new();
 
     while !outputs.is_empty() {
