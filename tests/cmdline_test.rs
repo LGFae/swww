@@ -3,7 +3,7 @@ use std::{thread::sleep, time::Duration};
 use assert_cmd::Command;
 
 fn cmd() -> Command {
-    return Command::cargo_bin("fswww").unwrap();
+    Command::cargo_bin("fswww").unwrap()
 }
 
 const TEST_IMGS: [&str; 3] = [
@@ -23,7 +23,7 @@ fn main() {
     let output = query_outputs();
     sending_img_to_individual_monitors(&output);
     sending_img_to_monitor_that_does_not_exist();
-    sending_img_with_no_transition();
+    sending_img_with_custom_transition();
     killing_daemon();
     cmd().arg("query").assert().failure(); //daemon is dead, so this should fail
 }
@@ -94,11 +94,11 @@ fn sending_img_with_filter_that_does_not_exist() {
         .failure();
 }
 
-fn sending_img_with_no_transition() {
+fn sending_img_with_custom_transition() {
     cmd()
         .arg("img")
         .arg(TEST_IMGS[0])
-        .arg("--no-transition")
+        .arg("transition_step 200")
         .assert()
         .success();
 }
