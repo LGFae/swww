@@ -88,6 +88,7 @@ impl Processor {
         let mut to_remove = Vec::with_capacity(self.animations.len());
         let mut i = 0;
         for animator in &self.animations {
+            //NOTE: this blocks the calloop! We might want to change this with something with a timeout
             if let Ok(mut outputs) = animator.outputs.write() {
                 outputs.retain(|o| !to_stop.contains(o));
                 if outputs.is_empty() {
@@ -99,7 +100,7 @@ impl Processor {
         for i in to_remove {
             let animator = self.animations.swap_remove(i);
             if let Err(e) = animator.thread_handle.join() {
-                error!("Animaiton thread panicked: {:?}", e);
+                error!("Animation thread panicked: {:?}", e);
             };
         }
     }
@@ -125,14 +126,31 @@ impl Processor {
             thread_handle: thread::spawn(move || {
                 let mut ani = format == Some(ImageFormat::Gif);
                 ani &= complete_transition(old_img, &new_img, &mut out_clone, &sender);
-
                 debug!("Transition has finished!");
+
                 if ani {
                     let gif = image::io::Reader::open(path).unwrap();
                     animate(gif, new_img, &mut out_clone, width, height, filter, sender);
                 }
             }),
         })
+    }
+}
+
+impl Drop for Processor {
+    //We need to make sure to kill all pending animators
+    fn drop(&mut self) {
+        for animator in &self.animations {
+            if let Ok(mut outputs) = animator.outputs.write() {
+                outputs.clear();
+            }
+        }
+        while !self.animations.is_empty() {
+            let anim = self.animations.pop().unwrap();
+            if let Err(e) = anim.thread_handle.join() {
+                error!("Animation thread panicked on drop: {:?}", e);
+            };
+        }
     }
 }
 
@@ -380,8 +398,10 @@ fn send_frame(
     thread::sleep(timeout);
     match outputs.read() {
         Ok(outputs) => {
+            //This means a new image will be displayed instead, and this animation must end
             if outputs.is_empty() {
                 return true;
+            //This means the receiver died for some reason, and this animation must also end
             } else if sender.send((outputs.clone(), frame)).is_err() {
                 return true;
             }
