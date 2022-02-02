@@ -1,4 +1,0 @@
-PROBLEM: for some reason, memory usage seems to increase unbounded as we switch images during runtime
-SOLUTION: this doesn't seem that big of an issue
-
-IDEA: refactor code so that we have a manager struct for the bgs, which will do the job currently given to the processor

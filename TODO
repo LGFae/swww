@@ -1,0 +1,8 @@
+Autocompletion for bash/zsh/fish
+
+Fully automated, complete testing
+	- This includes basic memory benchmarking
+
+Use generic images in test_images
+
+Manpages
