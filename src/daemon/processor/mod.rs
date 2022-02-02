@@ -8,8 +8,9 @@ use smithay_client_toolkit::reexports::calloop::channel::SyncSender;
 
 use std::cell::RefMut;
 use std::io::BufReader;
+use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
-use std::{path::Path, sync::mpsc, thread};
+use std::{path::Path, thread};
 
 use crate::cli::Img;
 
@@ -17,15 +18,20 @@ use super::Background;
 
 pub mod comp_decomp;
 
+struct Animator {
+    outputs: Arc<RwLock<Vec<String>>>,
+    thread_handle: thread::JoinHandle<()>,
+}
+
 pub struct Processor {
     frame_sender: SyncSender<(Vec<String>, Vec<u8>)>,
-    on_going_animations: Vec<mpsc::Sender<Vec<String>>>,
+    animations: Vec<Animator>,
 }
 
 impl Processor {
     pub fn new(frame_sender: SyncSender<(Vec<String>, Vec<u8>)>) -> Self {
         Self {
-            on_going_animations: Vec::new(),
+            animations: Vec::new(),
             frame_sender,
         }
     }
@@ -79,13 +85,22 @@ impl Processor {
     }
 
     pub fn stop_animations(&mut self, to_stop: &[String]) {
+        let mut to_remove = Vec::with_capacity(self.animations.len());
         let mut i = 0;
-        while i < self.on_going_animations.len() {
-            if self.on_going_animations[i].send(to_stop.to_vec()).is_err() {
-                self.on_going_animations.remove(i);
-            } else {
-                i += 1;
+        for animator in &self.animations {
+            if let Ok(mut outputs) = animator.outputs.write() {
+                outputs.retain(|o| !to_stop.contains(o));
+                if outputs.is_empty() {
+                    to_remove.push(i);
+                }
             }
+            i += 1;
+        }
+        for i in to_remove {
+            let animator = self.animations.swap_remove(i);
+            if let Err(e) = animator.thread_handle.join() {
+                error!("Animaiton thread panicked: {:?}", e);
+            };
         }
     }
 
@@ -102,28 +117,22 @@ impl Processor {
     ) {
         let old_img = old_img.to_vec();
         let sender = self.frame_sender.clone();
-        let (stop_sender, stop_receiver) = mpsc::channel();
-        self.on_going_animations.push(stop_sender);
         let path = path.to_owned();
-        thread::spawn(move || {
-            let mut ani = format == Some(ImageFormat::Gif);
-            ani &= complete_transition(old_img, &new_img, outputs.clone(), &sender, &stop_receiver);
+        let out_arc = Arc::new(RwLock::new(outputs));
+        let mut out_clone = out_arc.clone();
+        self.animations.push(Animator {
+            outputs: out_arc,
+            thread_handle: thread::spawn(move || {
+                let mut ani = format == Some(ImageFormat::Gif);
+                ani &= complete_transition(old_img, &new_img, &mut out_clone, &sender);
 
-            debug!("Transition has finished!");
-            if ani {
-                let gif = image::io::Reader::open(path).unwrap();
-                animate(
-                    gif,
-                    new_img,
-                    outputs,
-                    width,
-                    height,
-                    filter,
-                    sender,
-                    stop_receiver,
-                );
-            }
-        });
+                debug!("Transition has finished!");
+                if ani {
+                    let gif = image::io::Reader::open(path).unwrap();
+                    animate(gif, new_img, &mut out_clone, width, height, filter, sender);
+                }
+            }),
+        })
     }
 }
 
@@ -197,9 +206,8 @@ fn get_outputs_groups(
 fn complete_transition(
     mut old_img: Vec<u8>,
     goal: &[u8],
-    mut outputs: Vec<String>,
+    outputs: &mut Arc<RwLock<Vec<String>>>,
     sender: &SyncSender<(Vec<String>, Vec<u8>)>,
-    receiver: &mpsc::Receiver<Vec<String>>,
 ) -> bool {
     let mut done = true;
     let mut now = Instant::now();
@@ -235,10 +243,9 @@ fn complete_transition(
 
         if send_frame(
             compressed_img,
-            &mut outputs,
+            outputs,
             duration.saturating_sub(now.elapsed()),
             &sender,
-            &receiver,
         ) {
             return false;
         }
@@ -256,12 +263,11 @@ fn complete_transition(
 fn animate(
     gif: Reader<BufReader<std::fs::File>>,
     first_frame: Vec<u8>,
-    mut outputs: Vec<String>,
+    outputs: &mut Arc<RwLock<Vec<String>>>,
     width: u32,
     height: u32,
     filter: FilterType,
     sender: SyncSender<(Vec<String>, Vec<u8>)>,
-    receiver: mpsc::Receiver<Vec<String>>,
 ) {
     let mut frames = GifDecoder::new(gif.into_inner())
         .expect("Couldn't decode gif, though this should be impossible...")
@@ -294,10 +300,9 @@ fn animate(
 
         if send_frame(
             compressed_frame,
-            &mut outputs,
+            outputs,
             duration.saturating_sub(now.elapsed()),
             &sender,
-            &receiver,
         ) {
             return;
         };
@@ -314,15 +319,14 @@ fn animate(
         drop(canvas);
         drop(frames);
         cached_frames.shrink_to_fit();
-        loop_animation(&cached_frames, outputs, sender, receiver, now);
+        loop_animation(&cached_frames, outputs, sender, now);
     }
 }
 
 fn loop_animation(
     cached_frames: &[(Vec<u8>, Duration)],
-    mut outputs: Vec<String>,
+    outputs: &mut Arc<RwLock<Vec<String>>>,
     sender: SyncSender<(Vec<String>, Vec<u8>)>,
-    receiver: mpsc::Receiver<Vec<String>>,
     mut now: Instant,
 ) {
     info!("Finished caching the frames!");
@@ -330,10 +334,9 @@ fn loop_animation(
         for (cached_img, duration) in cached_frames {
             if send_frame(
                 cached_img.clone(),
-                &mut outputs,
+                outputs,
                 duration.saturating_sub(now.elapsed()),
                 &sender,
-                &receiver,
             ) {
                 return;
             };
@@ -370,23 +373,23 @@ fn img_resize(img: image::DynamicImage, width: u32, height: u32, filter: FilterT
 ///Returns whether the calling function should exit or not
 fn send_frame(
     frame: Vec<u8>,
-    outputs: &mut Vec<String>,
+    outputs: &mut Arc<RwLock<Vec<String>>>,
     timeout: Duration,
     sender: &SyncSender<(Vec<String>, Vec<u8>)>,
-    receiver: &mpsc::Receiver<Vec<String>>,
 ) -> bool {
-    match receiver.recv_timeout(timeout) {
-        Ok(out_to_remove) => {
-            outputs.retain(|o| !out_to_remove.contains(o));
+    thread::sleep(timeout);
+    match outputs.read() {
+        Ok(outputs) => {
             if outputs.is_empty() {
+                return true;
+            } else if sender.send((outputs.clone(), frame)).is_err() {
                 return true;
             }
         }
-        Err(mpsc::RecvTimeoutError::Disconnected) => return true,
-        Err(mpsc::RecvTimeoutError::Timeout) => (),
-    };
-    if sender.send((outputs.clone(), frame)).is_err() {
-        return true;
+        Err(e) => {
+            error!("Error when sending frame from processor: {}", e);
+            return true;
+        }
     }
     false
 }
