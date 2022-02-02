@@ -9,7 +9,7 @@ debug = 0
 lto = true
 opt-level = 3
 codegen-units = 1
-panic = "abort"
+panic = "abort" # stack unwinding is mostly useless since the user won't be able to see it during normal operation
 #strip = "symbols" #enable this once it gets stabilized -- literally next rust version, I think
 
 [profile.bench]
