@@ -29,6 +29,10 @@ lz4_flex = {version = "0.9" , default-features = false}
 assert_cmd = "2.0"
 rand = "0.8"
 
+[build-dependencies]
+structopt = {version = "0.3", default-features = true}
+hex = "0.4"
+
 [[test]]
 name = "cmdline_test"
 harness = false
