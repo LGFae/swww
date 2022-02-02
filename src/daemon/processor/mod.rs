@@ -4,7 +4,7 @@ use image::{self, imageops::FilterType, GenericImageView};
 use image::{AnimationDecoder, ImageFormat};
 use log::{debug, error, info};
 
-use smithay_client_toolkit::reexports::calloop::channel::Sender;
+use smithay_client_toolkit::reexports::calloop::channel::SyncSender;
 
 use std::cell::RefMut;
 use std::io::BufReader;
@@ -18,12 +18,12 @@ use super::Background;
 pub mod comp_decomp;
 
 pub struct Processor {
-    frame_sender: Sender<(Vec<String>, Vec<u8>)>,
+    frame_sender: SyncSender<(Vec<String>, Vec<u8>)>,
     on_going_animations: Vec<mpsc::Sender<Vec<String>>>,
 }
 
 impl Processor {
-    pub fn new(frame_sender: Sender<(Vec<String>, Vec<u8>)>) -> Self {
+    pub fn new(frame_sender: SyncSender<(Vec<String>, Vec<u8>)>) -> Self {
         Self {
             on_going_animations: Vec::new(),
             frame_sender,
@@ -198,7 +198,7 @@ fn complete_transition(
     mut old_img: Vec<u8>,
     goal: &[u8],
     mut outputs: Vec<String>,
-    sender: &Sender<(Vec<String>, Vec<u8>)>,
+    sender: &SyncSender<(Vec<String>, Vec<u8>)>,
     receiver: &mpsc::Receiver<Vec<String>>,
 ) -> bool {
     let mut done = true;
@@ -260,7 +260,7 @@ fn animate(
     width: u32,
     height: u32,
     filter: FilterType,
-    sender: Sender<(Vec<String>, Vec<u8>)>,
+    sender: SyncSender<(Vec<String>, Vec<u8>)>,
     receiver: mpsc::Receiver<Vec<String>>,
 ) {
     let mut frames = GifDecoder::new(gif.into_inner())
@@ -321,7 +321,7 @@ fn animate(
 fn loop_animation(
     cached_frames: &[(Vec<u8>, Duration)],
     mut outputs: Vec<String>,
-    sender: Sender<(Vec<String>, Vec<u8>)>,
+    sender: SyncSender<(Vec<String>, Vec<u8>)>,
     receiver: mpsc::Receiver<Vec<String>>,
     mut now: Instant,
 ) {
@@ -372,7 +372,7 @@ fn send_frame(
     frame: Vec<u8>,
     outputs: &mut Vec<String>,
     timeout: Duration,
-    sender: &Sender<(Vec<String>, Vec<u8>)>,
+    sender: &SyncSender<(Vec<String>, Vec<u8>)>,
     receiver: &mpsc::Receiver<Vec<String>>,
 ) -> bool {
     match receiver.recv_timeout(timeout) {
