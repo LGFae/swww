@@ -1,21 +1,22 @@
-use image::codecs::gif::GifDecoder;
-use image::io::Reader;
-use image::{self, imageops::FilterType, GenericImageView};
-use image::{AnimationDecoder, ImageFormat};
+use image::{
+    self, codecs::gif::GifDecoder, imageops::FilterType, io::Reader, AnimationDecoder,
+    GenericImageView, ImageFormat,
+};
 use log::{debug, error, info};
 
 use smithay_client_toolkit::reexports::calloop::channel::SyncSender;
 
-use std::cell::RefMut;
-use std::io::BufReader;
-use std::sync::{Arc, RwLock};
-use std::time::{Duration, Instant};
-use std::{path::Path, thread};
-
-use crate::cli::Img;
+use std::{
+    cell::RefMut,
+    io::BufReader,
+    path::Path,
+    sync::{Arc, RwLock},
+    thread,
+    time::{Duration, Instant},
+};
 
 use super::Background;
-
+use crate::cli::Img;
 pub mod comp_decomp;
 
 struct Animator {
@@ -395,7 +396,7 @@ fn send_frame(
     timeout: Duration,
     sender: &SyncSender<(Vec<String>, Vec<u8>)>,
 ) -> bool {
-    thread::sleep(timeout);
+    thread::sleep(timeout); //TODO: better timeout?
     match outputs.read() {
         Ok(outputs) => {
             //This means a new image will be displayed instead, and this animation must end
