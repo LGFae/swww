@@ -118,8 +118,8 @@ pub struct Img {
     pub outputs: String,
 
     ///Filter to use when scaling images (run fswww img --help to see options).
-    ///Note that image scaling significantly increases RAM usage. If you want to use as little RAM
-    ///as possible, I recommend scaling the images before sending them to fswww
+    ///Note that image scaling can sometimes significantly increase RAM usage. If you want to use
+    ///as little RAM as possible, I recommend scaling the images before sending them to fswww
     ///
     ///Available options are:
     ///
