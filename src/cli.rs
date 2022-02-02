@@ -135,6 +135,12 @@ pub struct Img {
     ///https://docs.rs/image/latest/image/imageops/enum.FilterType.html.
     #[structopt(short, long, default_value = "Lanczos3")]
     pub filter: Filter,
+
+    ///This represents how smoothly the transition effect plays out when switching images. Larger
+    ///values will make the transition faster, but more abrupt. A value of 255 will always switch
+    ///to the new image immediately.
+    #[structopt(long, default_value = "20")]
+    pub transition_step: u8,
 }
 
 impl Fswww {
@@ -206,8 +212,13 @@ impl std::str::FromStr for Fswww {
                     let file = lines.next();
                     let outputs = lines.next();
                     let filter = lines.next();
+                    let transition_step = lines.next();
 
-                    if filter.is_none() || outputs.is_none() || file.is_none() {
+                    if filter.is_none()
+                        || outputs.is_none()
+                        || file.is_none()
+                        || transition_step.is_none()
+                    {
                         return Err("badly formatted img request".to_string());
                     }
 
@@ -215,6 +226,7 @@ impl std::str::FromStr for Fswww {
                         path: PathBuf::from_str(file.unwrap()).unwrap(),
                         outputs: outputs.unwrap().to_string(),
                         filter: Filter::from_str(filter.unwrap())?,
+                        transition_step: transition_step.unwrap().parse().unwrap(),
                     }))
                 }
                 _ => Err(format!("unrecognized command: {}", cmd)),
@@ -260,8 +272,8 @@ fn send_img(img: &Img) -> Result<bool, String> {
     };
     let img_path_str = abs_path.to_str().unwrap();
     let msg = format!(
-        "__IMG__\n{}\n{}\n{}\n",
-        img_path_str, img.outputs, img.filter
+        "__IMG__\n{}\n{}\n{}\n{}\n",
+        img_path_str, img.outputs, img.filter, img.transition_step
     );
     send_request(&msg)
 }

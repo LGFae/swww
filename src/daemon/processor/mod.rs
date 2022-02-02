@@ -45,6 +45,7 @@ impl Processor {
         }
         let filter = request.filter.get_image_filter();
         let path = &request.path;
+        let transition_step = request.transition_step;
 
         for group in get_outputs_groups(bgs, outputs) {
             self.stop_animations(&group);
@@ -75,6 +76,7 @@ impl Processor {
                 group,
                 filter,
                 format,
+                transition_step,
             );
         }
         debug!("Finished image processing!");
@@ -112,6 +114,7 @@ impl Processor {
         outputs: Vec<String>,
         filter: FilterType,
         format: Option<ImageFormat>,
+        step: u8,
     ) {
         let old_img = old_img.to_vec();
         let sender = self.frame_sender.clone();
@@ -122,7 +125,7 @@ impl Processor {
             outputs: out_arc,
             thread_handle: thread::spawn(move || {
                 let mut ani = format == Some(ImageFormat::Gif);
-                ani &= complete_transition(old_img, &new_img, &mut out_clone, &sender);
+                ani &= complete_transition(old_img, &new_img, step, &mut out_clone, &sender);
                 debug!("Transition has finished!");
 
                 if ani {
@@ -218,12 +221,13 @@ fn get_outputs_groups(bgs: &mut RefMut<Vec<Bg>>, mut outputs: Vec<String>) -> Ve
 fn complete_transition(
     mut old_img: Vec<u8>,
     goal: &[u8],
+    step: u8,
     outputs: &mut Arc<RwLock<Vec<String>>>,
     sender: &SyncSender<(Vec<String>, Vec<u8>)>,
 ) -> bool {
     let mut done = true;
     let mut now = Instant::now();
-    let duration = Duration::from_millis(30); //A little less than 30 fps
+    let duration = Duration::from_millis(34); //A little less than 30 fps
     let mut transition_img = Vec::with_capacity(goal.len());
     loop {
         let mut i = 0;
@@ -235,14 +239,14 @@ fn complete_transition(
                 } else {
                     goal[k] - old_pixel[j]
                 };
-                if distance < 20 {
+                if distance < step {
                     transition_img.push(goal[k]);
                 } else if old_pixel[j] > goal[k] {
                     done = false;
-                    transition_img.push(old_pixel[j] - 20);
+                    transition_img.push(old_pixel[j] - step);
                 } else {
                     done = false;
-                    transition_img.push(old_pixel[j] + 20);
+                    transition_img.push(old_pixel[j] + step);
                 }
             }
             transition_img.push(old_pixel[3]);
