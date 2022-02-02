@@ -34,7 +34,7 @@ impl Processor {
         &mut self,
         bgs: &mut RefMut<Vec<Background>>,
         request: &Img,
-    ) -> Result<(), String> {
+    ) -> Result<String, String> {
         let outputs = get_real_outputs(bgs, &request.outputs);
         if outputs.is_empty() {
             error!("None of the outputs sent were valid.");
@@ -75,7 +75,7 @@ impl Processor {
             );
         }
         debug!("Finished image processing!");
-        Ok(())
+        Ok("".to_string())
     }
 
     pub fn stop_animations(&mut self, to_stop: &[String]) {

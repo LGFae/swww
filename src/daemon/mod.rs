@@ -382,11 +382,7 @@ fn recv_socket_msg(
             match request {
                 Ok(Fswww::Clear(clear)) => answer = clear_outputs(&mut bgs, clear),
                 Ok(Fswww::Kill) => loop_signal.stop(),
-                Ok(Fswww::Img(img)) => {
-                    if let Err(e) = processor.process(&mut bgs, &img) {
-                        answer = Err(e);
-                    }
-                }
+                Ok(Fswww::Img(img)) => answer = processor.process(&mut bgs, &img),
                 Ok(Fswww::Init { .. }) => (), //This only exists for us to send an answer back
                 Ok(Fswww::Query) => answer = Ok(outputs_name_and_dim(&mut bgs)),
                 Err(e) => answer = Err(e),
