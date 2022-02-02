@@ -62,30 +62,19 @@ impl Processor {
             let img_resized = img_resize(img, width, height, filter);
 
             let old_img = bg.get_current_img();
-            if !request.no_transition {
-                results.push((
-                    group.clone(),
-                    self.transition(
-                        old_img,
-                        path,
-                        img_resized,
-                        width,
-                        height,
-                        group,
-                        filter,
-                        format,
-                    ),
-                ));
-            } else {
-                results.push((
-                    group.clone(),
-                    comp_decomp::mixed_comp(old_img, &img_resized),
-                ));
-                //TODO: Also do apng
-                if format == Some(ImageFormat::Gif) {
-                    self.process_gif(path, img_resized, width, height, filter, group);
-                }
-            };
+            results.push((
+                group.clone(),
+                self.transition(
+                    old_img,
+                    path,
+                    img_resized,
+                    width,
+                    height,
+                    group,
+                    filter,
+                    format,
+                ),
+            ));
         }
 
         debug!("Finished image processing!");
@@ -140,13 +129,13 @@ impl Processor {
         }
 
         let result = comp_decomp::mixed_comp(&old_img, &transition_img);
-        let sender = self.frame_sender.clone();
-        let (stop_sender, stop_receiver) = mpsc::channel();
-        self.on_going_animations.push(stop_sender);
-        let path = path.to_owned();
-        thread::spawn(move || {
-            let mut ani = format == Some(ImageFormat::Gif);
-            if !done {
+        if !done {
+            let sender = self.frame_sender.clone();
+            let (stop_sender, stop_receiver) = mpsc::channel();
+            self.on_going_animations.push(stop_sender);
+            let path = path.to_owned();
+            thread::spawn(move || {
+                let mut ani = format == Some(ImageFormat::Gif);
                 ani &= complete_transition(
                     transition_img,
                     &new_img,
@@ -154,53 +143,24 @@ impl Processor {
                     &sender,
                     &stop_receiver,
                 );
-            }
-            debug!("Transition has finished!");
-            if ani {
-                let gif = image::io::Reader::open(path).unwrap();
-                animate(
-                    gif,
-                    new_img,
-                    outputs,
-                    width,
-                    height,
-                    filter,
-                    sender,
-                    stop_receiver,
-                );
-            }
-        });
+
+                debug!("Transition has finished!");
+                if ani {
+                    let gif = image::io::Reader::open(path).unwrap();
+                    animate(
+                        gif,
+                        new_img,
+                        outputs,
+                        width,
+                        height,
+                        filter,
+                        sender,
+                        stop_receiver,
+                    );
+                }
+            });
+        }
         result
-    }
-
-    fn process_gif(
-        &mut self,
-        gif_path: &Path,
-        first_frame: Vec<u8>,
-        width: u32,
-        height: u32,
-        filter: FilterType,
-        outputs: Vec<String>,
-    ) {
-        let sender = self.frame_sender.clone();
-        let (stop_sender, stop_receiver) = mpsc::channel();
-        self.on_going_animations.push(stop_sender);
-
-        let gif_buf = image::io::Reader::open(gif_path).unwrap();
-
-        thread::spawn(move || {
-            animate(
-                gif_buf,
-                first_frame,
-                outputs,
-                width,
-                height,
-                filter,
-                sender,
-                stop_receiver,
-            );
-            info!("Stopped animation.");
-        });
     }
 }
 
