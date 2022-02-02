@@ -116,7 +116,7 @@ impl Background {
                     debug!("Configured output: {}", self.output_name);
                 } else {
                     debug!(
-                        "Output {} already has correct dimensions.",
+                        "Output {} is already configured correctly.",
                         self.output_name
                     );
                 }
