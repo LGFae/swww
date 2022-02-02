@@ -382,15 +382,11 @@ fn recv_socket_msg(
             match request {
                 Ok(Fswww::Clear(clear)) => answer = clear_outputs(&mut bgs, clear),
                 Ok(Fswww::Kill) => loop_signal.stop(),
-                Ok(Fswww::Img(img)) => match processor.process(&mut bgs, &img) {
-                    Ok(results) => {
-                        for result in results {
-                            debug!("Received img as processing result");
-                            handle_recv_img(&mut bgs, &result, Some(&img.path));
-                        }
+                Ok(Fswww::Img(img)) => {
+                    if let Err(e) = processor.process(&mut bgs, &img) {
+                        answer = Err(e);
                     }
-                    Err(e) => answer = Err(e),
-                },
+                }
                 Ok(Fswww::Init { .. }) => (), //This only exists for us to send an answer back
                 Ok(Fswww::Query) => answer = Ok(outputs_name_and_dim(&mut bgs)),
                 Err(e) => answer = Err(e),

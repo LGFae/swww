@@ -15,8 +15,6 @@ use crate::cli::Img;
 
 use super::Background;
 
-pub type ProcessorResult = Result<Vec<(Vec<String>, Vec<u8>)>, String>;
-
 pub mod comp_decomp;
 
 pub struct Processor {
@@ -32,7 +30,11 @@ impl Processor {
         }
     }
 
-    pub fn process(&mut self, bgs: &mut RefMut<Vec<Background>>, request: &Img) -> ProcessorResult {
+    pub fn process(
+        &mut self,
+        bgs: &mut RefMut<Vec<Background>>,
+        request: &Img,
+    ) -> Result<(), String> {
         let outputs = get_real_outputs(bgs, &request.outputs);
         if outputs.is_empty() {
             error!("None of the outputs sent were valid.");
@@ -41,7 +43,6 @@ impl Processor {
         let filter = request.filter.get_image_filter();
         let path = &request.path;
 
-        let mut results = Vec::new();
         for group in get_outputs_groups(bgs, outputs) {
             self.stop_animations(&group);
             let bg = bgs
@@ -60,25 +61,21 @@ impl Processor {
                 .decode()
                 .expect("Img decoding failed, though this should be impossible...");
             let img_resized = img_resize(img, width, height, filter);
-
             let old_img = bg.get_current_img();
-            results.push((
-                group.clone(),
-                self.transition(
-                    old_img,
-                    path,
-                    img_resized,
-                    width,
-                    height,
-                    group,
-                    filter,
-                    format,
-                ),
-            ));
-        }
 
+            self.transition(
+                old_img,
+                path,
+                img_resized,
+                width,
+                height,
+                group,
+                filter,
+                format,
+            );
+        }
         debug!("Finished image processing!");
-        Ok(results)
+        Ok(())
     }
 
     pub fn stop_animations(&mut self, to_stop: &[String]) {
@@ -102,65 +99,31 @@ impl Processor {
         outputs: Vec<String>,
         filter: FilterType,
         format: Option<ImageFormat>,
-    ) -> Vec<u8> {
-        let mut done = true;
-        let mut transition_img = Vec::with_capacity(new_img.len());
-        let mut i = 0;
-        for old_pixel in old_img.chunks_exact(4) {
-            for j in 0..3 {
-                let k = i + j;
-                let distance = if old_pixel[j] > new_img[k] {
-                    old_pixel[j] - new_img[k]
-                } else {
-                    new_img[k] - old_pixel[j]
-                };
-                if distance < 20 {
-                    transition_img.push(new_img[k]);
-                } else if old_pixel[j] > new_img[k] {
-                    done = false;
-                    transition_img.push(old_pixel[j] - 20);
-                } else {
-                    done = false;
-                    transition_img.push(old_pixel[j] + 20);
-                }
-            }
-            transition_img.push(255);
-            i += 4;
-        }
+    ) {
+        let old_img = old_img.to_vec();
+        let sender = self.frame_sender.clone();
+        let (stop_sender, stop_receiver) = mpsc::channel();
+        self.on_going_animations.push(stop_sender);
+        let path = path.to_owned();
+        thread::spawn(move || {
+            let mut ani = format == Some(ImageFormat::Gif);
+            ani &= complete_transition(old_img, &new_img, outputs.clone(), &sender, &stop_receiver);
 
-        let result = comp_decomp::mixed_comp(&old_img, &transition_img);
-        if !done {
-            let sender = self.frame_sender.clone();
-            let (stop_sender, stop_receiver) = mpsc::channel();
-            self.on_going_animations.push(stop_sender);
-            let path = path.to_owned();
-            thread::spawn(move || {
-                let mut ani = format == Some(ImageFormat::Gif);
-                ani &= complete_transition(
-                    transition_img,
-                    &new_img,
-                    outputs.clone(),
-                    &sender,
-                    &stop_receiver,
+            debug!("Transition has finished!");
+            if ani {
+                let gif = image::io::Reader::open(path).unwrap();
+                animate(
+                    gif,
+                    new_img,
+                    outputs,
+                    width,
+                    height,
+                    filter,
+                    sender,
+                    stop_receiver,
                 );
-
-                debug!("Transition has finished!");
-                if ani {
-                    let gif = image::io::Reader::open(path).unwrap();
-                    animate(
-                        gif,
-                        new_img,
-                        outputs,
-                        width,
-                        height,
-                        filter,
-                        sender,
-                        stop_receiver,
-                    );
-                }
-            });
-        }
-        result
+            }
+        });
     }
 }
 
