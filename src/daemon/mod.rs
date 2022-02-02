@@ -300,7 +300,7 @@ fn run_main_loop(
     display: &Display,
     listener: UnixListener,
 ) {
-    let (frame_sender, frame_receiver) = calloop::channel::sync_channel(0);
+    let (frame_sender, frame_receiver) = calloop::channel::sync_channel(1);
     let processor = Rc::new(RefCell::new(processor::Processor::new(frame_sender)));
     let mut event_loop = calloop::EventLoop::<calloop::LoopSignal>::try_new().unwrap();
     let event_handle = event_loop.handle();
