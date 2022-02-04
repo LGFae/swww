@@ -36,7 +36,7 @@ impl Processor {
         }
     }
 
-    pub fn process(&mut self, bgs: &mut RefMut<Vec<Bg>>, request: &Img) -> Result<String, String> {
+    pub fn process(&mut self, bgs: &mut RefMut<Vec<Bg>>, request: Img) -> Result<String, String> {
         let outputs = get_real_outputs(bgs, &request.outputs);
         if outputs.is_empty() {
             error!("None of the outputs sent were valid.");
@@ -62,7 +62,7 @@ impl Processor {
             let old_img = bg.get_current_img();
             let img_resized = img_resize(img, dimensions, request.filter.get_image_filter());
 
-            self.transition(request, old_img, img_resized, dimensions, group, format);
+            self.transition(&request, old_img, img_resized, dimensions, group, format);
         }
         debug!("Finished image processing!");
         Ok("".to_string())
