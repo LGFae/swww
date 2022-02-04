@@ -98,7 +98,7 @@ fn sending_img_with_custom_transition() {
     cmd()
         .arg("img")
         .arg(TEST_IMGS[0])
-        .arg("transition_step 200")
+        .arg("transition-step 200")
         .assert()
         .success();
 }
