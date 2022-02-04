@@ -237,7 +237,7 @@ fn wait_for_response() -> Result<(), String> {
         match socket.read_to_string(&mut buf) {
             Ok(_) => {
                 if let Some(answer) = buf.strip_prefix("Ok\n") {
-                    println!("{}", answer);
+                    print!("{}", answer);
                     return Ok(());
                 } else if let Some(answer) = buf.strip_prefix("Err\n") {
                     return Err(format!("daemon sent back: {}", answer));
