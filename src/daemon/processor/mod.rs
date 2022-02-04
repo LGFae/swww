@@ -9,7 +9,6 @@ use smithay_client_toolkit::reexports::calloop::channel::SyncSender;
 use std::{
     cell::RefMut,
     io::BufReader,
-    path::Path,
     sync::{Arc, RwLock},
     thread,
     time::{Duration, Instant},
@@ -43,41 +42,27 @@ impl Processor {
             error!("None of the outputs sent were valid.");
             return Err("None of the outputs sent are valid.".to_string());
         }
-        let filter = request.filter.get_image_filter();
-        let path = &request.path;
-        let transition_step = request.transition_step;
 
         for group in get_outputs_groups(bgs, outputs) {
             self.stop_animations(&group);
-            let bg = bgs
-                .iter_mut()
-                .find(|bg| bg.output_name == group[0])
-                .unwrap();
-
-            let (width, height) = bg.dimensions;
-
             //We check if we can open and read the image before sending it, so these should never fail
             //Note these can't be moved outside the loop without creating some memory overhead
-            let img_buf = image::io::Reader::open(path)
+            let img_buf = image::io::Reader::open(&request.path)
                 .expect("Failed to open image, though this should be impossible...");
             let format = img_buf.format();
             let img = img_buf
                 .decode()
                 .expect("Img decoding failed, though this should be impossible...");
-            let img_resized = img_resize(img, width, height, filter);
-            let old_img = bg.get_current_img();
 
-            self.transition(
-                old_img,
-                path,
-                img_resized,
-                width,
-                height,
-                group,
-                filter,
-                format,
-                transition_step,
-            );
+            let bg = bgs
+                .iter_mut()
+                .find(|bg| bg.output_name == group[0])
+                .unwrap();
+            let dimensions = bg.dimensions;
+            let old_img = bg.get_current_img();
+            let img_resized = img_resize(img, dimensions, request.filter.get_image_filter());
+
+            self.transition(request, old_img, img_resized, dimensions, group, format);
         }
         debug!("Finished image processing!");
         Ok("".to_string())
@@ -85,8 +70,7 @@ impl Processor {
 
     pub fn stop_animations(&mut self, to_stop: &[String]) {
         let mut to_remove = Vec::with_capacity(self.animations.len());
-        let mut i = 0;
-        for animator in &self.animations {
+        for (i, animator) in self.animations.iter().enumerate() {
             //NOTE: this blocks the calloop! We might want to change this with something with a timeout
             if let Ok(mut outputs) = animator.outputs.write() {
                 outputs.retain(|o| !to_stop.contains(o));
@@ -94,7 +78,6 @@ impl Processor {
                     to_remove.push(i);
                 }
             }
-            i += 1;
         }
         for i in to_remove {
             let animator = self.animations.swap_remove(i);
@@ -106,19 +89,18 @@ impl Processor {
 
     fn transition(
         &mut self,
+        request: &Img,
         old_img: &[u8],
-        path: &Path,
         new_img: Vec<u8>,
-        width: u32,
-        height: u32,
+        dimensions: (u32, u32),
         outputs: Vec<String>,
-        filter: FilterType,
         format: Option<ImageFormat>,
-        step: u8,
     ) {
+        let filter = request.filter.get_image_filter();
+        let path = request.path.clone();
+        let step = request.transition_step;
         let old_img = old_img.to_vec();
         let sender = self.frame_sender.clone();
-        let path = path.to_owned();
         let out_arc = Arc::new(RwLock::new(outputs));
         let mut out_clone = out_arc.clone();
         self.animations.push(Animator {
@@ -130,7 +112,7 @@ impl Processor {
 
                 if ani {
                     let gif = image::io::Reader::open(path).unwrap();
-                    animate(gif, new_img, &mut out_clone, width, height, filter, sender);
+                    animate(gif, new_img, &mut out_clone, dimensions, filter, sender);
                 }
             }),
         })
@@ -232,21 +214,21 @@ fn complete_transition(
     loop {
         let mut i = 0;
         for old_pixel in old_img.chunks_exact(4) {
-            for j in 0..3 {
+            for (j, old_color) in old_pixel.iter().enumerate().take(3) {
                 let k = i + j;
-                let distance = if old_pixel[j] > goal[k] {
-                    old_pixel[j] - goal[k]
+                let distance = if *old_color > goal[k] {
+                    old_color - goal[k]
                 } else {
-                    goal[k] - old_pixel[j]
+                    goal[k] - old_color
                 };
                 if distance < step {
                     transition_img.push(goal[k]);
-                } else if old_pixel[j] > goal[k] {
+                } else if *old_color > goal[k] {
                     done = false;
-                    transition_img.push(old_pixel[j] - step);
+                    transition_img.push(old_color - step);
                 } else {
                     done = false;
-                    transition_img.push(old_pixel[j] + step);
+                    transition_img.push(old_color + step);
                 }
             }
             transition_img.push(old_pixel[3]);
@@ -261,7 +243,7 @@ fn complete_transition(
             compressed_img,
             outputs,
             duration.saturating_sub(now.elapsed()),
-            &sender,
+            sender,
         ) {
             return false;
         }
@@ -280,8 +262,7 @@ fn animate(
     gif: Reader<BufReader<std::fs::File>>,
     first_frame: Vec<u8>,
     outputs: &mut Arc<RwLock<Vec<String>>>,
-    width: u32,
-    height: u32,
+    dimensions: (u32, u32),
     filter: FilterType,
     sender: SyncSender<(Vec<String>, Vec<u8>)>,
 ) {
@@ -298,14 +279,13 @@ fn animate(
 
     let mut canvas = first_frame.clone();
     let mut now = Instant::now();
-    while let Some(frame) = frames.next() {
+    for frame in frames.by_ref() {
         let frame = frame.unwrap();
         let (dur_num, dur_div) = frame.delay().numer_denom_ms();
         let duration = Duration::from_millis((dur_num / dur_div).into());
         let img = img_resize(
             image::DynamicImage::ImageRgba8(frame.into_buffer()),
-            width,
-            height,
+            dimensions,
             filter,
         );
         let mut compressed_frame = comp_decomp::mixed_comp(&canvas, &img);
@@ -328,9 +308,7 @@ fn animate(
     let mut first_frame_comp = comp_decomp::mixed_comp(&canvas, &first_frame);
     first_frame_comp.shrink_to_fit();
     cached_frames.insert(0, (first_frame_comp, duration_first_frame));
-    if cached_frames.len() == 1 {
-        return; //This means we only had a static image anyway
-    } else {
+    if cached_frames.len() > 1 {
         drop(first_frame);
         drop(canvas);
         drop(frames);
@@ -361,7 +339,8 @@ fn loop_animation(
     }
 }
 
-fn img_resize(img: image::DynamicImage, width: u32, height: u32, filter: FilterType) -> Vec<u8> {
+fn img_resize(img: image::DynamicImage, dimensions: (u32, u32), filter: FilterType) -> Vec<u8> {
+    let (width, height) = dimensions;
     let img_dimensions = img.dimensions();
     debug!("Output dimensions: width: {} height: {}", width, height);
     debug!(
@@ -397,10 +376,8 @@ fn send_frame(
     match outputs.read() {
         Ok(outputs) => {
             //This means a new image will be displayed instead, and this animation must end
-            if outputs.is_empty() {
-                return true;
             //This means the receiver died for some reason, and this animation must also end
-            } else if sender.send((outputs.clone(), frame)).is_err() {
+            if outputs.is_empty() || sender.send((outputs.clone(), frame)).is_err() {
                 return true;
             }
         }

@@ -145,7 +145,7 @@ mod tests {
         let compreesed = diff_byte_header(&frame1, &frame2);
         assert_eq!(compreesed, [0x80, 1, 2, 3, 8, 7, 6]);
 
-        let mut buf = frame1.clone();
+        let mut buf = frame1;
         diff_byte_header_copy_onto(&mut buf, &compreesed);
         for i in 0..2 {
             for j in 0..3 {

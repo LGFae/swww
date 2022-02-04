@@ -36,7 +36,7 @@ impl Fswww {
     ///Returns whether we should wait for response or not
     pub fn execute(&self) -> Result<bool, String> {
         match self {
-            Fswww::Clear(clear) => send_clear(&clear),
+            Fswww::Clear(clear) => send_clear(clear),
             //TODO: refactor this so that spawn_daemon already returns the correct result
             //(including sending the request)
             Fswww::Init { no_daemon } => {
@@ -59,10 +59,10 @@ impl Fswww {
                     return Err(format!("{}", e));
                 } else {
                     println!("Stopped daemon and removed socket.");
-                    return Ok(false);
+                    Ok(false)
                 }
             }
-            Fswww::Img(img) => send_img(&img),
+            Fswww::Img(img) => send_img(img),
             Fswww::Query => send_request("__QUERY__"),
         }
     }
@@ -201,10 +201,7 @@ pub fn get_socket() -> Result<UnixStream, String> {
         match UnixStream::connect(&path) {
             Ok(socket) => {
                 if let Err(e) = socket.set_nonblocking(true) {
-                    return Err(format!(
-                        "Failed to set nonblocking connection: {}",
-                        e.to_string()
-                    ));
+                    return Err(format!("Failed to set nonblocking connection: {}", e));
                 }
                 return Ok(socket);
             }
@@ -239,13 +236,11 @@ fn wait_for_response() -> Result<(), String> {
     for _ in 0..tries {
         match socket.read_to_string(&mut buf) {
             Ok(_) => {
-                if buf.starts_with("Ok\n") {
-                    if buf.len() > 3 {
-                        print!("{}", &buf[3..]);
-                    }
+                if let Some(answer) = buf.strip_prefix("Ok\n") {
+                    println!("{}", answer);
                     return Ok(());
-                } else if buf.starts_with("Err\n") {
-                    return Err(format!("daemon sent back: {}", &buf[4..]));
+                } else if let Some(answer) = buf.strip_prefix("Err\n") {
+                    return Err(format!("daemon sent back: {}", answer));
                 } else {
                     return Err(format!("daemon returned a badly formatted answer: {}", buf));
                 }
