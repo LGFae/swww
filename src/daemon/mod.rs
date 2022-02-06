@@ -276,6 +276,11 @@ fn create_backgrounds(
 }
 
 fn make_socket() -> UnixListener {
+    let socket_addr = get_socket_addr();
+    UnixListener::bind(socket_addr).expect("Couldn't bind socket")
+}
+
+fn get_socket_addr() -> PathBuf {
     let runtime_dir = if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
         dir
     } else {
@@ -288,9 +293,7 @@ fn make_socket() -> UnixListener {
         fs::create_dir(runtime_dir).expect("Failed to create runtime dir...");
     }
 
-    let socket = runtime_dir.join("fswww.socket");
-
-    UnixListener::bind(socket).expect("Couldn't bind socket")
+    runtime_dir.join("fswww.socket")
 }
 
 ///bgs and display can't be moved into here because it causes a segfault
@@ -361,6 +364,17 @@ fn run_main_loop(
         }
     }) {
         error!("Event loop closed unexpectedly: {}", e);
+        //If the event loop closed like this, we gotta cleanup ourselves:
+        drop(event_loop);
+        let socket_addr = get_socket_addr();
+        if let Err(e) = fs::remove_file(&socket_addr) {
+            error!(
+                "Failed to remove socket at {:?} after closing unexpectedly: {}",
+                socket_addr, e
+            );
+        } else {
+            info!("Removed socket at {:?}", socket_addr);
+        }
     }
 }
 
