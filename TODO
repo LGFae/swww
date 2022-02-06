@@ -5,4 +5,6 @@ Use generic images in test_images
 
 Improve the first line of the cli arguments to be something sane for autocompletion
 
+Make sure to exit cleanly on SIGTERM
+
 Manpages
