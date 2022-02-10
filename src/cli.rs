@@ -42,23 +42,25 @@ impl std::fmt::Display for Filter {
 }
 
 #[derive(Debug, Parser)]
-#[clap(name = "fswww")]
+#[clap(version, name = "fswww")]
 ///The Final Solution to your Wayland Wallpaper Woes
 ///
 ///Change what your monitors display as a background by controlling the fswww daemon at runtime.
 ///Supports animated gifs and putting different stuff in different monitors. I also did my best to
 ///make it as resource efficient as possible.
 pub enum Fswww {
-    ///Fills the specified outputs with the given color (Defaults to filling all outputs with
-    ///black).
+    ///Fills the specified outputs with the given color.
+    ///
+    ///Defaults to filling all outputs with black.
     Clear(Clear),
 
-    /// Send an image (or animated gif) for the daemon to display
+    /// Send an image (or animated gif) for the daemon to display.
     Img(Img),
 
-    /// Initialize the daemon. Exits if there is already a daemon running.
+    /// Initialize the daemon.
     ///
-    /// We check it by seeing if $XDG_RUNTIME_DIR/fswww.socket exists.
+    /// Exits if there is already a daemon running. We check thay by seeing if
+    /// $XDG_RUNTIME_DIR/fswww.socket exists.
     Init {
         ///Don't fork the daemon. This will keep it running in the current terminal.
         ///
@@ -71,21 +73,24 @@ pub enum Fswww {
     ///Kills the daemon
     Kill,
 
-    ///Asks the daemon to print output information (names and dimensions). You may use this to find
-    ///out valid values for the <fswww-img --outputs> option. If you want more detailed information
-    ///about your outputs, I would recommed trying wlr-randr.
+    ///Asks the daemon to print output information (names and dimensions).
+    ///
+    ///You may use this to find out valid values for the <fswww-img --outputs> option. If you want
+    ///more detailed information about your outputs, I would recommed trying wlr-randr.
     Query,
 }
 
 #[derive(Debug, Parser)]
 pub struct Clear {
-    /// Color to fill the screen with. Must be given in rrggbb format (note there is no prepended
-    /// '#').
+    /// Color to fill the screen with.
+    ///
+    /// Must be given in rrggbb format (note there is no prepended '#').
     #[clap(parse(try_from_str = <[u8; 3]>::from_hex), default_value = "000000")]
     pub color: [u8; 3],
 
-    /// Comma separated list of outputs to display the image at. If it isn't set, the image is
-    /// displayed on all outputs
+    /// Comma separated list of outputs to display the image at.
+    ///
+    /// If it isn't set, the image is displayed on all outputs.
     #[clap(short, long, default_value = "")]
     pub outputs: String,
 }
@@ -96,12 +101,14 @@ pub struct Img {
     #[clap(parse(from_os_str))]
     pub path: PathBuf,
 
-    /// Comma separated list of outputs to display the image at. If it isn't set, the image is
-    /// displayed on all outputs
+    /// Comma separated list of outputs to display the image at.
+    ///
+    /// If it isn't set, the image is displayed on all outputs.
     #[clap(short, long, default_value = "")]
     pub outputs: String,
 
     ///Filter to use when scaling images (run fswww img --help to see options).
+    ///
     ///Note that image scaling can sometimes significantly increase RAM usage. If you want to use
     ///as little RAM as possible, I recommend scaling the images before sending them to fswww
     ///
@@ -120,9 +127,10 @@ pub struct Img {
     #[clap(short, long, default_value = "Lanczos3")]
     pub filter: Filter,
 
-    ///This represents how smoothly the transition effect plays out when switching images. Larger
-    ///values will make the transition faster, but more abrupt. A value of 255 will always switch
-    ///to the new image immediately.
+    ///How smoothly the transition when switching images plays out.
+    ///
+    ///Larger values will make the transition faster, but more abrupt. A value of 255 will always
+    ///switch to the new image immediately.
     #[clap(long, default_value = "20")]
     pub transition_step: u8,
 }
