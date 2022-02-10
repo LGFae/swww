@@ -5,7 +5,10 @@ use smithay_client_toolkit::{
     environment::Environment,
     output::{with_output_info, OutputInfo},
     reexports::{
-        calloop::{self, channel},
+        calloop::{
+            self, channel,
+            signals::{self, Signal},
+        },
         client::protocol::{wl_output, wl_shm, wl_surface},
         client::{Attached, Display, EventQueue, Main},
         protocols::wlr::unstable::layer_shell::v1::client::{
@@ -303,10 +306,26 @@ fn run_main_loop(
     display: &Display,
     listener: UnixListener,
 ) {
+    let cleanup = RefCell::new(false);
+
     let (frame_sender, frame_receiver) = calloop::channel::sync_channel(1);
     let processor = Rc::new(RefCell::new(processor::Processor::new(frame_sender)));
     let mut event_loop = calloop::EventLoop::<calloop::LoopSignal>::try_new().unwrap();
     let event_handle = event_loop.handle();
+
+    //I don't think the signal handling failing here is enough for us to panic.
+    if let Ok(signals) = signals::Signals::new(&[Signal::SIGINT, Signal::SIGQUIT, Signal::SIGTERM])
+    {
+        event_handle
+            .insert_source(signals, |_, _, loop_signal| {
+                let mut cleanup = cleanup.borrow_mut();
+                *cleanup = true;
+                loop_signal.stop();
+            })
+            .unwrap();
+    } else {
+        error!("failed to register signals to stop program!");
+    }
 
     event_handle
         .insert_source(frame_receiver, |evt, _, loop_signal| match evt {
@@ -343,7 +362,6 @@ fn run_main_loop(
     //removed the socket. So we can only assure the user the socket has been removed in the fswww
     //client).
     info!("Initialization succeeded! Starting main loop...");
-
     let mut loop_signal = event_loop.get_signal();
     if let Err(e) = event_loop.run(None, &mut loop_signal, |_| {
         {
@@ -364,7 +382,10 @@ fn run_main_loop(
         }
     }) {
         error!("Event loop closed unexpectedly: {}", e);
-        //If the event loop closed like this, we gotta cleanup ourselves:
+        let mut cleanup = cleanup.borrow_mut();
+        *cleanup = true;
+    }
+    if *cleanup.borrow() {
         drop(event_loop);
         let socket_addr = get_socket_addr();
         if let Err(e) = fs::remove_file(&socket_addr) {
