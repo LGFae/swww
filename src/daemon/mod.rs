@@ -220,7 +220,17 @@ pub fn main() {
 
     //NOTE: we can't move display into the function because it causes a segfault
     run_main_loop(bgs, queue, &display, listener);
-    info!("Finished running event loop. Exiting...");
+    let socket_addr = get_socket_addr();
+    if let Err(e) = fs::remove_file(&socket_addr) {
+        error!(
+            "Failed to remove socket at {:?} after closing unexpectedly: {}",
+            socket_addr, e
+        );
+    } else {
+        info!("Removed socket at {:?}", socket_addr);
+    }
+
+    info!("Goodbye!");
 }
 
 fn make_logger() {
@@ -382,21 +392,8 @@ fn run_main_loop(
         }
     }) {
         error!("Event loop closed unexpectedly: {}", e);
-        let mut cleanup = cleanup.borrow_mut();
-        *cleanup = true;
     }
-    if *cleanup.borrow() {
-        drop(event_loop);
-        let socket_addr = get_socket_addr();
-        if let Err(e) = fs::remove_file(&socket_addr) {
-            error!(
-                "Failed to remove socket at {:?} after closing unexpectedly: {}",
-                socket_addr, e
-            );
-        } else {
-            info!("Removed socket at {:?}", socket_addr);
-        }
-    }
+    info!("Finished running event loop.");
 }
 
 fn recv_socket_msg(

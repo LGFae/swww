@@ -13,8 +13,38 @@ use cli::{Clear, Filter, Fswww, Img};
 
 fn main() -> Result<(), String> {
     let fswww = Fswww::parse();
-    if fswww.execute()? {
-        wait_for_response()
+    match &fswww {
+        Fswww::Clear(clear) => send_clear(clear)?,
+        Fswww::Init { no_daemon } => {
+            if get_socket().is_err() {
+                spawn_daemon(*no_daemon)?;
+            } else {
+                return Err("There seems to already be another instance running...".to_string());
+            }
+            if *no_daemon {
+                return Ok(());
+            } else {
+                send_request("__INIT__")?;
+            }
+        }
+        Fswww::Kill => kill()?,
+        Fswww::Img(img) => send_img(img)?,
+        Fswww::Query => send_request("__QUERY__")?,
+    }
+
+    wait_for_response()?;
+    if let Fswww::Kill = fswww {
+        let socket_path = get_socket_path();
+        for _ in 0..5 {
+            if !socket_path.exists() {
+                return Ok(());
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        return Err(format!(
+            "Could not confirm socket deletion at: {:?}",
+            socket_path
+        ));
     } else {
         Ok(())
     }
@@ -28,42 +58,6 @@ impl Filter {
             Self::CatmullRom => image::imageops::FilterType::CatmullRom,
             Self::Gaussian => image::imageops::FilterType::Gaussian,
             Self::Lanczos3 => image::imageops::FilterType::Lanczos3,
-        }
-    }
-}
-
-impl Fswww {
-    ///Returns whether we should wait for response or not
-    pub fn execute(&self) -> Result<bool, String> {
-        match self {
-            Fswww::Clear(clear) => send_clear(clear),
-            //TODO: refactor this so that spawn_daemon already returns the correct result
-            //(including sending the request)
-            Fswww::Init { no_daemon } => {
-                if get_socket().is_err() {
-                    spawn_daemon(*no_daemon)?;
-                } else {
-                    return Err("There seems to already be another instance running...".to_string());
-                }
-                if *no_daemon {
-                    Ok(false)
-                } else {
-                    send_request("__INIT__")
-                }
-            }
-            Fswww::Kill => {
-                kill()?;
-                wait_for_response()?;
-                let socket_path = get_socket_path();
-                if let Err(e) = std::fs::remove_file(socket_path) {
-                    return Err(format!("{}", e));
-                } else {
-                    println!("Stopped daemon and removed socket.");
-                    Ok(false)
-                }
-            }
-            Fswww::Img(img) => send_img(img),
-            Fswww::Query => send_request("__QUERY__"),
         }
     }
 }
@@ -139,7 +133,7 @@ fn spawn_daemon(no_daemon: bool) -> Result<(), String> {
     }
 }
 
-fn send_clear(clear: &Clear) -> Result<bool, String> {
+fn send_clear(clear: &Clear) -> Result<(), String> {
     let msg = format!(
         "__CLEAR__\n{}\n{}\n",
         hex::encode(clear.color),
@@ -149,7 +143,7 @@ fn send_clear(clear: &Clear) -> Result<bool, String> {
 }
 
 ///This tests if the img exsits and can be openned before sending it
-fn send_img(img: &Img) -> Result<bool, String> {
+fn send_img(img: &Img) -> Result<(), String> {
     if let Err(e) = image::open(&img.path) {
         return Err(format!("Cannot open img {:?}: {}", img.path, e));
     }
@@ -175,13 +169,13 @@ fn kill() -> Result<(), String> {
     }
 }
 
-fn send_request(request: &str) -> Result<bool, String> {
+fn send_request(request: &str) -> Result<(), String> {
     let mut socket = get_socket()?;
     let mut error = String::new();
 
     for _ in 0..5 {
         match socket.write_all(request.as_bytes()) {
-            Ok(_) => return Ok(true),
+            Ok(_) => return Ok(()),
             Err(e) => error = e.to_string(),
         }
         std::thread::sleep(Duration::from_millis(100));
