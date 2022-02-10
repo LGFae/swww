@@ -1,3 +1,4 @@
+use clap::Parser;
 use hex::{self, FromHex};
 use std::{
     io::{Read, Write},
@@ -5,14 +6,13 @@ use std::{
     path::{Path, PathBuf},
     time::Duration,
 };
-use structopt::StructOpt;
 
 mod cli;
 mod daemon;
 use cli::{Clear, Filter, Fswww, Img};
 
 fn main() -> Result<(), String> {
-    let fswww = Fswww::from_args();
+    let fswww = Fswww::parse();
     if fswww.execute()? {
         wait_for_response()
     } else {

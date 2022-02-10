@@ -1,65 +1,25 @@
-use std::{io::Error, path::Path};
+use std::io::Error;
 
-use structopt::clap::App;
+use clap::IntoApp;
+use clap_complete::{generate_to, Shell};
 
 include!("src/cli.rs");
 
 const COMPLETION_DIR: &str = "completions";
-const APP: &str = "fswww";
-const FILE: &str = "_fswww";
+const APP_NAME: &str = "fswww";
 
 fn main() -> Result<(), Error> {
     let outdir = completion_dir()?;
-    let mut app = Fswww::clap();
+    let mut app = Fswww::into_app();
 
-    bash_completion(&mut app, &outdir)?;
-    zsh_completion(&mut app, &outdir)?;
-    fish_completion(&mut app, &outdir)?;
-
-    println!(
-        "cargo:warning=completion file is generated: {}",
-        COMPLETION_DIR
-    );
-
-    Ok(())
-}
-
-fn bash_completion(app: &mut App, dir: &Path) -> std::io::Result<()> {
-    let dir = dir.join("bash");
-    if !dir.is_dir() {
-        std::fs::create_dir(&dir)?;
+    let shells = [Shell::Bash, Shell::Zsh, Shell::Fish, Shell::Elvish];
+    for shell in shells {
+        let comp_file = generate_to(shell, &mut app, APP_NAME, &outdir)?;
+        println!(
+            "cargo:info=generated shell completion file: {:?}",
+            comp_file
+        );
     }
-    let file = dir.join(FILE);
-    let mut file = std::fs::File::create(file)?;
-
-    app.gen_completions_to(APP, structopt::clap::Shell::Bash, &mut file);
-
-    Ok(())
-}
-
-fn zsh_completion(app: &mut App, dir: &Path) -> std::io::Result<()> {
-    let dir = dir.join("zsh");
-    if !dir.is_dir() {
-        std::fs::create_dir(&dir)?;
-    }
-    let file = dir.join(FILE);
-    let mut file = std::fs::File::create(file)?;
-
-    app.gen_completions_to(APP, structopt::clap::Shell::Zsh, &mut file);
-
-    Ok(())
-}
-
-fn fish_completion(app: &mut App, dir: &Path) -> std::io::Result<()> {
-    let dir = dir.join("fish");
-    if !dir.is_dir() {
-        std::fs::create_dir(&dir)?;
-    }
-    let file = dir.join(FILE);
-    let mut file = std::fs::File::create(file)?;
-
-    app.gen_completions_to(APP, structopt::clap::Shell::Fish, &mut file);
-
     Ok(())
 }
 

@@ -3,7 +3,7 @@
 use hex::{self, FromHex};
 use std::path::PathBuf;
 
-use structopt::StructOpt;
+use clap::Parser;
 
 #[derive(Debug)]
 pub enum Filter {
@@ -41,8 +41,8 @@ impl std::fmt::Display for Filter {
     }
 }
 
-#[derive(Debug, StructOpt)]
-#[structopt(name = "fswww")]
+#[derive(Debug, Parser)]
+#[clap(name = "fswww")]
 ///The Final Solution to your Wayland Wallpaper Woes
 ///
 ///Change what your monitors display as a background by controlling the fswww daemon at runtime.
@@ -64,7 +64,7 @@ pub enum Fswww {
         ///
         ///The only advantage of this would be seeing the logging real time. Note that for release
         ///builds we only log info, warnings and errors, so you won't be seeing much (ideally).
-        #[structopt(long)]
+        #[clap(long)]
         no_daemon: bool,
     },
 
@@ -77,28 +77,28 @@ pub enum Fswww {
     Query,
 }
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, Parser)]
 pub struct Clear {
     /// Color to fill the screen with. Must be given in rrggbb format (note there is no prepended
     /// '#').
-    #[structopt(parse(try_from_str = <[u8; 3]>::from_hex), default_value = "000000")]
+    #[clap(parse(try_from_str = <[u8; 3]>::from_hex), default_value = "000000")]
     pub color: [u8; 3],
 
     /// Comma separated list of outputs to display the image at. If it isn't set, the image is
     /// displayed on all outputs
-    #[structopt(short, long, default_value = "")]
+    #[clap(short, long, default_value = "")]
     pub outputs: String,
 }
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, Parser)]
 pub struct Img {
     /// Path to the image to display
-    #[structopt(parse(from_os_str))]
+    #[clap(parse(from_os_str))]
     pub path: PathBuf,
 
     /// Comma separated list of outputs to display the image at. If it isn't set, the image is
     /// displayed on all outputs
-    #[structopt(short, long, default_value = "")]
+    #[clap(short, long, default_value = "")]
     pub outputs: String,
 
     ///Filter to use when scaling images (run fswww img --help to see options).
@@ -117,12 +117,12 @@ pub struct Img {
     ///experimentation will be necessary to see which one you like best. Also note they are
     ///all slower than Nearest. For some examples, see
     ///https://docs.rs/image/latest/image/imageops/enum.FilterType.html.
-    #[structopt(short, long, default_value = "Lanczos3")]
+    #[clap(short, long, default_value = "Lanczos3")]
     pub filter: Filter,
 
     ///This represents how smoothly the transition effect plays out when switching images. Larger
     ///values will make the transition faster, but more abrupt. A value of 255 will always switch
     ///to the new image immediately.
-    #[structopt(long, default_value = "20")]
+    #[clap(long, default_value = "20")]
     pub transition_step: u8,
 }

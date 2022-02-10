@@ -7,4 +7,6 @@ Improve the first line of the cli arguments to be something sane for autocomplet
 
 Make sure to exit cleanly on SIGTERM
 
+CHANGE THE CLI PARSER FOR CLAP 3, AS STRUCTOPT IS BASICALLY DEPRECATED
+
 Manpages
