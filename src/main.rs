@@ -16,7 +16,7 @@ fn main() -> Result<(), String> {
     match &fswww {
         Fswww::Clear(clear) => send_clear(clear)?,
         Fswww::Init { no_daemon } => {
-            if get_socket(1).is_err() {
+            if get_socket().is_err() {
                 spawn_daemon(*no_daemon)?;
             } else {
                 return Err("There seems to already be another instance running...".to_string());
@@ -162,38 +162,30 @@ fn send_img(img: &Img) -> Result<(), String> {
 }
 
 fn send_request(request: &str) -> Result<(), String> {
-    let mut socket = get_socket(5)?;
-    let mut error = String::new();
+    let mut socket = get_socket()?;
+    let timeout = Duration::from_millis(500);
+    if let Err(e) = socket.set_write_timeout(Some(timeout)) {
+        return Err(format!("Failed to set write timeout: {}", e));
+    };
 
-    for _ in 0..5 {
-        //TODO: there might be a more elegant way of doing this error handling
-        match socket.write_all(request.as_bytes()) {
-            Ok(_) => return Ok(()),
-            Err(e) => error = e.to_string(),
-        }
-        std::thread::sleep(Duration::from_millis(100));
+    match socket.write_all(request.as_bytes()) {
+        Ok(_) => Ok(()),
+        Err(e) => Err(e.to_string()),
     }
-    Err("Failed to send request: ".to_string() + &error)
 }
 
-///Always sets connection to nonblocking. This is because the daemon will always listen to
-///connections in a nonblocking fashion, so it makes sense to make this the standard for the whole
-///program. The only difference is that we will have to make timeouts manually by trying to connect
-///several times in a row, waiting some time between every attempt.
+/// We make sure the Stream is always set to blocking mode
 ///
 /// * `tries` -  how make times to attempt the connection
-pub fn get_socket(attempts: u8) -> Result<UnixStream, String> {
-    if attempts == 0 {
-        return Err("When getting the socket, attempts must be bigger than 0".to_string());
-    }
+/// * `interval` - how long to wait between attempts, in milliseconds
+fn get_socket() -> Result<UnixStream, String> {
     let path = get_socket_path();
     let mut error = String::new();
-    //We try to connect 5 fives, waiting 100 milis in between
-    for _ in 0..attempts {
+    for _ in 0..5 {
         match UnixStream::connect(&path) {
             Ok(socket) => {
-                if let Err(e) = socket.set_nonblocking(true) {
-                    return Err(format!("Failed to set nonblocking connection: {}", e));
+                if let Err(e) = socket.set_nonblocking(false) {
+                    return Err(format!("Failed to set blocking connection: {}", e));
                 }
                 return Ok(socket);
             }
@@ -216,7 +208,7 @@ fn get_socket_path() -> PathBuf {
 
 ///Timeouts in 10 seconds
 fn wait_for_response() -> Result<(), String> {
-    let mut socket = get_socket(5)?;
+    let mut socket = get_socket()?;
     let mut buf = String::with_capacity(100);
     let mut error = String::new();
 
@@ -225,6 +217,10 @@ fn wait_for_response() -> Result<(), String> {
     #[cfg(not(debug_assertions))]
     let tries = 20;
 
+    let timeout = Duration::from_millis(500);
+    if let Err(e) = socket.set_read_timeout(Some(timeout)) {
+        return Err(format!("Failed to set read timeout: {}", e));
+    };
     for _ in 0..tries {
         match socket.read_to_string(&mut buf) {
             Ok(_) => {
@@ -239,7 +235,6 @@ fn wait_for_response() -> Result<(), String> {
             }
             Err(e) => error = e.to_string(),
         }
-        std::thread::sleep(Duration::from_millis(500));
     }
     Err("Error while waiting for response: ".to_string() + &error)
 }
