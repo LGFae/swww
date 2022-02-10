@@ -16,7 +16,7 @@ fn main() -> Result<(), Error> {
     for shell in shells {
         let comp_file = generate_to(shell, &mut app, APP_NAME, &outdir)?;
         println!(
-            "cargo:info=generated shell completion file: {:?}",
+            "cargo:warning=generated shell completion file: {:?}",
             comp_file
         );
     }
