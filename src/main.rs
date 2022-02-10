@@ -27,7 +27,7 @@ fn main() -> Result<(), String> {
                 send_request("__INIT__")?;
             }
         }
-        Fswww::Kill => kill()?,
+        Fswww::Kill => send_request("__KILL__")?,
         Fswww::Img(img) => send_img(img)?,
         Fswww::Query => send_request("__QUERY__")?,
     }
@@ -161,19 +161,12 @@ fn send_img(img: &Img) -> Result<(), String> {
     send_request(&msg)
 }
 
-fn kill() -> Result<(), String> {
-    let mut socket = get_socket(5)?;
-    match socket.write(b"__KILL__") {
-        Ok(_) => Ok(()),
-        Err(e) => Err(e.to_string()),
-    }
-}
-
 fn send_request(request: &str) -> Result<(), String> {
     let mut socket = get_socket(5)?;
     let mut error = String::new();
 
     for _ in 0..5 {
+        //TODO: there might be a more elegant way of doing this error handling
         match socket.write_all(request.as_bytes()) {
             Ok(_) => return Ok(()),
             Err(e) => error = e.to_string(),
