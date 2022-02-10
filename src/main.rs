@@ -35,7 +35,7 @@ fn main() -> Result<(), String> {
     wait_for_response()?;
     if let Fswww::Kill = fswww {
         let socket_path = get_socket_path();
-        for _ in 0..5 {
+        for _ in 0..10 {
             if !socket_path.exists() {
                 return Ok(());
             }
