@@ -79,8 +79,10 @@ impl Processor {
                 }
             }
         }
-        for i in to_remove {
-            let animator = self.animations.swap_remove(i);
+        //If we remove one 'i', the next indexes will become i - 1. If we remove two 'i's, the next
+        //indexes will become i - 2. So on and so forth.
+        for (offset, i) in to_remove.iter().enumerate() {
+            let animator = self.animations.remove(i - offset);
             if let Err(e) = animator.thread_handle.join() {
                 error!("Animation thread panicked: {:?}", e);
             };
