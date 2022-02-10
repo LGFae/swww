@@ -123,13 +123,17 @@ fn spawn_daemon(no_daemon: bool) -> Result<(), String> {
     if no_daemon {
         daemon::main();
     }
-    match fork::daemon(false, false) {
-        Ok(fork::Fork::Child) => {
-            daemon::main();
-            Ok(())
-        }
+    match fork::fork() {
+        Ok(fork::Fork::Child) => match fork::daemon(false, false) {
+            Ok(fork::Fork::Child) => {
+                daemon::main();
+                Ok(())
+            }
+            Ok(fork::Fork::Parent(_)) => Ok(()),
+            Err(_) => Err("Couldn't daemonize process!".to_string()),
+        },
         Ok(fork::Fork::Parent(_)) => Ok(()),
-        Err(_) => Err("Couldn't daemonize process!".to_string()),
+        Err(_) => Err("Couldn't fork process!".to_string()),
     }
 }
 

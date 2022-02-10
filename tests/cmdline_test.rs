@@ -14,7 +14,6 @@ const TEST_IMGS: [&str; 3] = [
 
 fn main() {
     init_daemon();
-    sleep(Duration::from_millis(100));
     init_daemon_twice();
     sending_imgs();
     sending_img_that_does_not_exist();
