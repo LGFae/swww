@@ -24,6 +24,7 @@ fn main() {
     sending_img_to_individual_monitors(&output);
     sending_img_to_monitor_that_does_not_exist();
     sending_img_with_custom_transition();
+    clear_outputs();
     killing_daemon();
     cmd().arg("query").assert().failure(); //daemon is dead, so this should fail
 }
@@ -102,6 +103,10 @@ fn sending_img_with_custom_transition() {
         .arg("200")
         .assert()
         .success();
+}
+
+fn clear_outputs() {
+    cmd().arg("clear").assert().success();
 }
 
 fn killing_daemon() {
