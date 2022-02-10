@@ -3,6 +3,4 @@ Fully automated, complete testing
 
 Use generic images in test_images
 
-Make sure to exit cleanly on SIGTERM
-
 Manpages
