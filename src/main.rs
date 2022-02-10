@@ -16,7 +16,7 @@ fn main() -> Result<(), String> {
     match &fswww {
         Fswww::Clear(clear) => send_clear(clear)?,
         Fswww::Init { no_daemon } => {
-            if get_socket().is_err() {
+            if get_socket(1, 0).is_err() {
                 spawn_daemon(*no_daemon)?;
             } else {
                 return Err("There seems to already be another instance running...".to_string());
@@ -162,7 +162,7 @@ fn send_img(img: &Img) -> Result<(), String> {
 }
 
 fn send_request(request: &str) -> Result<(), String> {
-    let mut socket = get_socket()?;
+    let mut socket = get_socket(5, 100)?;
     let timeout = Duration::from_millis(500);
     if let Err(e) = socket.set_write_timeout(Some(timeout)) {
         return Err(format!("Failed to set write timeout: {}", e));
@@ -178,10 +178,12 @@ fn send_request(request: &str) -> Result<(), String> {
 ///
 /// * `tries` -  how make times to attempt the connection
 /// * `interval` - how long to wait between attempts, in milliseconds
-fn get_socket() -> Result<UnixStream, String> {
+fn get_socket(tries: u8, interval: u64) -> Result<UnixStream, String> {
+    //Make sure we try at least once
+    let tries = if tries == 0 { 1 } else { tries };
     let path = get_socket_path();
     let mut error = String::new();
-    for _ in 0..5 {
+    for _ in 0..tries {
         match UnixStream::connect(&path) {
             Ok(socket) => {
                 if let Err(e) = socket.set_nonblocking(false) {
@@ -191,7 +193,7 @@ fn get_socket() -> Result<UnixStream, String> {
             }
             Err(e) => error = e.to_string(),
         }
-        std::thread::sleep(Duration::from_millis(100));
+        std::thread::sleep(Duration::from_millis(interval));
     }
     Err("Failed to connect to socket: ".to_string() + &error)
 }
@@ -208,7 +210,7 @@ fn get_socket_path() -> PathBuf {
 
 ///Timeouts in 10 seconds in release and in 20 in debug
 fn wait_for_response() -> Result<(), String> {
-    let mut socket = get_socket()?;
+    let mut socket = get_socket(5, 100)?;
     let mut buf = String::with_capacity(100);
     let mut error = String::new();
 
