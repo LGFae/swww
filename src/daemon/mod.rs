@@ -350,14 +350,17 @@ fn run_main_loop(
             calloop::generic::Generic::new(listener, calloop::Interest::READ, calloop::Mode::Level),
             |_, listener, loop_signal| {
                 let mut processor = processor.borrow_mut();
-                //TODO: eliminate the '?' bellow
-                recv_socket_msg(bgs.borrow_mut(), listener, loop_signal, &mut processor)?;
-
-                //We must flush here because if multiple requests are sent at once the loop might
-                //never be idle, and so the callback in the run function bellow wouldn't be called
-                if let Err(e) = display.flush() {
-                    error!("Couldn't flush display: {}", e);
-                }
+                match recv_socket_msg(bgs.borrow_mut(), listener, loop_signal, &mut processor) {
+                    Err(e) => error!("Failed to receive socket message: {}", e),
+                    Ok(()) => {
+                        //We must flush here because if multiple requests are sent at once the loop
+                        //might never be idle, and so the callback in the run function bellow
+                        //wouldn't be called (afaik)
+                        if let Err(e) = display.flush() {
+                            error!("Couldn't flush display: {}", e);
+                        }
+                    }
+                };
                 Ok(calloop::PostAction::Continue)
             },
         )
