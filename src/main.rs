@@ -16,7 +16,7 @@ fn main() -> Result<(), String> {
     match &fswww {
         Fswww::Clear(clear) => send_clear(clear)?,
         Fswww::Init { no_daemon } => {
-            if get_socket().is_err() {
+            if get_socket(1).is_err() {
                 spawn_daemon(*no_daemon)?;
             } else {
                 return Err("There seems to already be another instance running...".to_string());
@@ -162,7 +162,7 @@ fn send_img(img: &Img) -> Result<(), String> {
 }
 
 fn kill() -> Result<(), String> {
-    let mut socket = get_socket()?;
+    let mut socket = get_socket(5)?;
     match socket.write(b"__KILL__") {
         Ok(_) => Ok(()),
         Err(e) => Err(e.to_string()),
@@ -170,7 +170,7 @@ fn kill() -> Result<(), String> {
 }
 
 fn send_request(request: &str) -> Result<(), String> {
-    let mut socket = get_socket()?;
+    let mut socket = get_socket(5)?;
     let mut error = String::new();
 
     for _ in 0..5 {
@@ -187,11 +187,16 @@ fn send_request(request: &str) -> Result<(), String> {
 ///connections in a nonblocking fashion, so it makes sense to make this the standard for the whole
 ///program. The only difference is that we will have to make timeouts manually by trying to connect
 ///several times in a row, waiting some time between every attempt.
-pub fn get_socket() -> Result<UnixStream, String> {
+///
+/// * `tries` -  how make times to attempt the connection
+pub fn get_socket(attempts: u8) -> Result<UnixStream, String> {
+    if attempts == 0 {
+        return Err("When getting the socket, attempts must be bigger than 0".to_string());
+    }
     let path = get_socket_path();
     let mut error = String::new();
     //We try to connect 5 fives, waiting 100 milis in between
-    for _ in 0..5 {
+    for _ in 0..attempts {
         match UnixStream::connect(&path) {
             Ok(socket) => {
                 if let Err(e) = socket.set_nonblocking(true) {
@@ -218,7 +223,7 @@ fn get_socket_path() -> PathBuf {
 
 ///Timeouts in 10 seconds
 fn wait_for_response() -> Result<(), String> {
-    let mut socket = get_socket()?;
+    let mut socket = get_socket(5)?;
     let mut buf = String::with_capacity(100);
     let mut error = String::new();
 
