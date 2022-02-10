@@ -206,7 +206,7 @@ fn get_socket_path() -> PathBuf {
     runtime_dir.join("fswww.socket")
 }
 
-///Timeouts in 10 seconds
+///Timeouts in 10 seconds in release and in 20 in debug
 fn wait_for_response() -> Result<(), String> {
     let mut socket = get_socket()?;
     let mut buf = String::with_capacity(100);
