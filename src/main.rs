@@ -212,7 +212,6 @@ fn get_socket_path() -> PathBuf {
 fn wait_for_response() -> Result<(), String> {
     let mut socket = get_socket(5, 100)?;
     let mut buf = String::with_capacity(100);
-    let mut error = String::new();
 
     #[cfg(debug_assertions)]
     let tries = 40; //Some operations take a while to respond in debug mode
@@ -235,8 +234,13 @@ fn wait_for_response() -> Result<(), String> {
                     return Err(format!("daemon returned a badly formatted answer: {}", buf));
                 }
             }
-            Err(e) => error = e.to_string(),
+            Err(e) => {
+                //If the error is a timeout we just try again
+                if let std::io::ErrorKind::TimedOut = e.kind() {
+                    return Err(e.to_string());
+                }
+            }
         }
     }
-    Err("Error while waiting for response: ".to_string() + &error)
+    Err("daemon response wasn't sent.".to_string())
 }
