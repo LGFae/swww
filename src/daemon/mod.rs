@@ -350,6 +350,7 @@ fn run_main_loop(
             calloop::generic::Generic::new(listener, calloop::Interest::READ, calloop::Mode::Level),
             |_, listener, loop_signal| {
                 let mut processor = processor.borrow_mut();
+                //TODO: eliminate the '?' bellow
                 recv_socket_msg(bgs.borrow_mut(), listener, loop_signal, &mut processor)?;
 
                 //We must flush here because if multiple requests are sent at once the loop might
@@ -367,10 +368,8 @@ fn run_main_loop(
         .unwrap();
 
     //IMPORTANT: For here on out, any failures must NOT result in a panic. We need to exit cleanly.
-    //If it's unrecoverable, we should also delete the socket. Note that on normal exit the cleanup
-    //happens at the calling fswww instance (because we can't send back an answer after we've
-    //removed the socket. So we can only assure the user the socket has been removed in the fswww
-    //client).
+    //It is specially important to delete the socket file, since that will cause an attempt to
+    //launch a new instance of the daemon to fail
     info!("Initialization succeeded! Starting main loop...");
     let mut loop_signal = event_loop.get_signal();
     if let Err(e) = event_loop.run(None, &mut loop_signal, |_| {
