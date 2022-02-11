@@ -20,6 +20,14 @@ fn main() -> Result<(), Error> {
             comp_file
         );
     }
+    if let Err(e) = std::process::Command::new("./fix_zsh_completion.sh").output() {
+        println!(
+            "cargo:warning=FAILED TO RUN fix_zsh_completion.sh SCRIPT: {}",
+            e
+        );
+    } else {
+        println!("cargo:warning=ran fix_zsh_completion.sh script.");
+    }
     Ok(())
 }
 
