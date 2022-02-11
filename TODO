@@ -1,5 +1,13 @@
+Serialize the fswww struct, so that we can send it through the socket, instead of transforming it into and from a string
+
+Idea: resize the image in the client, and send all information ready to the daemon.
+This will bypass any problems the image crate is creating in regards to memory performance.
+It will also fix the current issue we have with waiting for the daemon to confirm it finished the image processing,
+since that should become a lot faster.
+
 Fully automated, complete testing
 	- This includes basic memory benchmarking
+	- Use criterion for this!
 
 Use generic images in test_images
 
