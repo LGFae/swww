@@ -4,6 +4,9 @@ Idea: resize the image in the client, and send all information ready to the daem
 This will bypass any problems the image crate is creating in regards to memory performance.
 It will also fix the current issue we have with waiting for the daemon to confirm it finished the image processing,
 since that should become a lot faster.
+Note that, for an animated gif, we can compress all the frames directly in the client, except for the first one.
+The first frame (or img if it isn't animated) can't be compressed because we need the previous frame to do the transition.
+When sending the image, we can ignore the filter argument.
 
 Fully automated, complete testing
 	- This includes basic memory benchmarking

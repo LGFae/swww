@@ -89,6 +89,8 @@ impl Processor {
         }
     }
 
+    //TODO: if two images will have the same animation, but have differen current images,
+    //this will make the animations independent from each other, which isn't really necessary
     fn transition(
         &mut self,
         request: &Img,
