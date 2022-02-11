@@ -10,9 +10,9 @@
 printf  "':path:->files' \\
 && ret=0
 case \$state in
-        files) # Only complete the files we support with the image crate
-			_files -g \"*.png|*.jpg|*.jpeg|*.gif|*.bmp|*.tif|*.tiff|*.ico|*.webp|*.avif|*.pnm|*.pbm|*.pgm|*.ppm|*.dds|*.tga|*.exr|*.ff|*.farbfeld\"
-                ;;
+	files) # Only complete the files we support with the image crate
+		_files -g \"*.png|*.jpg|*.jpeg|*.gif|*.bmp|*.tif|*.tiff|*.ico|*.webp|*.avif|*.pnm|*.pbm|*.pgm|*.ppm|*.dds|*.tga|*.exr|*.ff|*.farbfeld\"
+		;;
 esac" | sed \
 	-e '/:path .*/r /dev/stdin' \
 	-e 's/esac&& ret=0/esac/1' \
