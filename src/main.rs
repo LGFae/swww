@@ -8,6 +8,7 @@ use std::{
 };
 
 mod cli;
+mod communication;
 mod daemon;
 use cli::{Clear, Filter, Fswww, Img};
 

@@ -1,11 +1,12 @@
 //Note: this file only has basic declarations and some definitions in order to be possible to
 //import it in the build script, to automate shell completion
 use hex::{self, FromHex};
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 use clap::Parser;
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum Filter {
     Nearest,
     Triangle,
@@ -41,7 +42,7 @@ impl std::fmt::Display for Filter {
     }
 }
 
-#[derive(Debug, Parser)]
+#[derive(Debug, Parser, Serialize, Deserialize)]
 #[clap(version, name = "fswww")]
 ///The Final Solution to your Wayland Wallpaper Woes
 ///
@@ -80,7 +81,7 @@ pub enum Fswww {
     Query,
 }
 
-#[derive(Debug, Parser)]
+#[derive(Debug, Parser, Serialize, Deserialize)]
 pub struct Clear {
     /// Color to fill the screen with.
     ///
@@ -95,7 +96,7 @@ pub struct Clear {
     pub outputs: String,
 }
 
-#[derive(Debug, Parser)]
+#[derive(Debug, Parser, Serialize, Deserialize)]
 pub struct Img {
     /// Path to the image to display
     #[clap(parse(from_os_str))]
