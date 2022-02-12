@@ -316,6 +316,8 @@ fn run_main_loop(
     display: &Display,
     listener: UnixListener,
 ) {
+    //We use 1 because we can't send a new frame without being absolutely sure that all previous
+    //have already been displayed
     let (frame_sender, frame_receiver) = calloop::channel::sync_channel(1);
     let processor = Rc::new(RefCell::new(processor::Processor::new(frame_sender)));
     let mut event_loop = calloop::EventLoop::<calloop::LoopSignal>::try_new().unwrap();
