@@ -316,8 +316,6 @@ fn run_main_loop(
     display: &Display,
     listener: UnixListener,
 ) {
-    let cleanup = RefCell::new(false);
-
     let (frame_sender, frame_receiver) = calloop::channel::sync_channel(1);
     let processor = Rc::new(RefCell::new(processor::Processor::new(frame_sender)));
     let mut event_loop = calloop::EventLoop::<calloop::LoopSignal>::try_new().unwrap();
@@ -327,11 +325,7 @@ fn run_main_loop(
     if let Ok(signals) = signals::Signals::new(&[Signal::SIGINT, Signal::SIGQUIT, Signal::SIGTERM])
     {
         event_handle
-            .insert_source(signals, |_, _, loop_signal| {
-                let mut cleanup = cleanup.borrow_mut();
-                *cleanup = true;
-                loop_signal.stop();
-            })
+            .insert_source(signals, |_, _, loop_signal| loop_signal.stop())
             .unwrap();
     } else {
         error!("failed to register signals to stop program!");
