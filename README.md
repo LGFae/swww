@@ -1,16 +1,16 @@
 # The Final Solution to your Wayland Wallpaper Woes
 ### Efficient animated wallpaper daemon for wayland, controlled at runtime
 
-#### Dependencies
+## Dependencies
 
  - a compositor that implements:
    * wlr-layer-shell
    * xdg-output
    * xdg-shell
 
-#### Build
+## Build
 
-##### Dependencies:
+### Dependencies:
 
   - Up to date stable rustc compiler and cargo
 
@@ -22,14 +22,14 @@ Then, put the binary at `target/release/fswww` in your path.
 Optionally, autocompletion scripts for bash, zsh, fish and elvish are offered
 in the `completions` directory.
 
-#### Features
+## Features
 
  - Display animated gifs on your desktop
  - Display any image in a format that is decodable by the [image](https://docs.rs/image/latest/image/codecs/index.html#supported-formats) crate.
  - Clear the screen with an arbitrary rrggbb color
  - Smooth transition effect when you switch images
 
-#### Why
+## Why
 
 There are two main reasons that compelled me to make this, the first, that
 [oguri](https://github.com/vilhalmer/oguri) hasn't updated in over a year as I
@@ -49,7 +49,7 @@ example, cycle through the images of a directory, you'd have to kill the daemon
 and restart it. Not only does it make simple shell scripts a pain to write, it
 makes switch from one image to the next to happen very abruptly.
 
-#### Usage
+## Usage
 
 Start by initializing the daemon:
 ```
@@ -80,7 +80,7 @@ fswww kill
 For a more complete description, run *fswww --help* or *fswww \<subcommand\>
 --help*.
 
-### Caveats/Limitations
+## Caveats/Limitations
 
 I had a glorious name when I started this project, but alas, I couldn't quite
 get there, here are some issues with it:
