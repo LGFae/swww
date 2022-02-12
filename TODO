@@ -1,8 +1,8 @@
-Serialize the fswww struct, so that we can send it through the socket, instead of transforming it into and from a string
-
 Fully automated, complete testing
 	- This includes basic memory benchmarking
 	- Use criterion for this!
+
+REGISTER THE CURRENT IMAGE IN THE BG STRUCT
 
 Use generic images in test_images
 
