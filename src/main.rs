@@ -11,7 +11,7 @@ mod daemon;
 use cli::{Filter, Fswww};
 
 fn main() -> Result<(), String> {
-    let fswww = Fswww::parse();
+    let mut fswww = Fswww::parse();
     if let Fswww::Init { no_daemon } = fswww {
         if get_socket(1, 0).is_err() {
             spawn_daemon(no_daemon)?;
@@ -57,7 +57,13 @@ impl Filter {
 }
 
 impl Fswww {
-    pub fn send(&self, stream: &UnixStream) -> Result<(), String> {
+    pub fn send(&mut self, stream: &UnixStream) -> Result<(), String> {
+        if let Fswww::Img(img) = self {
+            img.path = match img.path.canonicalize() {
+                Ok(p) => p,
+                Err(e) => return Err(format!("Coulnd't get absolute path: {}", e)),
+            };
+        }
         match bincode::serialize_into(stream, self) {
             Ok(()) => Ok(()),
             Err(e) => Err(format!("Failed to serialize request: {}", e)),

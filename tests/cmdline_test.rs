@@ -1,5 +1,3 @@
-use std::{thread::sleep, time::Duration};
-
 use assert_cmd::Command;
 
 fn cmd() -> Command {

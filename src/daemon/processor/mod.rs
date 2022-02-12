@@ -45,14 +45,16 @@ impl Processor {
 
         for group in get_outputs_groups(bgs, outputs) {
             self.stop_animations(&group);
-            //We check if we can open and read the image before sending it, so these should never fail
             //Note these can't be moved outside the loop without creating some memory overhead
-            let img_buf = image::io::Reader::open(&request.path)
-                .expect("Failed to open image, though this should be impossible...");
+            let img_buf = match image::io::Reader::open(&request.path) {
+                Ok(i) => i,
+                Err(e) => return Err(format!("failed to open image: {}", e)),
+            };
             let format = img_buf.format();
-            let img = img_buf
-                .decode()
-                .expect("Img decoding failed, though this should be impossible...");
+            let img = match img_buf.decode() {
+                Ok(i) => i,
+                Err(e) => return Err(format!("failed to decode image: {}", e)),
+            };
 
             let bg = bgs
                 .iter_mut()
