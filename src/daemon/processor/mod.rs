@@ -243,12 +243,7 @@ fn complete_transition(
         compressed_img.shrink_to_fit();
         comp_decomp::mixed_decomp(&mut old_img, &compressed_img);
 
-        if send_frame(
-            compressed_img,
-            outputs,
-            duration.saturating_sub(now.elapsed()),
-            sender,
-        ) {
+        if send_frame(&compressed_img, outputs, &duration, &mut now, sender) {
             return false;
         }
         if done {
@@ -298,12 +293,7 @@ fn animate(
 
         cached_frames.push((compressed_frame.clone(), duration));
 
-        if send_frame(
-            compressed_frame,
-            outputs,
-            duration.saturating_sub(now.elapsed()),
-            &sender,
-        ) {
+        if send_frame(&compressed_frame, outputs, &duration, &mut now, &sender) {
             return;
         };
         now = Instant::now();
@@ -330,12 +320,7 @@ fn loop_animation(
     info!("Finished caching the frames!");
     loop {
         for (cached_img, duration) in cached_frames {
-            if send_frame(
-                cached_img.clone(),
-                outputs,
-                duration.saturating_sub(now.elapsed()),
-                &sender,
-            ) {
+            if send_frame(cached_img, outputs, duration, &mut now, &sender) {
                 return;
             };
             now = Instant::now();
@@ -371,24 +356,30 @@ fn img_resize(img: image::DynamicImage, dimensions: (u32, u32), filter: FilterTy
 
 ///Returns whether the calling function should exit or not
 fn send_frame(
-    frame: Vec<u8>,
+    frame: &[u8],
     outputs: &mut Arc<RwLock<Vec<String>>>,
-    timeout: Duration,
+    timeout: &Duration,
+    now: &mut Instant,
     sender: &SyncSender<(Vec<String>, Vec<u8>)>,
 ) -> bool {
-    thread::sleep(timeout); //TODO: better timeout?
-    match outputs.read() {
-        Ok(outputs) => {
-            //This means a new image will be displayed instead, and this animation must end
-            //This means the receiver died for some reason, and this animation must also end
-            if outputs.is_empty() || sender.send((outputs.clone(), frame)).is_err() {
+    loop {
+        thread::sleep(timeout.saturating_sub(now.elapsed())); //TODO: better timeout?
+        match outputs.read() {
+            Ok(outputs) => {
+                //This means a new image will be displayed instead, and this animation must end
+                if outputs.is_empty() {
+                    return true;
+                }
+                match sender.try_send((outputs.clone(), frame.to_vec())) {
+                    Ok(()) => return false,
+                    Err(std::sync::mpsc::TrySendError::Full(_)) => *now = Instant::now(), //we try again in this case
+                    Err(std::sync::mpsc::TrySendError::Disconnected(_)) => return true,
+                }
+            }
+            Err(e) => {
+                error!("Error when sending frame from processor: {}", e);
                 return true;
             }
         }
-        Err(e) => {
-            error!("Error when sending frame from processor: {}", e);
-            return true;
-        }
     }
-    false
 }
