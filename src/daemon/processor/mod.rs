@@ -14,7 +14,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use super::Bg;
+use super::{Bg, BgImg};
 use crate::cli::Img;
 pub mod comp_decomp;
 
@@ -56,12 +56,17 @@ impl Processor {
                 Err(e) => return Err(format!("failed to decode image: {}", e)),
             };
 
-            let bg = bgs
-                .iter_mut()
-                .find(|bg| bg.output_name == group[0])
-                .unwrap();
-            let dimensions = bg.dimensions;
-            let old_img = bg.get_current_img();
+            let mut dimensions = (0, 0);
+            let mut old_img: &[u8] = &[0];
+            for bg in bgs.iter_mut().filter(|bg| group.contains(&bg.output_name)) {
+                bg.img = BgImg::Img(request.path.clone());
+                if dimensions == (0, 0) {
+                    dimensions = bg.dimensions;
+                }
+                if old_img == [0] {
+                    old_img = bg.get_current_img();
+                }
+            }
             let img_resized = img_resize(img, dimensions, request.filter.get_image_filter());
 
             self.transition(&request, old_img, img_resized, dimensions, group, format);

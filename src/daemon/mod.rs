@@ -39,6 +39,12 @@ enum RenderEvent {
     Closed,
 }
 
+#[derive(Debug, PartialEq, Clone)]
+pub enum BgImg {
+    Color([u8; 3]),
+    Img(PathBuf),
+}
+
 pub struct Bg {
     output_name: String,
     surface: wl_surface::WlSurface,
@@ -46,7 +52,7 @@ pub struct Bg {
     next_render_event: Rc<Cell<Option<RenderEvent>>>,
     pool: MemPool,
     dimensions: (u32, u32),
-    img: Option<PathBuf>,
+    img: BgImg,
 }
 
 impl Bg {
@@ -99,7 +105,7 @@ impl Bg {
             pool,
             output_name,
             dimensions: (0, 0),
-            img: None,
+            img: BgImg::Color([0, 0, 0]),
         })
     }
 
@@ -130,6 +136,7 @@ impl Bg {
 
     ///'color' argument is in rbg. We copy it correctly to brgx inside the function
     fn clear(&mut self, color: [u8; 3]) {
+        self.img = BgImg::Color(color);
         let stride = 4 * self.dimensions.0 as i32;
         let width = self.dimensions.0 as i32;
         let height = self.dimensions.1 as i32;
@@ -334,7 +341,7 @@ fn run_main_loop(
 
     event_handle
         .insert_source(frame_receiver, |evt, _, loop_signal| match evt {
-            channel::Event::Msg(msg) => handle_recv_img(&mut bgs.borrow_mut(), &msg, None),
+            channel::Event::Msg(msg) => handle_recv_img(&mut bgs.borrow_mut(), &msg),
             channel::Event::Closed => loop_signal.stop(),
         })
         .unwrap();
@@ -419,20 +426,13 @@ fn recv_socket_msg(
     Ok(())
 }
 
-fn handle_recv_img(
-    bgs: &mut RefMut<Vec<Bg>>,
-    msg: &(Vec<String>, Vec<u8>),
-    img_path: Option<&Path>,
-) {
+fn handle_recv_img(bgs: &mut RefMut<Vec<Bg>>, msg: &(Vec<String>, Vec<u8>)) {
     let (outputs, img) = msg;
     if outputs.is_empty() {
         warn!("Received empty list of outputs from processor, which should be impossible");
     }
     for bg in bgs.iter_mut() {
         if outputs.contains(&bg.output_name) {
-            if let Some(path) = img_path {
-                bg.img = Some(path.to_path_buf());
-            }
             bg.draw(img);
         }
     }
@@ -442,8 +442,8 @@ fn outputs_name_and_dim(bgs: &mut RefMut<Vec<Bg>>) -> String {
     let mut str = String::new();
     for bg in bgs.iter() {
         str += &format!(
-            "{} - Dimensions: {}x{}\n",
-            bg.output_name, bg.dimensions.0, bg.dimensions.1
+            "{} - {}x{}, currently displaying: {:?}\n",
+            bg.output_name, bg.dimensions.0, bg.dimensions.1, bg.img
         );
     }
     str
