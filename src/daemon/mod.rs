@@ -23,7 +23,7 @@ use std::{
     cell::{Cell, RefCell, RefMut},
     fs,
     io::{Read, Write},
-    os::unix::net::UnixListener,
+    os::unix::net::{UnixListener, UnixStream},
     path::{Path, PathBuf},
     rc::Rc,
     str::FromStr,
@@ -346,17 +346,23 @@ fn run_main_loop(
             calloop::generic::Generic::new(listener, calloop::Interest::READ, calloop::Mode::Level),
             |_, listener, loop_signal| {
                 let mut processor = processor.borrow_mut();
-                match recv_socket_msg(bgs.borrow_mut(), listener, loop_signal, &mut processor) {
-                    Err(e) => error!("Failed to receive socket message: {}", e),
-                    Ok(()) => {
-                        //We must flush here because if multiple requests are sent at once the loop
-                        //might never be idle, and so the callback in the run function bellow
-                        //wouldn't be called (afaik)
-                        if let Err(e) = display.flush() {
-                            error!("Couldn't flush display: {}", e);
+                match listener.accept() {
+                    Ok((stream, _)) => {
+                        match recv_socket_msg(bgs.borrow_mut(), stream, loop_signal, &mut processor)
+                        {
+                            Err(e) => error!("Failed to receive socket message: {}", e),
+                            Ok(()) => {
+                                //We must flush here because if multiple requests are sent at once the loop
+                                //might never be idle, and so the callback in the run function bellow
+                                //wouldn't be called (afaik)
+                                if let Err(e) = display.flush() {
+                                    error!("Couldn't flush display: {}", e);
+                                }
+                            }
                         }
                     }
-                };
+                    Err(e) => error!("Failed to accept connection: {}", e),
+                }
                 Ok(calloop::PostAction::Continue)
             },
         )
@@ -396,32 +402,22 @@ fn run_main_loop(
 
 fn recv_socket_msg(
     mut bgs: RefMut<Vec<Bg>>,
-    listener: &UnixListener,
+    mut stream: UnixStream,
     loop_signal: &calloop::LoopSignal,
     processor: &mut processor::Processor,
 ) -> Result<(), std::io::Error> {
-    match listener.accept() {
-        Ok((mut socket, _)) => {
-            let mut buf = String::with_capacity(100);
-            if let Err(e) = socket.read_to_string(&mut buf) {
-                error!("Failed to read socket: {}", e);
-                return Err(e);
-            };
-            let request = Fswww::from_str(&buf);
-            let mut answer = Ok(String::new());
-            match request {
-                Ok(Fswww::Clear(clear)) => answer = clear_outputs(&mut bgs, clear),
-                Ok(Fswww::Kill) => loop_signal.stop(),
-                Ok(Fswww::Img(img)) => answer = processor.process(&mut bgs, img),
-                Ok(Fswww::Init { .. }) => (), //This only exists for us to send an answer back
-                Ok(Fswww::Query) => answer = Ok(outputs_name_and_dim(&mut bgs)),
-                Err(e) => answer = Err(e),
-            }
-            send_answer(answer, listener);
-            Ok(())
-        }
-        Err(e) => Err(e),
+    let request = Fswww::receive(&mut stream);
+    let mut answer = Ok(String::new());
+    match request {
+        Ok(Fswww::Clear(clear)) => answer = clear_outputs(&mut bgs, clear),
+        Ok(Fswww::Kill) => loop_signal.stop(),
+        Ok(Fswww::Img(img)) => answer = processor.process(&mut bgs, img),
+        Ok(Fswww::Init { .. }) => (), //This only exists for us to send an answer back
+        Ok(Fswww::Query) => answer = Ok(outputs_name_and_dim(&mut bgs)),
+        Err(e) => answer = Err(e),
     }
+    send_answer(answer, &mut stream);
+    Ok(())
 }
 
 fn handle_recv_img(
@@ -478,23 +474,10 @@ fn clear_outputs(bgs: &mut RefMut<Vec<Bg>>, clear: Clear) -> Result<String, Stri
     Ok("".to_string())
 }
 
-fn send_answer(answer: Result<String, String>, listener: &UnixListener) {
-    let mut socket;
-
-    match listener.accept() {
-        Ok((s, _)) => socket = s,
-        Err(e) => {
-            error!(
-                "Failed to get socket stream while sending answer back: {}",
-                e
-            );
-            return;
-        }
-    }
-
+fn send_answer(answer: Result<String, String>, stream: &mut UnixStream) {
     let send_result = match answer {
-        Ok(msg) => socket.write_all(format!("Ok\n{}", msg).as_bytes()),
-        Err(err) => socket.write_all(format!("Err\n{}", err).as_bytes()),
+        Ok(msg) => stream.write_all(format!("Ok\n{}", msg).as_bytes()),
+        Err(err) => stream.write_all(format!("Err\n{}", err).as_bytes()),
     };
     if let Err(e) = send_result {
         error!("Error sending answer back: {}", e);

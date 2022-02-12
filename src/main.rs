@@ -13,26 +13,21 @@ use cli::{Clear, Filter, Fswww, Img};
 
 fn main() -> Result<(), String> {
     let fswww = Fswww::parse();
-    match &fswww {
-        Fswww::Clear(clear) => send_clear(clear)?,
-        Fswww::Init { no_daemon } => {
-            if get_socket(1, 0).is_err() {
-                spawn_daemon(*no_daemon)?;
-            } else {
-                return Err("There seems to already be another instance running...".to_string());
-            }
-            if *no_daemon {
+    if let Fswww::Init { no_daemon } = fswww {
+        if get_socket(1, 0).is_err() {
+            spawn_daemon(no_daemon)?;
+            if no_daemon {
                 return Ok(());
-            } else {
-                send_request("__INIT__")?;
             }
+        } else {
+            return Err("There seems to already be another instance running...".to_string());
         }
-        Fswww::Kill => send_request("__KILL__")?,
-        Fswww::Img(img) => send_img(img)?,
-        Fswww::Query => send_request("__QUERY__")?,
     }
 
-    wait_for_response()?;
+    let mut socket = get_socket(5, 100)?;
+    fswww.send(&socket)?;
+    wait_for_response(&mut socket)?;
+
     if let Fswww::Kill = fswww {
         let socket_path = get_socket_path();
         for _ in 0..10 {
@@ -58,6 +53,22 @@ impl Filter {
             Self::CatmullRom => image::imageops::FilterType::CatmullRom,
             Self::Gaussian => image::imageops::FilterType::Gaussian,
             Self::Lanczos3 => image::imageops::FilterType::Lanczos3,
+        }
+    }
+}
+
+impl Fswww {
+    pub fn send(&self, stream: &UnixStream) -> Result<(), String> {
+        match bincode::serialize_into(stream, self) {
+            Ok(()) => Ok(()),
+            Err(e) => Err(format!("Failed to serialize request: {}", e)),
+        }
+    }
+
+    pub fn receive(stream: &mut UnixStream) -> Result<Self, String> {
+        match bincode::deserialize_from(stream) {
+            Ok(i) => Ok(i),
+            Err(e) => Err(format!("Failed to serialize request: {}", e)),
         }
     }
 }
@@ -213,8 +224,7 @@ fn get_socket_path() -> PathBuf {
 }
 
 ///Timeouts in 10 seconds in release and in 20 in debug
-fn wait_for_response() -> Result<(), String> {
-    let mut socket = get_socket(5, 100)?;
+fn wait_for_response(socket: &mut UnixStream) -> Result<(), String> {
     let mut buf = String::with_capacity(100);
 
     #[cfg(debug_assertions)]
