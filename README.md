@@ -41,7 +41,7 @@ but if felt like quite the overkill for my purposes.
 Comparing to `oguri`, `fswww` uses less cpu power to animate once it has cached
 all the frames in the animation. It should also be **significantly** more
 memory efficient (make sure to see the 
-[Caveats/Limitations](#Caveats/Limitations) though).
+[Caveats/Limitations](#CaveatsLimitations) though).
 
 The second is that, to my knowledge, there is no wallpaper daemon for wayland
 that allows you to change the wallpaper at runtime. That is, is order to, for
