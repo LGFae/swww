@@ -2,8 +2,6 @@ Fully automated, complete testing
 	- This includes basic memory benchmarking
 	- Use criterion for this!
 
-REGISTER THE CURRENT IMAGE IN THE BG STRUCT
-
 Use generic images in test_images
 
 Manpages
