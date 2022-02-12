@@ -22,11 +22,10 @@ use smithay_client_toolkit::{
 use std::{
     cell::{Cell, RefCell, RefMut},
     fs,
-    io::{Read, Write},
+    io::Write,
     os::unix::net::{UnixListener, UnixStream},
     path::{Path, PathBuf},
     rc::Rc,
-    str::FromStr,
 };
 
 use crate::cli::{Clear, Fswww};

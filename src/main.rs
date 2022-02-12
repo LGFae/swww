@@ -1,7 +1,6 @@
 use clap::Parser;
-use hex::{self, FromHex};
 use std::{
-    io::{Read, Write},
+    io::Read,
     os::unix::net::UnixStream,
     path::{Path, PathBuf},
     time::Duration,
@@ -9,7 +8,7 @@ use std::{
 
 mod cli;
 mod daemon;
-use cli::{Clear, Filter, Fswww, Img};
+use cli::{Filter, Fswww};
 
 fn main() -> Result<(), String> {
     let fswww = Fswww::parse();
@@ -73,63 +72,6 @@ impl Fswww {
     }
 }
 
-impl std::str::FromStr for Fswww {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut lines = s.lines();
-        match lines.next() {
-            Some(cmd) => match cmd {
-                "__CLEAR__" => {
-                    let color = lines.next();
-                    let outputs = lines.next();
-
-                    if color.is_none() || outputs.is_none() {
-                        return Err("badly formatted clear request".to_string());
-                    }
-
-                    let color = <[u8; 3]>::from_hex(color.unwrap());
-                    if let Err(e) = color {
-                        return Err(format!("badly formatted clear request: {}", e));
-                    }
-                    let color = color.unwrap();
-
-                    Ok(Self::Clear(Clear {
-                        outputs: outputs.unwrap().to_string(),
-                        color,
-                    }))
-                }
-                "__INIT__" => Ok(Self::Init { no_daemon: false }),
-                "__KILL__" => Ok(Self::Kill),
-                "__QUERY__" => Ok(Self::Query),
-                "__IMG__" => {
-                    let file = lines.next();
-                    let outputs = lines.next();
-                    let filter = lines.next();
-                    let transition_step = lines.next();
-
-                    if filter.is_none()
-                        || outputs.is_none()
-                        || file.is_none()
-                        || transition_step.is_none()
-                    {
-                        return Err("badly formatted img request".to_string());
-                    }
-
-                    Ok(Self::Img(Img {
-                        path: PathBuf::from_str(file.unwrap()).unwrap(),
-                        outputs: outputs.unwrap().to_string(),
-                        filter: Filter::from_str(filter.unwrap())?,
-                        transition_step: transition_step.unwrap().parse().unwrap(),
-                    }))
-                }
-                _ => Err(format!("unrecognized command: {}", cmd)),
-            },
-            None => Err("empty request!".to_string()),
-        }
-    }
-}
-
 fn spawn_daemon(no_daemon: bool) -> Result<(), String> {
     if no_daemon {
         daemon::main();
@@ -145,47 +87,6 @@ fn spawn_daemon(no_daemon: bool) -> Result<(), String> {
         },
         Ok(fork::Fork::Parent(_)) => Ok(()),
         Err(_) => Err("Couldn't fork process!".to_string()),
-    }
-}
-
-fn send_clear(clear: &Clear) -> Result<(), String> {
-    let msg = format!(
-        "__CLEAR__\n{}\n{}\n",
-        hex::encode(clear.color),
-        clear.outputs
-    );
-    send_request(&msg)
-}
-
-///This tests if the img exsits and can be openned before sending it
-fn send_img(img: &Img) -> Result<(), String> {
-    if let Err(e) = image::open(&img.path) {
-        return Err(format!("Cannot open img {:?}: {}", img.path, e));
-    }
-    let abs_path = match img.path.canonicalize() {
-        Ok(p) => p,
-        Err(e) => {
-            return Err(format!("Failed to find absolute path: {}", e));
-        }
-    };
-    let img_path_str = abs_path.to_str().unwrap();
-    let msg = format!(
-        "__IMG__\n{}\n{}\n{}\n{}\n",
-        img_path_str, img.outputs, img.filter, img.transition_step
-    );
-    send_request(&msg)
-}
-
-fn send_request(request: &str) -> Result<(), String> {
-    let mut socket = get_socket(5, 100)?;
-    let timeout = Duration::from_millis(500);
-    if let Err(e) = socket.set_write_timeout(Some(timeout)) {
-        return Err(format!("Failed to set write timeout: {}", e));
-    };
-
-    match socket.write_all(request.as_bytes()) {
-        Ok(_) => Ok(()),
-        Err(e) => Err(e.to_string()),
     }
 }
 
