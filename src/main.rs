@@ -63,6 +63,10 @@ impl Fswww {
                 Ok(p) => p,
                 Err(e) => return Err(format!("Coulnd't get absolute path: {}", e)),
             };
+            if img.transition_step == 0 {
+                eprintln!("A transition_step of 0 is invalid! Defaulting to 20...");
+                img.transition_step = 20;
+            }
         }
         match bincode::serialize_into(stream, self) {
             Ok(()) => Ok(()),
