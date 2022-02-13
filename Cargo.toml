@@ -23,7 +23,7 @@ simplelog = "0.11"
 fork = "0.1"
 clap = {version = "3.0.14", features = ["derive", "wrap_help"]}
 hex = "0.4"
-lz4_flex = {version = "0.9" , default-features = false}
+lzzzz = "1.0"
 serde = {version = "1.0", features = [ "derive" ]}
 bincode = "1.3"
 

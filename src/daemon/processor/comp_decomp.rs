@@ -22,7 +22,7 @@
 //! Note that the frame itself has 4 byte pixels, so take that into account when copying the
 //! difference.
 
-use lz4_flex;
+use lzzzz::lz4f;
 
 ///Note: in its current form, this will panic when len of the arrays is not divisible by 8
 fn diff_byte_header(prev: &[u8], curr: &[u8]) -> Vec<u8> {
@@ -87,13 +87,21 @@ fn diff_byte_header_copy_onto(buf: &mut [u8], diff: &[u8]) {
 ///Compresses by first doing our custom bitpacking compression, and then using lz4
 pub fn mixed_comp(prev: &[u8], curr: &[u8]) -> Vec<u8> {
     let bit_pack = diff_byte_header(prev, curr);
-    lz4_flex::compress_prepend_size(&bit_pack)
+    let mut v = Vec::with_capacity(bit_pack.len() / 2);
+    let prefs = lz4f::PreferencesBuilder::new()
+        .favor_dec_speed(lz4f::FavorDecSpeed::Enabled)
+        .block_size(lz4f::BlockSize::Max256KB)
+        .compression_level(8)
+        .build();
+    lzzzz::lz4f::compress_to_vec(&bit_pack, &mut v, &prefs).unwrap();
+    v
 }
 
 ///Decompresses by first undoing lz4, then undoing our custom bitpacking
 pub fn mixed_decomp(buf: &mut [u8], diff: &[u8]) {
-    let diff = lz4_flex::decompress_size_prepended(diff).unwrap();
-    diff_byte_header_copy_onto(buf, &diff);
+    let mut v = Vec::with_capacity(diff.len() * 3);
+    lz4f::decompress_to_vec(diff, &mut v).unwrap();
+    diff_byte_header_copy_onto(buf, &v);
 }
 
 #[cfg(test)]
