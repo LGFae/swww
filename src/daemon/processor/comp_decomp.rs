@@ -26,43 +26,44 @@ use lzzzz::lz4f;
 
 ///Note: in its current form, this will panic when len of the arrays is not divisible by 8
 fn diff_byte_header(prev: &[u8], curr: &[u8]) -> Vec<u8> {
+    let prev_chunks = prev.chunks_exact(64);
+    let curr_chunks = curr.chunks_exact(64);
+    let remainder = prev_chunks
+        .remainder()
+        .chunks_exact(8)
+        .zip(curr_chunks.remainder().chunks_exact(8));
+
     let mut last_zero_header = 0;
     let mut vec = Vec::with_capacity(56 + (prev.len() * 49) / 64);
-    let mut to_add = Vec::with_capacity(8 * 6);
-    let mut header = 0;
-    let mut i = 0;
-    let mut k = 0;
-    for chunk in prev.chunks_exact(8) {
-        if chunk[0..3] != curr[i..i + 3] || chunk[4..7] != curr[i + 4..i + 7] {
-            to_add.extend_from_slice(&curr[i..i + 3]);
-            to_add.extend_from_slice(&curr[i + 4..i + 7]);
-            header |= 0x80 >> k;
+    let mut header_idx = 0;
+    for (prev, curr) in prev_chunks.zip(curr_chunks) {
+        vec.push(0);
+        for (k, (prev, curr)) in prev.chunks_exact(8).zip(curr.chunks_exact(8)).enumerate() {
+            if prev != curr {
+                vec[header_idx] |= 0x80 >> k;
+                vec.extend_from_slice(&curr[0..3]);
+                vec.extend_from_slice(&curr[4..7]);
+            }
         }
 
-        i += 8;
-        k += 1;
-        if k == 8 {
-            if header == 0 && last_zero_header == 0 {
-                last_zero_header = vec.len();
-            } else if header != 0 && last_zero_header != 0 {
-                last_zero_header = 0;
-            }
-            vec.push(header);
-            vec.extend_from_slice(&to_add);
-            header = 0;
-            to_add.clear();
-            k = 0;
+        if vec[header_idx] != 0 {
+            last_zero_header = vec.len();
+        }
+        header_idx = vec.len();
+    }
+    vec.push(0);
+    for (k, (prev, curr)) in remainder.enumerate() {
+        if prev != curr {
+            vec[header_idx] |= 0x80 >> k;
+            vec.extend_from_slice(&curr[0..3]);
+            vec.extend_from_slice(&curr[4..7]);
         }
     }
-    if header > 0 {
-        //Add whatever's left
-        vec.push(header);
-        vec.extend_from_slice(&to_add);
-    } else if last_zero_header != 0 {
-        //If there's nothing left, we should remove the trailing 0 headers:
+    //Remove the trailing 0 headers, if any:
+    if vec[header_idx] == 0 {
         vec.truncate(last_zero_header);
     }
-    vec.shrink_to_fit();
+
     vec
 }
 
@@ -72,14 +73,18 @@ fn diff_byte_header_copy_onto(buf: &mut [u8], diff: &[u8]) {
     while byte_idx < diff.len() {
         let header = diff[byte_idx];
         byte_idx += 1;
-        for j in (0..8).rev() {
-            if (header >> j) % 2 == 1 {
-                buf[pix_idx * 4..pix_idx * 4 + 3].clone_from_slice(&diff[byte_idx..byte_idx + 3]);
-                buf[pix_idx * 4 + 4..pix_idx * 4 + 7]
-                    .clone_from_slice(&diff[byte_idx + 3..byte_idx + 6]);
-                byte_idx += 6;
+        if header != 0 {
+            for j in (0..8).rev() {
+                if (header >> j) % 2 == 1 {
+                    buf[pix_idx..pix_idx + 3].clone_from_slice(&diff[byte_idx..byte_idx + 3]);
+                    buf[pix_idx + 4..pix_idx + 7]
+                        .clone_from_slice(&diff[byte_idx + 3..byte_idx + 6]);
+                    byte_idx += 6;
+                }
+                pix_idx += 8;
             }
-            pix_idx += 2;
+        } else {
+            pix_idx += 64;
         }
     }
 }
