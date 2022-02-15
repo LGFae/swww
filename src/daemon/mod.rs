@@ -28,7 +28,7 @@ use std::{
     rc::Rc,
 };
 
-use crate::cli::{Clear, Fswww};
+use crate::cli::{Clear, Fswww, Img};
 use crate::Answer;
 
 mod processor;
@@ -440,7 +440,24 @@ fn recv_socket_msg(
             Answer::Ok
         }
         Ok(Fswww::Img(img)) => processor.process(&mut bgs, img),
-        Ok(Fswww::Init { .. }) => Answer::Ok, //This only exists for us to send an answer back
+        Ok(Fswww::Init { img, color, .. }) => {
+            if let Some(img) = img {
+                let request = Img {
+                    path: img,
+                    outputs: "".to_string(),
+                    filter: crate::cli::Filter::Lanczos3,
+                    transition_step: 255,
+                };
+                processor.process(&mut bgs, request)
+            } else if let Some(color) = color {
+                for bg in bgs.iter_mut() {
+                    bg.clear(color);
+                }
+                Answer::Ok
+            } else {
+                Answer::Ok
+            }
+        } //This only exists for us to send an answer back
         Ok(Fswww::Query) => Answer::Info {
             out_dim_img: bgs
                 .iter()

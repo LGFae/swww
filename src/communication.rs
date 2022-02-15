@@ -55,6 +55,12 @@ impl Fswww {
                 img.transition_step = 20;
             }
         }
+        if let Fswww::Init { img: Some(img), .. } = self {
+            *img = match img.canonicalize() {
+                Ok(p) => p,
+                Err(e) => return Err(format!("Coulnd't get absolute path: {}", e)),
+            };
+        }
         match bincode::serialize_into(stream, self) {
             Ok(()) => Ok(()),
             Err(e) => Err(format!("Failed to serialize request: {}", e)),
