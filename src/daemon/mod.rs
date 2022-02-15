@@ -1,4 +1,5 @@
 use log::{debug, error, info, warn};
+use serde::{Deserialize, Serialize};
 use simplelog::{ColorChoice, LevelFilter, TermLogger, TerminalMode};
 
 use smithay_client_toolkit::{
@@ -21,14 +22,14 @@ use smithay_client_toolkit::{
 
 use std::{
     cell::{Cell, RefCell, RefMut},
-    fs,
-    io::Write,
+    fmt, fs,
     os::unix::net::{UnixListener, UnixStream},
     path::{Path, PathBuf},
     rc::Rc,
 };
 
 use crate::cli::{Clear, Fswww};
+use crate::Answer;
 
 mod processor;
 mod wayland;
@@ -39,10 +40,23 @@ enum RenderEvent {
     Closed,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum BgImg {
     Color([u8; 3]),
     Img(PathBuf),
+}
+
+impl fmt::Display for BgImg {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BgImg::Color(color) => write!(f, "color: {}{}{}", color[0], color[1], color[2]),
+            BgImg::Img(p) => write!(
+                f,
+                "image: {:#?}",
+                p.file_name().unwrap_or_else(|| std::ffi::OsStr::new("?"))
+            ),
+        }
+    }
 }
 
 pub struct Bg {
@@ -417,19 +431,25 @@ fn recv_socket_msg(
     mut stream: UnixStream,
     loop_signal: &calloop::LoopSignal,
     processor: &mut processor::Processor,
-) -> Result<(), std::io::Error> {
+) -> Result<(), String> {
     let request = Fswww::receive(&mut stream);
-    let mut answer = Ok(String::new());
-    match request {
-        Ok(Fswww::Clear(clear)) => answer = clear_outputs(&mut bgs, clear),
-        Ok(Fswww::Kill) => loop_signal.stop(),
-        Ok(Fswww::Img(img)) => answer = processor.process(&mut bgs, img),
-        Ok(Fswww::Init { .. }) => (), //This only exists for us to send an answer back
-        Ok(Fswww::Query) => answer = Ok(outputs_name_and_dim(&mut bgs)),
-        Err(e) => answer = Err(e),
-    }
-    send_answer(answer, &mut stream);
-    Ok(())
+    let answer = match request {
+        Ok(Fswww::Clear(clear)) => clear_outputs(&mut bgs, clear),
+        Ok(Fswww::Kill) => {
+            loop_signal.stop();
+            Answer::Ok
+        }
+        Ok(Fswww::Img(img)) => processor.process(&mut bgs, img),
+        Ok(Fswww::Init { .. }) => Answer::Ok, //This only exists for us to send an answer back
+        Ok(Fswww::Query) => Answer::Info {
+            out_dim_img: bgs
+                .iter()
+                .map(|bg| (bg.output_name.clone(), bg.dimensions, bg.img.clone()))
+                .collect(),
+        },
+        Err(e) => Answer::Err { msg: e },
+    };
+    answer.send(&stream)
 }
 
 fn handle_recv_img(bgs: &mut RefMut<Vec<Bg>>, msg: &(Vec<String>, Vec<u8>)) {
@@ -444,18 +464,7 @@ fn handle_recv_img(bgs: &mut RefMut<Vec<Bg>>, msg: &(Vec<String>, Vec<u8>)) {
     }
 }
 
-fn outputs_name_and_dim(bgs: &mut RefMut<Vec<Bg>>) -> String {
-    let mut str = String::new();
-    for bg in bgs.iter() {
-        str += &format!(
-            "{} - {}x{}, currently displaying: {:?}\n",
-            bg.output_name, bg.dimensions.0, bg.dimensions.1, bg.img
-        );
-    }
-    str
-}
-
-fn clear_outputs(bgs: &mut RefMut<Vec<Bg>>, clear: Clear) -> Result<String, String> {
+fn clear_outputs(bgs: &mut RefMut<Vec<Bg>>, clear: Clear) -> Answer {
     let mut bgs_to_change = Vec::with_capacity(bgs.len());
     if clear.outputs.is_empty() {
         for bg in bgs.iter_mut() {
@@ -469,22 +478,14 @@ fn clear_outputs(bgs: &mut RefMut<Vec<Bg>>, clear: Clear) -> Result<String, Stri
         }
     }
     if bgs_to_change.is_empty() {
-        return Err("None of the specified outputs exist!".to_string());
+        return Answer::Err {
+            msg: "None of the specified outputs exist!".to_string(),
+        };
     }
 
     for bg in bgs_to_change {
         bg.clear(clear.color);
     }
 
-    Ok("".to_string())
-}
-
-fn send_answer(answer: Result<String, String>, stream: &mut UnixStream) {
-    let send_result = match answer {
-        Ok(msg) => stream.write_all(format!("Ok\n{}", msg).as_bytes()),
-        Err(err) => stream.write_all(format!("Err\n{}", err).as_bytes()),
-    };
-    if let Err(e) = send_result {
-        error!("Error sending answer back: {}", e);
-    }
+    Answer::Ok
 }

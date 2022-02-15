@@ -1,6 +1,6 @@
 use clap::Parser;
+use serde::{Deserialize, Serialize};
 use std::{
-    io::Read,
     os::unix::net::UnixStream,
     path::{Path, PathBuf},
     time::Duration,
@@ -9,6 +9,42 @@ use std::{
 mod cli;
 mod daemon;
 use cli::{Filter, Fswww};
+
+#[derive(Serialize, Deserialize)]
+pub enum Answer {
+    Ok,
+    Err {
+        msg: String,
+    },
+    Info {
+        out_dim_img: Vec<(String, (u32, u32), daemon::BgImg)>,
+    },
+}
+
+impl Answer {
+    pub fn send(&self, stream: &UnixStream) -> Result<(), String> {
+        match bincode::serialize_into(stream, self) {
+            Ok(()) => Ok(()),
+            Err(e) => Err(format!("Failed to send answer: {}", e)),
+        }
+    }
+
+    pub fn receive(stream: &mut UnixStream) -> Result<Self, String> {
+        #[cfg(debug_assertions)]
+        let timeout = Duration::from_secs(10); //Some operations take a while to respond in debug mode
+        #[cfg(not(debug_assertions))]
+        let timeout = Duration::from_secs(1);
+
+        if let Err(e) = stream.set_read_timeout(Some(timeout)) {
+            return Err(format!("Failed to set read timeout: {}", e));
+        };
+
+        match bincode::deserialize_from(stream) {
+            Ok(i) => Ok(i),
+            Err(e) => Err(format!("Failed to receive answer: {}", e)),
+        }
+    }
+}
 
 fn main() -> Result<(), String> {
     let mut fswww = Fswww::parse();
@@ -25,23 +61,37 @@ fn main() -> Result<(), String> {
 
     let mut socket = get_socket(5, 100)?;
     fswww.send(&socket)?;
-    wait_for_response(&mut socket)?;
-
-    if let Fswww::Kill = fswww {
-        let socket_path = get_socket_path();
-        for _ in 0..10 {
-            if !socket_path.exists() {
-                return Ok(());
+    match Answer::receive(&mut socket)? {
+        Answer::Err { msg } => return Err(msg),
+        Answer::Info { out_dim_img } => {
+            for (output, (width, height), img) in out_dim_img {
+                println!(
+                    "{} - {}x{}, currently displaying: {}",
+                    output, width, height, img
+                );
             }
-            std::thread::sleep(Duration::from_millis(100));
         }
-        return Err(format!(
-            "Could not confirm socket deletion at: {:?}",
-            socket_path
-        ));
-    } else {
-        Ok(())
+        Answer::Ok => {
+            if let Fswww::Kill = fswww {
+                #[cfg(debug_assertions)]
+                let tries = 20;
+                #[cfg(not(debug_assertions))]
+                let tries = 10;
+                let socket_path = get_socket_path();
+                for _ in 0..tries {
+                    if !socket_path.exists() {
+                        return Ok(());
+                    }
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+                return Err(format!(
+                    "Could not confirm socket deletion at: {:?}",
+                    socket_path
+                ));
+            }
+        }
     }
+    Ok(())
 }
 
 impl Filter {
@@ -77,7 +127,7 @@ impl Fswww {
     pub fn receive(stream: &mut UnixStream) -> Result<Self, String> {
         match bincode::deserialize_from(stream) {
             Ok(i) => Ok(i),
-            Err(e) => Err(format!("Failed to serialize request: {}", e)),
+            Err(e) => Err(format!("Failed to deserialize request: {}", e)),
         }
     }
 }
@@ -132,40 +182,4 @@ fn get_socket_path() -> PathBuf {
     };
     let runtime_dir = Path::new(&runtime_dir);
     runtime_dir.join("fswww.socket")
-}
-
-///Timeouts in 10 seconds in release and in 20 in debug
-fn wait_for_response(socket: &mut UnixStream) -> Result<(), String> {
-    let mut buf = String::with_capacity(100);
-
-    #[cfg(debug_assertions)]
-    let tries = 40; //Some operations take a while to respond in debug mode
-    #[cfg(not(debug_assertions))]
-    let tries = 20;
-
-    let timeout = Duration::from_millis(500);
-    if let Err(e) = socket.set_read_timeout(Some(timeout)) {
-        return Err(format!("Failed to set read timeout: {}", e));
-    };
-    for _ in 0..tries {
-        match socket.read_to_string(&mut buf) {
-            Ok(_) => {
-                if let Some(answer) = buf.strip_prefix("Ok\n") {
-                    print!("{}", answer);
-                    return Ok(());
-                } else if let Some(answer) = buf.strip_prefix("Err\n") {
-                    return Err(format!("daemon sent back: {}", answer));
-                } else {
-                    return Err(format!("daemon returned a badly formatted answer: {}", buf));
-                }
-            }
-            Err(e) => {
-                //If the error is a timeout we just try again
-                if let std::io::ErrorKind::TimedOut = e.kind() {
-                    return Err(e.to_string());
-                }
-            }
-        }
-    }
-    Err("daemon response wasn't sent.".to_string())
 }

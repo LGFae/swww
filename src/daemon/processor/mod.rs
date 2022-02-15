@@ -16,6 +16,7 @@ use std::{
 
 use super::{Bg, BgImg};
 use crate::cli::Img;
+use crate::Answer;
 pub mod comp_decomp;
 
 struct Animator {
@@ -36,11 +37,13 @@ impl Processor {
         }
     }
 
-    pub fn process(&mut self, bgs: &mut RefMut<Vec<Bg>>, request: Img) -> Result<String, String> {
+    pub fn process(&mut self, bgs: &mut RefMut<Vec<Bg>>, request: Img) -> Answer {
         let outputs = get_real_outputs(bgs, &request.outputs);
         if outputs.is_empty() {
             error!("None of the outputs sent were valid.");
-            return Err("None of the outputs sent are valid.".to_string());
+            return Answer::Err {
+                msg: "None of the outputs sent are valid.".to_string(),
+            };
         }
 
         for group in get_outputs_groups(bgs, outputs) {
@@ -48,12 +51,20 @@ impl Processor {
             //Note these can't be moved outside the loop without creating some memory overhead
             let img_buf = match image::io::Reader::open(&request.path) {
                 Ok(i) => i,
-                Err(e) => return Err(format!("failed to open image: {}", e)),
+                Err(e) => {
+                    return Answer::Err {
+                        msg: format!("failed to open image '{:#?}': {}", &request.path, e),
+                    }
+                }
             };
             let format = img_buf.format();
             let img = match img_buf.decode() {
                 Ok(i) => i,
-                Err(e) => return Err(format!("failed to decode image: {}", e)),
+                Err(e) => {
+                    return Answer::Err {
+                        msg: format!("failed to decode image '{:#?}': {}", &request.path, e),
+                    }
+                }
             };
 
             let mut dimensions = (0, 0);
@@ -72,7 +83,7 @@ impl Processor {
             self.transition(&request, old_img, img_resized, dimensions, group, format);
         }
         debug!("Finished image processing!");
-        Ok("".to_string())
+        Answer::Ok
     }
 
     pub fn stop_animations(&mut self, to_stop: &[String]) {
