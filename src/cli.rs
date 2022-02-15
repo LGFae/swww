@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use clap::Parser;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub enum Filter {
     Nearest,
     Triangle,
@@ -30,7 +30,7 @@ impl std::str::FromStr for Filter {
     }
 }
 
-#[derive(Debug, Parser, Serialize, Deserialize)]
+#[derive(Parser, Serialize, Deserialize)]
 #[clap(version, name = "fswww")]
 ///The Final Solution to your Wayland Wallpaper Woes
 ///
@@ -84,7 +84,7 @@ pub struct Clear {
     pub outputs: String,
 }
 
-#[derive(Debug, Parser, Serialize, Deserialize)]
+#[derive(Parser, Serialize, Deserialize)]
 pub struct Img {
     /// Path to the image to display
     #[clap(parse(from_os_str))]
