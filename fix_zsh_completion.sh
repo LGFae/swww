@@ -17,5 +17,7 @@ esac" | sed \
 	-e '/:path .*/r /dev/stdin' \
 	-e 's/esac&& ret=0/esac/1' \
 	-e '/:path .*/d' completions/_fswww \
-	> completions/tmp \
-	&& mv completions/tmp completions/_fswww
+	> completions/tmp || exit 1
+
+sed 's/esac&& ret=0/esac/1' completions/tmp > completions/_fswww
+rm completions/tmp
