@@ -1,3 +1,10 @@
+Improved cli user interface:
+	Simply call:
+		fswww <img path | color | query sub | kill sub >
+	And we figure out what to do ourselves.
+		If we got an 'img path' or a 'color' we must check if the daemon is
+		alive. If not, we init it.
+
 Fully automated, complete testing
 	- This includes basic memory benchmarking
 	- Use criterion for this!
