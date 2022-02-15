@@ -69,7 +69,7 @@ pub enum Fswww {
     Query,
 }
 
-#[derive(Debug, Parser, Serialize, Deserialize)]
+#[derive(Parser, Serialize, Deserialize)]
 pub struct Clear {
     /// Color to fill the screen with.
     ///
