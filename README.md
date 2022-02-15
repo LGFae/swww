@@ -25,7 +25,7 @@ in the `completions` directory.
 ## Features
 
  - Display animated gifs on your desktop
- - Display any image in a format that is decodable by the [image](https://docs.rs/image/latest/image/codecs/index.html#supported-formats) crate.
+ - Display any image in a format that is decodable by the [image](https://github.com/image-rs/image#supported-image-formats) crate.
  - Clear the screen with an arbitrary rrggbb color
  - Smooth transition effect when you switch images
 
@@ -86,14 +86,13 @@ I had a glorious name when I started this project, but alas, I couldn't quite
 get there, here are some issues with it:
 
  - Despite trying my best to make this as resource efficient as possible,
- **memory can still be an issue**. In particular, from my testing, memory usage
- is annoying in the following cases:
-
-   * Memory goes up when resizing images. I am still not entirely sure why.
-   * Whenever you switch to an image that *hasn't been displayed yet*, memory
-   also goes up. Note this means that, if you are cycling through a directory,
-   you will only know for sure how much memory `fswww` will use when it goes
-   through all the images at least once. Why is it this way? I have no idea.
+ **memory can still be an issue**. From my testing, this seems to be mostly
+ related to how images are loaded with the
+ [image](https://github.com/image-rs/image#supported-image-formats) crate.
+ For certain formats, it seems that openning the images will bump up the
+ programs memory usage. Strangenly, it also seems that openning the same image
+ again will *not* increase usage further. Still trying to understand what's
+ going on here.
 
 - If you try to initialize `fswww` and display an image as fast as possible using
 your compositor's init script, like so:
