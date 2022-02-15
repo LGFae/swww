@@ -57,6 +57,18 @@ pub enum Fswww {
         ///builds we only log info, warnings and errors, so you won't be seeing much (ideally).
         #[clap(long)]
         no_daemon: bool,
+
+        ///Start the daemon with this color
+        ///
+        ///Mutually exclusive with the --img option.
+        #[clap(long, short, parse(try_from_str = <[u8; 3]>::from_hex),group = "init request")]
+        color: Option<[u8; 3]>,
+
+        ///Start the daemon with this image
+        ///
+        ///Mutually exclusive with the --color option
+        #[clap(long, short, parse(from_os_str), group = "init request")]
+        img: Option<PathBuf>,
     },
 
     ///Kills the daemon

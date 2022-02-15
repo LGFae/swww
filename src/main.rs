@@ -13,7 +13,7 @@ use communication::Answer;
 
 fn main() -> Result<(), String> {
     let mut fswww = Fswww::parse();
-    if let Fswww::Init { no_daemon } = fswww {
+    if let Fswww::Init { no_daemon, .. } = fswww {
         if get_socket(1, 0).is_err() {
             spawn_daemon(no_daemon)?;
             if no_daemon {
