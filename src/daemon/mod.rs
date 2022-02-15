@@ -110,27 +110,29 @@ impl Bg {
     }
 
     /// Handles any events that have occurred since the last call, redrawing if needed.
-    /// Returns true if the surface should be dropped.
-    fn handle_events(&mut self) -> bool {
+    /// Returns whether the surface was configured or not.
+    /// If it was, returns whether or not it should be dropped
+    fn handle_events(&mut self) -> Option<bool> {
         match self.next_render_event.take() {
-            Some(RenderEvent::Closed) => true,
+            Some(RenderEvent::Closed) => Some(true),
             Some(RenderEvent::Configure { width, height }) => {
                 if self.dimensions != (width, height) {
                     self.dimensions = (width, height);
-                    let width = width as usize;
-                    let height = height as usize;
-                    self.pool.resize(width * height * 4).unwrap();
+                    self.pool
+                        .resize(width as usize * height as usize * 4)
+                        .unwrap();
                     self.clear([0, 0, 0]);
                     debug!("Configured output: {}", self.output_name);
+                    Some(false)
                 } else {
                     debug!(
                         "Output {} is already configured correctly.",
                         self.output_name
                     );
+                    None
                 }
-                false
             }
-            None => false,
+            None => None,
         }
     }
 
@@ -388,10 +390,14 @@ fn run_main_loop(
             let mut bgs = bgs.borrow_mut();
             let mut i = 0;
             while i != bgs.len() {
-                if bgs[i].handle_events() {
+                if let Some(should_remove) = bgs[i].handle_events() {
                     let mut processor = processor.borrow_mut();
                     processor.stop_animations(&[bgs[i].output_name.clone()]);
-                    bgs.remove(i);
+                    if should_remove {
+                        bgs.remove(i);
+                    } else {
+                        i += 1;
+                    }
                 } else {
                     i += 1;
                 }
