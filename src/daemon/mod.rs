@@ -174,24 +174,28 @@ impl Bg {
     }
 
     fn draw(&mut self, img: &[u8]) {
-        let stride = 4 * self.dimensions.0 as i32;
-        let width = self.dimensions.0 as i32;
-        let height = self.dimensions.1 as i32;
+        //It's possible to receive one extra img from the processor before it shuts down the
+        //animation. With this test we stop that (there might be a better way of doing this)
+        if let BgImg::Img(_) = self.img {
+            let stride = 4 * self.dimensions.0 as i32;
+            let width = self.dimensions.0 as i32;
+            let height = self.dimensions.1 as i32;
 
-        debug!(
-            "Current state of mempoll for output {}:{:?}",
-            self.output_name, self.pool
-        );
-        let buffer = self
-            .pool
-            .buffer(0, width, height, stride, wl_shm::Format::Xrgb8888);
-        let canvas = self.pool.mmap();
-        processor::comp_decomp::mixed_decomp(canvas, img);
-        debug!("Decompressed img.");
+            debug!(
+                "Current state of mempoll for output {}:{:?}",
+                self.output_name, self.pool
+            );
+            let buffer = self
+                .pool
+                .buffer(0, width, height, stride, wl_shm::Format::Xrgb8888);
+            let canvas = self.pool.mmap();
+            processor::comp_decomp::mixed_decomp(canvas, img);
+            debug!("Decompressed img.");
 
-        self.surface.attach(Some(&buffer), 0, 0);
-        self.surface.damage_buffer(0, 0, width, height);
-        self.surface.commit();
+            self.surface.attach(Some(&buffer), 0, 0);
+            self.surface.damage_buffer(0, 0, width, height);
+            self.surface.commit();
+        }
     }
 
     ///This method is what makes necessary that we use the mempoll, instead of the "easier"
@@ -434,7 +438,7 @@ fn recv_socket_msg(
 ) -> Result<(), String> {
     let request = Fswww::receive(&mut stream);
     let answer = match request {
-        Ok(Fswww::Clear(clear)) => clear_outputs(&mut bgs, clear),
+        Ok(Fswww::Clear(clear)) => clear_outputs(&mut bgs, clear, processor),
         Ok(Fswww::Kill) => {
             loop_signal.stop();
             Answer::Ok
@@ -481,7 +485,11 @@ fn handle_recv_img(bgs: &mut RefMut<Vec<Bg>>, msg: &(Vec<String>, Vec<u8>)) {
     }
 }
 
-fn clear_outputs(bgs: &mut RefMut<Vec<Bg>>, clear: Clear) -> Answer {
+fn clear_outputs(
+    bgs: &mut RefMut<Vec<Bg>>,
+    clear: Clear,
+    processor: &mut processor::Processor,
+) -> Answer {
     let mut bgs_to_change = Vec::with_capacity(bgs.len());
     if clear.outputs.is_empty() {
         for bg in bgs.iter_mut() {
@@ -501,6 +509,7 @@ fn clear_outputs(bgs: &mut RefMut<Vec<Bg>>, clear: Clear) -> Answer {
     }
 
     for bg in bgs_to_change {
+        processor.stop_animations(&[bg.output_name.clone()]);
         bg.clear(clear.color);
     }
 
