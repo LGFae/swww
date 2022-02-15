@@ -25,19 +25,7 @@ impl std::str::FromStr for Filter {
             "CatmullRom" => Ok(Self::CatmullRom),
             "Gaussian" => Ok(Self::Gaussian),
             "Lanczos3" => Ok(Self::Lanczos3),
-            _ => Err("Non existing filter".to_string()),
-        }
-    }
-}
-
-impl std::fmt::Display for Filter {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Nearest => write!(f, "Nearest"),
-            Self::Triangle => write!(f, "Triangle"),
-            Self::CatmullRom => write!(f, "CatmullRom"),
-            Self::Gaussian => write!(f, "Gaussian"),
-            Self::Lanczos3 => write!(f, "Lanczos3"),
+            _ => Err(format!("unrecognized filter: {}", s)),
         }
     }
 }
