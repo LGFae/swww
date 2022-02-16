@@ -1,16 +1,55 @@
+//! These are relatively simple tests just to make sure no basic functionally
+//! was broken by anything. They are no substitute to actually trying to run
+//! the program yourself and seeing if anything broke (e.g. maybe images stopped
+//! rendering correctly, somehow, without the program breaking down)
+
 use assert_cmd::Command;
+use std::path::PathBuf;
+
+const TEST_IMG_DIR: &str = "test_images";
+const TEST_IMGS: [&str; 3] = [
+    "test_images/test1.jpg",
+    "test_images/test2.png",
+    "test_images/test3.bmp",
+];
+
+fn make_img_dir() {
+    let p = PathBuf::from(TEST_IMG_DIR);
+    if !p.is_dir() {
+        std::fs::create_dir(p)
+            .expect("Failed to create directory to put the images used for testing: ");
+    }
+}
+
+fn make_test_imgs() {
+    make_img_dir();
+    for (i, test_img) in TEST_IMGS.iter().enumerate() {
+        let p = PathBuf::from(test_img);
+        if !p.is_file() {
+            //We use i to create images of different dimensions, just to be more through
+            let mut imgbuf = image::ImageBuffer::new(400 * (i as u32 + 1), 400 * (i as u32 + 1));
+
+            //This is taken straight from the image crate fractal example
+            for (x, y, pixel) in imgbuf.enumerate_pixels_mut() {
+                let r = (0.3 * x as f32) as u8;
+                let b = (0.3 * y as f32) as u8;
+                *pixel = image::Rgb([r, 0, b]);
+            }
+
+            imgbuf
+                .save(test_img)
+                .expect("Failed to create image for testing: ");
+        }
+    }
+}
 
 fn cmd() -> Command {
     Command::cargo_bin("fswww").unwrap()
 }
 
-const TEST_IMGS: [&str; 3] = [
-    "test_images/test1.jpg",
-    "test_images/test1.png",
-    "test_images/test2.jpg",
-];
-
 fn main() {
+    make_test_imgs();
+
     init_daemon();
     init_daemon_twice();
     sending_imgs();
