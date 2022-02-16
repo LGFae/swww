@@ -1,5 +1,3 @@
-Fix the zsh completion script for fswww init --img: <path>
-
 Fully automated, complete testing
 	- This includes basic memory benchmarking
 	- Use criterion for this!
