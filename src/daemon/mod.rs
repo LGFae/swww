@@ -245,7 +245,7 @@ pub fn main() {
         env.listen_for_outputs(move |output, info, _| output_handler(output, info));
 
     //NOTE: we can't move display into the function because it causes a segfault
-    run_main_loop(bgs, queue, &display, listener);
+    main_loop(bgs, queue, &display, listener);
     let socket_addr = get_socket_addr();
     if let Err(e) = fs::remove_file(&socket_addr) {
         error!(
@@ -336,7 +336,7 @@ fn get_socket_addr() -> PathBuf {
 }
 
 ///bgs and display can't be moved into here because it causes a segfault
-fn run_main_loop(
+fn main_loop(
     bgs: Rc<RefCell<Vec<Bg>>>,
     queue: EventQueue,
     display: &Display,
@@ -453,15 +453,15 @@ fn recv_socket_msg(
                     transition_step: 255,
                 };
                 processor.process(&mut bgs, request)
-            } else if let Some(color) = color {
-                for bg in bgs.iter_mut() {
-                    bg.clear(color);
+            } else {
+                if let Some(color) = color {
+                    for bg in bgs.iter_mut() {
+                        bg.clear(color);
+                    }
                 }
                 Answer::Ok
-            } else {
-                Answer::Ok
             }
-        } //This only exists for us to send an answer back
+        }
         Ok(Fswww::Query) => Answer::Info {
             out_dim_img: bgs
                 .iter()
