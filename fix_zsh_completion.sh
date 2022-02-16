@@ -7,17 +7,15 @@
 #
 # Bash seems to be fine, and I haven't tested neither fish nor elvish
 #
-printf  "':path:->files' \\
-&& ret=0
-case \$state in
-	files) # Only complete the files we support with the image crate
-		_files -g \"*.png|*.jpg|*.jpeg|*.gif|*.bmp|*.tif|*.tiff|*.ico|*.webp|*.avif|*.pnm|*.pbm|*.pgm|*.ppm|*.dds|*.tga|*.exr|*.ff|*.farbfeld\"
-		;;
-esac" | sed \
-	-e '/:path .*/r /dev/stdin' \
-	-e 's/esac&& ret=0/esac/1' \
-	-e '/:path .*/d' completions/_fswww \
-	> completions/tmp || exit 1
 
-sed 's/esac&& ret=0/esac/1' completions/tmp > completions/_fswww
-rm completions/tmp
+# These are simply the formats supported by the image crate
+SUPPORTED_FILES="*.png|*.jpg|*.jpeg|*.gif|*.bmp|*.tif|*.tiff|*.ico|*.webp|*.avif|*.pnm|*.pbm|*.pgm|*.ppm|*.dds|*.tga|*.exr|*.ff|*.farbfeld"
+
+# in order we fix:
+# 	img <path>
+#	init -i|--img <path>
+sed \
+	-e "s/:path .*:/&_files -g \"$SUPPORTED_FILES\"/" \
+	-e "s/:IMG:/&_files -g \"$SUPPORTED_FILES\"/g" \
+	completions/_fswww > completions/tmp \
+	&& mv completions/tmp completions/_fswww
