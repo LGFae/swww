@@ -18,6 +18,7 @@ use super::{Bg, BgImg};
 use crate::cli::Img;
 use crate::Answer;
 pub mod comp_decomp;
+use comp_decomp::Packed;
 
 struct Animator {
     outputs: Arc<RwLock<Vec<String>>>,
@@ -25,12 +26,12 @@ struct Animator {
 }
 
 pub struct Processor {
-    frame_sender: SyncSender<(Vec<String>, Vec<u8>)>,
+    frame_sender: SyncSender<(Vec<String>, Packed)>,
     animations: Vec<Animator>,
 }
 
 impl Processor {
-    pub fn new(frame_sender: SyncSender<(Vec<String>, Vec<u8>)>) -> Self {
+    pub fn new(frame_sender: SyncSender<(Vec<String>, Packed)>) -> Self {
         Self {
             animations: Vec::new(),
             frame_sender,
@@ -227,7 +228,7 @@ fn complete_transition(
     goal: &[u8],
     step: u8,
     outputs: &mut Arc<RwLock<Vec<String>>>,
-    sender: &SyncSender<(Vec<String>, Vec<u8>)>,
+    sender: &SyncSender<(Vec<String>, Packed)>,
 ) -> bool {
     let mut done = true;
     let mut now = Instant::now();
@@ -257,9 +258,8 @@ fn complete_transition(
             i += 4;
         }
 
-        let mut compressed_img = comp_decomp::mixed_comp(&old_img, &transition_img);
-        compressed_img.shrink_to_fit();
-        comp_decomp::mixed_decomp(&mut old_img, &compressed_img);
+        let compressed_img = Packed::pack(&old_img, &transition_img);
+        compressed_img.unpack(&mut old_img);
 
         if send_frame(&compressed_img, outputs, &duration, &mut now, sender) {
             return false;
@@ -281,7 +281,7 @@ fn animate(
     outputs: &mut Arc<RwLock<Vec<String>>>,
     dimensions: (u32, u32),
     filter: FilterType,
-    sender: SyncSender<(Vec<String>, Vec<u8>)>,
+    sender: SyncSender<(Vec<String>, Packed)>,
 ) {
     let mut frames = GifDecoder::new(gif.into_inner())
         .expect("Couldn't decode gif, though this should be impossible...")
@@ -305,8 +305,8 @@ fn animate(
             dimensions,
             filter,
         );
-        let mut compressed_frame = comp_decomp::mixed_comp(&canvas, &img);
-        compressed_frame.shrink_to_fit();
+
+        let compressed_frame = Packed::pack(&canvas, &img);
         canvas = img;
 
         cached_frames.push((compressed_frame.clone(), duration));
@@ -317,8 +317,7 @@ fn animate(
         now = Instant::now();
     }
     //Add the first frame we got earlier:
-    let mut first_frame_comp = comp_decomp::mixed_comp(&canvas, &first_frame);
-    first_frame_comp.shrink_to_fit();
+    let first_frame_comp = Packed::pack(&canvas, &first_frame);
     cached_frames.insert(0, (first_frame_comp, duration_first_frame));
     if cached_frames.len() > 1 {
         drop(first_frame);
@@ -330,9 +329,9 @@ fn animate(
 }
 
 fn loop_animation(
-    cached_frames: &[(Vec<u8>, Duration)],
+    cached_frames: &[(Packed, Duration)],
     outputs: &mut Arc<RwLock<Vec<String>>>,
-    sender: SyncSender<(Vec<String>, Vec<u8>)>,
+    sender: SyncSender<(Vec<String>, Packed)>,
     mut now: Instant,
 ) {
     info!("Finished caching the frames!");
@@ -374,11 +373,11 @@ fn img_resize(img: image::DynamicImage, dimensions: (u32, u32), filter: FilterTy
 
 ///Returns whether the calling function should exit or not
 fn send_frame(
-    frame: &[u8],
+    frame: &Packed,
     outputs: &mut Arc<RwLock<Vec<String>>>,
     timeout: &Duration,
     now: &mut Instant,
-    sender: &SyncSender<(Vec<String>, Vec<u8>)>,
+    sender: &SyncSender<(Vec<String>, Packed)>,
 ) -> bool {
     loop {
         thread::sleep(timeout.saturating_sub(now.elapsed())); //TODO: better timeout?
@@ -388,7 +387,7 @@ fn send_frame(
                 if outputs.is_empty() {
                     return true;
                 }
-                match sender.try_send((outputs.clone(), frame.to_vec())) {
+                match sender.try_send((outputs.clone(), frame.clone())) {
                     Ok(()) => return false,
                     Err(std::sync::mpsc::TrySendError::Full(_)) => *now = Instant::now(), //we try again in this case
                     Err(std::sync::mpsc::TrySendError::Disconnected(_)) => return true,

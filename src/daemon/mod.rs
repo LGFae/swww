@@ -34,6 +34,8 @@ use crate::Answer;
 mod processor;
 mod wayland;
 
+use processor::comp_decomp::Packed;
+
 #[derive(PartialEq, Copy, Clone)]
 enum RenderEvent {
     Configure { width: u32, height: u32 },
@@ -173,7 +175,7 @@ impl Bg {
         self.surface.commit();
     }
 
-    fn draw(&mut self, img: &[u8]) {
+    fn draw(&mut self, img: &Packed) {
         //It's possible to receive one extra img from the processor before it shuts down the
         //animation. With this test we stop that (there might be a better way of doing this)
         if let BgImg::Img(_) = self.img {
@@ -189,7 +191,7 @@ impl Bg {
                 .pool
                 .buffer(0, width, height, stride, wl_shm::Format::Xrgb8888);
             let canvas = self.pool.mmap();
-            processor::comp_decomp::mixed_decomp(canvas, img);
+            img.unpack(canvas);
             debug!("Decompressed img.");
 
             self.surface.attach(Some(&buffer), 0, 0);
@@ -473,7 +475,7 @@ fn recv_socket_msg(
     answer.send(&stream)
 }
 
-fn handle_recv_img(bgs: &mut RefMut<Vec<Bg>>, msg: &(Vec<String>, Vec<u8>)) {
+fn handle_recv_img(bgs: &mut RefMut<Vec<Bg>>, msg: &(Vec<String>, Packed)) {
     let (outputs, img) = msg;
     if outputs.is_empty() {
         warn!("Received empty list of outputs from processor, which should be impossible");
