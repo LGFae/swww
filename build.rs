@@ -10,7 +10,7 @@ const APP_NAME: &str = "fswww";
 
 fn main() -> Result<(), Error> {
     let outdir = completion_dir()?;
-    let mut app = Fswww::into_app();
+    let mut app = Fswww::command();
 
     let shells = [Shell::Bash, Shell::Zsh, Shell::Fish, Shell::Elvish];
     for shell in shells {

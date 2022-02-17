@@ -21,7 +21,7 @@ image = "0.24"
 log = {version = "0.4", features = ["max_level_debug", "release_max_level_info"]}
 simplelog = "0.11"
 fork = "0.1"
-clap = {version = "3.0.14", features = ["derive", "wrap_help"]}
+clap = {version = "3.1.0", features = ["derive", "wrap_help"]}
 hex = "0.4"
 lzzzz = "1.0"
 serde = {version = "1.0", features = [ "derive" ]}
@@ -32,8 +32,8 @@ assert_cmd = "2.0"
 rand = "0.8"
 
 [build-dependencies]
-clap = "3.0.14"
-clap_complete = "3.0.6"
+clap = "3.1.0"
+clap_complete = "3.1.0"
 hex = "0.4"
 serde =  {version = "1.0", features = [ "derive" ]}
 
