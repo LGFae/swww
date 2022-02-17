@@ -38,5 +38,5 @@ hex = "0.4"
 serde =  {version = "1.0", features = [ "derive" ]}
 
 [[test]]
-name = "integration_test"
+name = "integration_tests"
 harness = false
