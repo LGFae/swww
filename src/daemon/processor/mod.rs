@@ -20,6 +20,39 @@ use crate::Answer;
 pub mod comp_decomp;
 use comp_decomp::Packed;
 
+struct ProcessingGroups {
+    outputs: Vec<String>,
+    dimensions: (u32, u32),
+    old_img: Vec<u8>,
+}
+
+impl ProcessingGroups {
+    ///Returns one group per output with same dimensions and current image
+    fn make(bgs: &mut RefMut<Vec<Bg>>, outputs: Vec<String>) -> Vec<Self> {
+        let mut groups: Vec<(ProcessingGroups, BgImg)> = Vec::with_capacity(outputs.len());
+        bgs.iter_mut()
+            .filter(|bg| outputs.contains(&bg.output_name))
+            .for_each(|bg| {
+                if let Some(i) = groups
+                    .iter()
+                    .position(|g| bg.dimensions == g.0.dimensions && bg.img == g.1)
+                {
+                    groups[i].0.outputs.push(bg.output_name.clone());
+                } else {
+                    groups.push((
+                        ProcessingGroups {
+                            outputs: vec![bg.output_name.clone()],
+                            dimensions: bg.dimensions,
+                            old_img: bg.get_current_img().to_vec(),
+                        },
+                        bg.img.clone(),
+                    ));
+                }
+            });
+        groups.into_iter().map(|g| g.0).collect()
+    }
+}
+
 struct Animator {
     outputs: Arc<RwLock<Vec<String>>>,
     thread_handle: thread::JoinHandle<()>,
@@ -47,8 +80,13 @@ impl Processor {
             };
         }
 
-        for group in get_outputs_groups(bgs, outputs) {
-            self.stop_animations(&group);
+        for ProcessingGroups {
+            outputs,
+            dimensions,
+            old_img,
+        } in ProcessingGroups::make(bgs, outputs)
+        {
+            self.stop_animations(&outputs);
             //Note these can't be moved outside the loop without creating some memory overhead
             let img_buf = match image::io::Reader::open(&request.path) {
                 Ok(i) => i,
@@ -68,20 +106,15 @@ impl Processor {
                 }
             };
 
-            let mut dimensions = (0, 0);
-            let mut old_img: &[u8] = &[0];
-            for bg in bgs.iter_mut().filter(|bg| group.contains(&bg.output_name)) {
+            for bg in bgs
+                .iter_mut()
+                .filter(|bg| outputs.contains(&bg.output_name))
+            {
                 bg.img = BgImg::Img(request.path.clone());
-                if dimensions == (0, 0) {
-                    dimensions = bg.dimensions;
-                }
-                if old_img == [0] {
-                    old_img = bg.get_current_img();
-                }
             }
             let img_resized = img_resize(img, dimensions, request.filter.get_image_filter());
 
-            self.transition(&request, old_img, img_resized, dimensions, group, format);
+            self.transition(&request, old_img, img_resized, dimensions, outputs, format);
         }
         debug!("Finished image processing!");
         Answer::Ok
@@ -113,7 +146,7 @@ impl Processor {
     fn transition(
         &mut self,
         request: &Img,
-        old_img: &[u8],
+        old_img: Vec<u8>,
         new_img: Vec<u8>,
         dimensions: (u32, u32),
         outputs: Vec<String>,
@@ -122,7 +155,6 @@ impl Processor {
         let filter = request.filter.get_image_filter();
         let path = request.path.clone();
         let step = request.transition_step;
-        let old_img = old_img.to_vec();
         let sender = self.frame_sender.clone();
         let out_arc = Arc::new(RwLock::new(outputs));
         let mut out_clone = out_arc.clone();
@@ -159,67 +191,19 @@ impl Drop for Processor {
     }
 }
 
-///Verifies that all outputs exist
+///Return only the outputs that actually exist
 ///Also puts in all outpus if an empty string was offered
 fn get_real_outputs(bgs: &mut RefMut<Vec<Bg>>, outputs: &str) -> Vec<String> {
-    let mut real_outputs: Vec<String> = Vec::with_capacity(bgs.len());
     //An empty line means all outputs
     if outputs.is_empty() {
-        for bg in bgs.iter() {
-            real_outputs.push(bg.output_name.to_owned());
-        }
+        bgs.iter().map(|bg| bg.output_name.clone()).collect()
     } else {
-        for output in outputs.split(',') {
-            let output = output.to_string();
-            let mut exists = false;
-            for bg in bgs.iter() {
-                if output == bg.output_name {
-                    exists = true;
-                }
-            }
-
-            if !exists {
-                error!("Output {} does not exist!", output);
-            } else if !real_outputs.contains(&output) {
-                real_outputs.push(output);
-            }
-        }
+        outputs
+            .split(',')
+            .filter(|o| bgs.iter().any(|bg| o == &bg.output_name))
+            .map(|o| o.to_string())
+            .collect()
     }
-    real_outputs
-}
-
-///Returns one result per output with same dimesions and image
-fn get_outputs_groups(bgs: &mut RefMut<Vec<Bg>>, mut outputs: Vec<String>) -> Vec<Vec<String>> {
-    let mut outputs_groups = Vec::new();
-
-    while !outputs.is_empty() {
-        let mut out_same_group = Vec::with_capacity(outputs.len());
-        out_same_group.push(outputs.pop().unwrap());
-
-        let dim;
-        let old_img_path;
-        {
-            let bg = bgs
-                .iter_mut()
-                .find(|bg| bg.output_name == out_same_group[0])
-                .unwrap();
-            dim = bg.dimensions;
-            old_img_path = bg.img.clone();
-        }
-
-        for bg in bgs.iter().filter(|bg| outputs.contains(&bg.output_name)) {
-            if bg.dimensions == dim && bg.img == old_img_path {
-                out_same_group.push(bg.output_name.clone());
-            }
-        }
-        outputs.retain(|o| !out_same_group.contains(o));
-        debug!(
-            "Output group: {:?}, {:?}, {:?}",
-            &out_same_group, dim, old_img_path
-        );
-        outputs_groups.push(out_same_group);
-    }
-    outputs_groups
 }
 
 ///Returns whether the transition completed or was interrupted
