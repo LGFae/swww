@@ -457,9 +457,7 @@ fn recv_socket_msg(
                 processor.process(&mut bgs, request)
             } else {
                 if let Some(color) = color {
-                    for bg in bgs.iter_mut() {
-                        bg.clear(color);
-                    }
+                    bgs.iter_mut().for_each(|bg| bg.clear(color));
                 }
                 Answer::Ok
             }
@@ -490,18 +488,14 @@ fn clear_outputs(
     clear: Clear,
     processor: &mut processor::Processor,
 ) -> Answer {
-    let mut bgs_to_change = Vec::with_capacity(bgs.len());
-    if clear.outputs.is_empty() {
-        for bg in bgs.iter_mut() {
-            bgs_to_change.push(bg);
-        }
+    let bgs_to_change: Vec<&mut Bg> = if clear.outputs.is_empty() {
+        bgs.iter_mut().collect()
     } else {
-        for bg in bgs.iter_mut() {
-            if clear.outputs.contains(&bg.output_name) {
-                bgs_to_change.push(bg);
-            }
-        }
-    }
+        bgs.iter_mut()
+            .filter(|bg| clear.outputs.split(',').any(|o| o == bg.output_name))
+            .collect()
+    };
+
     if bgs_to_change.is_empty() {
         return Answer::Err {
             msg: "None of the specified outputs exist!".to_string(),
