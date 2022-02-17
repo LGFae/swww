@@ -94,6 +94,8 @@ pub struct Packed {
     inner: Vec<u8>,
 }
 
+///Wrapper struct for compression and decompression. This makes sure we operating on a Vec<u8> with
+///the correct properties, simply by virtue of the type checking.
 impl Packed {
     ///Compresses a frame of animation by getting the difference between the previous and the
     ///current frame
@@ -119,18 +121,18 @@ impl Packed {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use rand::prelude::*;
+    use super::Packed;
+    use rand::prelude::random;
 
     #[test]
     //Use this when annoying problems show up
     fn should_compress_and_decompress_to_same_info_small() {
         let frame1 = [1, 2, 3, 4, 5, 6, 7, 8];
         let frame2 = [1, 2, 3, 4, 8, 7, 6, 5];
-        let compreesed = diff_byte_header(&frame1, &frame2);
+        let compressed = Packed::pack(&frame1, &frame2);
 
         let mut buf = frame1;
-        diff_byte_header_copy_onto(&mut buf, &compreesed);
+        compressed.unpack(&mut buf);
         for i in 0..2 {
             for j in 0..3 {
                 assert_eq!(
@@ -157,14 +159,14 @@ mod tests {
             }
 
             let mut compressed = Vec::with_capacity(20);
-            compressed.push(diff_byte_header(original.last().unwrap(), &original[0]));
+            compressed.push(Packed::pack(original.last().unwrap(), &original[0]));
             for i in 1..20 {
-                compressed.push(diff_byte_header(&original[i - 1], &original[i]));
+                compressed.push(Packed::pack(&original[i - 1], &original[i]));
             }
 
             let mut buf = original.last().unwrap().clone();
             for i in 0..20 {
-                diff_byte_header_copy_onto(&mut buf, &compressed[i]);
+                compressed[i].unpack(&mut buf);
                 let mut j = 0;
                 while j < 4000 {
                     for k in 0..3 {
@@ -192,14 +194,14 @@ mod tests {
             }
 
             let mut compressed = Vec::with_capacity(20);
-            compressed.push(diff_byte_header(original.last().unwrap(), &original[0]));
+            compressed.push(Packed::pack(original.last().unwrap(), &original[0]));
             for i in 1..20 {
-                compressed.push(diff_byte_header(&original[i - 1], &original[i]));
+                compressed.push(Packed::pack(&original[i - 1], &original[i]));
             }
 
             let mut buf = original.last().unwrap().clone();
             for i in 0..20 {
-                diff_byte_header_copy_onto(&mut buf, &compressed[i]);
+                compressed[i].unpack(&mut buf);
                 let mut j = 0;
                 while j < 4000 {
                     for k in 0..3 {
