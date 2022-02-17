@@ -106,8 +106,7 @@ impl Processor {
                 }
             };
 
-             bgs
-                .iter_mut()
+            bgs.iter_mut()
                 .filter(|bg| outputs.contains(&bg.output_name))
                 .for_each(|bg| bg.img = BgImg::Img(request.path.clone()));
 
@@ -244,7 +243,7 @@ fn complete_transition(
         let compressed_img = Packed::pack(&old_img, &transition_img);
         compressed_img.unpack(&mut old_img);
 
-        if send_frame(&compressed_img, outputs, &duration, &mut now, sender) {
+        if send_frame(compressed_img, outputs, &duration, &mut now, sender) {
             return false;
         }
         if done {
@@ -291,12 +290,12 @@ fn animate(
 
         let compressed_frame = Packed::pack(&canvas, &img);
         canvas = img;
-
         cached_frames.push((compressed_frame.clone(), duration));
 
-        if send_frame(&compressed_frame, outputs, &duration, &mut now, &sender) {
+        if send_frame(compressed_frame, outputs, &duration, &mut now, &sender) {
             return;
         };
+
         now = Instant::now();
     }
     //Add the first frame we got earlier:
@@ -320,7 +319,7 @@ fn loop_animation(
     info!("Finished caching the frames!");
     loop {
         for (cached_img, duration) in cached_frames {
-            if send_frame(cached_img, outputs, duration, &mut now, &sender) {
+            if send_frame(cached_img.clone(), outputs, duration, &mut now, &sender) {
                 return;
             };
             now = Instant::now();
@@ -356,7 +355,7 @@ fn img_resize(img: image::DynamicImage, dimensions: (u32, u32), filter: FilterTy
 
 ///Returns whether the calling function should exit or not
 fn send_frame(
-    frame: &Packed,
+    mut frame: Packed,
     outputs: &mut Arc<RwLock<Vec<String>>>,
     timeout: &Duration,
     now: &mut Instant,
@@ -370,9 +369,13 @@ fn send_frame(
                 if outputs.is_empty() {
                     return true;
                 }
-                match sender.try_send((outputs.clone(), frame.clone())) {
+                match sender.try_send((outputs.clone(), frame)) {
                     Ok(()) => return false,
-                    Err(std::sync::mpsc::TrySendError::Full(_)) => *now = Instant::now(), //we try again in this case
+                    //we try again in this case
+                    Err(std::sync::mpsc::TrySendError::Full(e)) => {
+                        *now = Instant::now();
+                        frame = e.1
+                    }
                     Err(std::sync::mpsc::TrySendError::Disconnected(_)) => return true,
                 }
             }
