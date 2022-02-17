@@ -115,48 +115,11 @@ mod tests {
     use rand::prelude::*;
 
     #[test]
-    fn should_make_byte_header() {
-        let original = vec![1, 2, 3, 4, 5, 6, 7, 8];
-        let copy = original.clone();
-        let different = vec![8, 7, 6, 5, 4, 3, 2, 1];
-
-        let diff_copy = diff_byte_header(&original, &copy);
-        assert_eq!(
-            diff_copy.len(),
-            0,
-            "Since it's equal, it should have no bytes"
-        );
-
-        let diff_diff = diff_byte_header(&original, &different);
-        assert_eq!(
-            diff_diff.len(),
-            7,
-            "Since it's different, it should have 7 bytes. 1 for the header, 6 for the colors"
-        );
-        assert_eq!(
-            diff_diff[0], 0x80,
-            "Since it's different in the first position, header should be 1000 0000"
-        );
-
-        assert_eq!(
-            diff_diff[1..4],
-            different[0..3],
-            "We should have stored the different bytes"
-        );
-
-        assert_eq!(
-            diff_diff[4..7],
-            different[4..7],
-            "We should have stored the different bytes"
-        );
-    }
-    #[test]
     //Use this when annoying problems show up
-    fn should_compress_and_decompress_to_small() {
+    fn should_compress_and_decompress_to_same_info_small() {
         let frame1 = [1, 2, 3, 4, 5, 6, 7, 8];
         let frame2 = [1, 2, 3, 4, 8, 7, 6, 5];
         let compreesed = diff_byte_header(&frame1, &frame2);
-        assert_eq!(compreesed, [0x80, 1, 2, 3, 8, 7, 6]);
 
         let mut buf = frame1;
         diff_byte_header_copy_onto(&mut buf, &compreesed);
@@ -181,6 +144,41 @@ mod tests {
                 let mut v = Vec::with_capacity(4000);
                 for _ in 0..4000 {
                     v.push(random::<u8>());
+                }
+                original.push(v);
+            }
+
+            let mut compressed = Vec::with_capacity(20);
+            compressed.push(diff_byte_header(original.last().unwrap(), &original[0]));
+            for i in 1..20 {
+                compressed.push(diff_byte_header(&original[i - 1], &original[i]));
+            }
+
+            let mut buf = original.last().unwrap().clone();
+            for i in 0..20 {
+                diff_byte_header_copy_onto(&mut buf, &compressed[i]);
+                let mut j = 0;
+                while j < 4000 {
+                    for k in 0..3 {
+                        assert_eq!(buf[j + k], original[i][j + k], "Failed at index: {}", j + k);
+                    }
+                    j += 4;
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn should_compress_and_decompress_to_same_info_with_equal_data() {
+        for _ in 0..10 {
+            let mut original = Vec::with_capacity(20);
+            for _ in 0..20 {
+                let mut v = Vec::with_capacity(4000);
+                for _ in 0..3000 {
+                    v.push(random::<u8>());
+                }
+                for i in 0..1000 {
+                    v.push((i % 255) as u8);
                 }
                 original.push(v);
             }
