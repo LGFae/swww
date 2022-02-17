@@ -480,11 +480,9 @@ fn handle_recv_img(bgs: &mut RefMut<Vec<Bg>>, msg: &(Vec<String>, Packed)) {
     if outputs.is_empty() {
         warn!("Received empty list of outputs from processor, which should be impossible");
     }
-    for bg in bgs.iter_mut() {
-        if outputs.contains(&bg.output_name) {
-            bg.draw(img);
-        }
-    }
+    bgs.iter_mut()
+        .filter(|bg| outputs.contains(&bg.output_name))
+        .for_each(|bg| bg.draw(img));
 }
 
 fn clear_outputs(
