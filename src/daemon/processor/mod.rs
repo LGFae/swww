@@ -106,15 +106,14 @@ impl Processor {
                 }
             };
 
-            for bg in bgs
+             bgs
                 .iter_mut()
                 .filter(|bg| outputs.contains(&bg.output_name))
-            {
-                bg.img = BgImg::Img(request.path.clone());
-            }
-            let img_resized = img_resize(img, dimensions, request.filter.get_image_filter());
+                .for_each(|bg| bg.img = BgImg::Img(request.path.clone()));
 
-            self.transition(&request, old_img, img_resized, dimensions, outputs, format);
+            let new_img = img_resize(img, dimensions, request.filter.get_image_filter());
+
+            self.transition(&request, old_img, new_img, dimensions, outputs, format);
         }
         debug!("Finished image processing!");
         Answer::Ok
