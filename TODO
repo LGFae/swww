@@ -1,4 +1,5 @@
-There might be a condition where we send an extra frame after stopping and animation
+There might be a condition where we send an extra frame after stopping an
+animation with the clear command. I haven't seen this yet though.
 
 Fully automated, complete testing, for every option
 
