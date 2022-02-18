@@ -275,15 +275,12 @@ fn send_frame(
             if outputs.is_empty() {
                 return true;
             }
-            match sender.send((outputs.clone(), frame)) {
-                Ok(()) => false,
-                Err(_) => true,
-            }
         }
-        Err(mpsc::RecvTimeoutError::Timeout) => match sender.send((outputs.clone(), frame)) {
-            Ok(()) => false,
-            Err(_) => true,
-        },
-        Err(mpsc::RecvTimeoutError::Disconnected) => true,
+        Err(mpsc::RecvTimeoutError::Timeout) => (),
+        Err(mpsc::RecvTimeoutError::Disconnected) => return true,
+    }
+    match sender.send((outputs.clone(), frame)) {
+        Ok(()) => false,
+        Err(_) => true,
     }
 }
