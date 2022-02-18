@@ -134,4 +134,12 @@ pub struct Img {
     ///switch to the new image immediately.
     #[clap(long, default_value = "20")]
     pub transition_step: u8,
+
+    ///Frame rate for the transition effect.
+    ///
+    ///Note there is no point in setting this to a value smaller than what your monitor supports.
+    ///Also note this is **different** from the transition-step. That one controls by how much we
+    ///approach the new image every frame.
+    #[clap(long, default_value = "30")]
+    pub transition_fps: u8,
 }

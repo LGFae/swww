@@ -24,6 +24,7 @@ pub struct ProcessorRequest {
     pub path: PathBuf,
     pub filter: FilterType,
     pub step: u8,
+    pub fps: Duration,
 }
 
 pub struct Processor {
@@ -82,12 +83,21 @@ impl Processor {
             path,
             filter,
             step,
+            fps,
         } = req;
         let sender = self.frame_sender.clone();
         let (stopper, stop_recv) = mpsc::channel();
         self.anim_stoppers.push(stopper);
         thread::spawn(move || {
-            if !complete_transition(old_img, &new_img, step, &mut outputs, &sender, &stop_recv) {
+            if !complete_transition(
+                old_img,
+                &new_img,
+                step,
+                fps,
+                &mut outputs,
+                &sender,
+                &stop_recv,
+            ) {
                 return;
             }
             let img = image::io::Reader::open(path).unwrap();
@@ -115,18 +125,18 @@ impl Drop for Processor {
 ///Returns whether the transition completed or was interrupted
 fn complete_transition(
     mut old_img: Vec<u8>,
-    goal: &[u8],
+    new_img: &[u8],
     step: u8,
+    fps: Duration,
     outputs: &mut Vec<String>,
     sender: &SyncSender<(Vec<String>, Packed)>,
     stop_recv: &mpsc::Receiver<Vec<String>>,
 ) -> bool {
     let mut done = true;
     let mut now = Instant::now();
-    let duration = Duration::from_millis(34); //A little less than 30 fps
-    let mut transition_img: Vec<u8> = Vec::with_capacity(goal.len());
+    let mut transition_img: Vec<u8> = Vec::with_capacity(new_img.len());
     loop {
-        for (old, new) in old_img.chunks_exact(4).zip(goal.chunks_exact(4)) {
+        for (old, new) in old_img.chunks_exact(4).zip(new_img.chunks_exact(4)) {
             for (old_color, new_color) in old.iter().zip(new.iter()).take(3) {
                 let distance = if old_color > new_color {
                     old_color - new_color
@@ -147,7 +157,7 @@ fn complete_transition(
         }
 
         let compressed_img = Packed::pack(&old_img, &transition_img);
-        let timeout = duration.saturating_sub(now.elapsed());
+        let timeout = fps.saturating_sub(now.elapsed());
         if send_frame(compressed_img, outputs, timeout, sender, stop_recv) {
             debug!("Transition was interrupted!");
             return false;

@@ -26,6 +26,7 @@ use std::{
     os::unix::net::{UnixListener, UnixStream},
     path::{Path, PathBuf},
     rc::Rc,
+    time::Duration,
 };
 
 use crate::cli::{Clear, Fswww, Img};
@@ -449,6 +450,7 @@ fn recv_socket_msg(
                     outputs: "".to_string(),
                     filter: crate::cli::Filter::Lanczos3,
                     transition_step: 255,
+                    transition_fps: 255, // We are sending it ASAP
                 };
                 send_processor_request(proc, &mut bgs, request)
             } else {
@@ -519,6 +521,7 @@ fn make_processor_requests(bgs: &mut RefMut<Vec<Bg>>, img: &Img) -> Vec<Processo
                         path: img.path.clone(),
                         filter: img.filter.get_image_filter(),
                         step: img.transition_step,
+                        fps: Duration::from_nanos(1_000_000_000 / img.transition_fps as u64),
                     },
                     bg.img.clone(),
                 ));
