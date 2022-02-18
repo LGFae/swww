@@ -152,18 +152,15 @@ fn complete_transition(
             debug!("Transition was interrupted!");
             return false;
         }
-
         if done {
-            break;
-        } else {
-            old_img.clear();
-            old_img.append(&mut transition_img);
-            now = Instant::now();
-            done = true;
+            debug!("Transition has finished.");
+            return true;
         }
+        old_img.clear();
+        old_img.append(&mut transition_img);
+        now = Instant::now();
+        done = true;
     }
-    debug!("Transition has finished.");
-    true
 }
 
 fn animate(
