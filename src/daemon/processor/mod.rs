@@ -147,13 +147,8 @@ fn complete_transition(
         }
 
         let compressed_img = Packed::pack(&old_img, &transition_img);
-        if send_frame(
-            compressed_img,
-            outputs,
-            duration.saturating_sub(now.elapsed()),
-            sender,
-            stop_recv,
-        ) {
+        let timeout = duration.saturating_sub(now.elapsed());
+        if send_frame(compressed_img, outputs, timeout, sender, stop_recv) {
             debug!("Transition was interrupted!");
             return false;
         }
@@ -202,16 +197,10 @@ fn animate(
         canvas = img;
         cached_frames.push((compressed_frame.clone(), duration));
 
-        if send_frame(
-            compressed_frame,
-            &mut outputs,
-            duration.saturating_sub(now.elapsed()),
-            &sender,
-            &stop_recv,
-        ) {
+        let timeout = duration.saturating_sub(now.elapsed());
+        if send_frame(compressed_frame, &mut outputs, timeout, &sender, &stop_recv) {
             return;
         };
-
         now = Instant::now();
     }
     //Add the first frame we got earlier:
@@ -236,13 +225,9 @@ fn loop_animation(
     info!("Finished caching the frames!");
     loop {
         for (cached_img, duration) in cached_frames {
-            if send_frame(
-                cached_img.clone(),
-                &mut outputs,
-                duration.saturating_sub(now.elapsed()),
-                &sender,
-                &stop_recv,
-            ) {
+            let frame = cached_img.clone();
+            let timeout = duration.saturating_sub(now.elapsed());
+            if send_frame(frame, &mut outputs, timeout, &sender, &stop_recv) {
                 return;
             };
             now = Instant::now();
