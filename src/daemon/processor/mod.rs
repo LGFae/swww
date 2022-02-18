@@ -29,13 +29,13 @@ pub struct ProcessorRequest {
 
 pub struct Processor {
     frame_sender: SyncSender<(Vec<String>, Packed)>,
-    animation_stoppers: Vec<mpsc::Sender<Vec<String>>>,
+    anim_stoppers: Vec<mpsc::Sender<Vec<String>>>,
 }
 
 impl Processor {
     pub fn new(frame_sender: SyncSender<(Vec<String>, Packed)>) -> Self {
         Self {
-            animation_stoppers: Vec::new(),
+            anim_stoppers: Vec::new(),
             frame_sender,
         }
     }
@@ -70,27 +70,24 @@ impl Processor {
     }
 
     pub fn stop_animations(&mut self, to_stop: &[String]) {
-        self.animation_stoppers
+        self.anim_stoppers
             .retain(|a| a.send(to_stop.to_vec()).is_ok());
     }
 
     //TODO: if two images will have the same animation, but have differen current images,
     //this will make the animations independent from each other, which isn't really necessary
-    fn transition(
-        &mut self,
-        request: ProcessorRequest,
-        new_img: Vec<u8>,
-        format: Option<ImageFormat>,
-    ) {
-        let dimensions = request.dimensions;
-        let filter = request.filter;
-        let old_img = request.old_img;
-        let path = request.path;
-        let step = request.step;
-        let mut outputs = request.outputs;
+    fn transition(&mut self, req: ProcessorRequest, new_img: Vec<u8>, format: Option<ImageFormat>) {
+        let ProcessorRequest {
+            mut outputs,
+            dimensions,
+            old_img,
+            path,
+            filter,
+            step,
+        } = req;
         let sender = self.frame_sender.clone();
         let (stopper, stop_recv) = mpsc::channel();
-        self.animation_stoppers.push(stopper);
+        self.anim_stoppers.push(stopper);
         thread::spawn(move || {
             if !complete_transition(old_img, &new_img, step, &mut outputs, &sender, &stop_recv) {
                 return;
@@ -104,9 +101,9 @@ impl Processor {
 }
 
 impl Drop for Processor {
-    //We need to make sure to kill all pending animators
+    //We need to make sure pending animators exited
     fn drop(&mut self) {
-        while !self.animation_stoppers.is_empty() {
+        while !self.anim_stoppers.is_empty() {
             self.stop_animations(&Vec::new());
         }
     }
