@@ -275,8 +275,7 @@ fn animate(
 
     let mut canvas = first_frame.clone();
     let mut now = Instant::now();
-    for frame in frames.by_ref() {
-        let frame = frame.unwrap();
+    while let Some(Ok(frame)) = frames.next() {
         let (dur_num, dur_div) = frame.delay().numer_denom_ms();
         let duration = Duration::from_millis((dur_num / dur_div).into());
         let img = img_resize(
