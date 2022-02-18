@@ -34,7 +34,7 @@ use crate::Answer;
 mod processor;
 mod wayland;
 
-use processor::{comp_decomp::Packed, ProcessorRequest};
+use processor::{comp_decomp::Packed, Processor, ProcessorRequest};
 
 #[derive(PartialEq, Copy, Clone)]
 enum RenderEvent {
@@ -343,7 +343,7 @@ fn main_loop(
     //We use 1 because we can't send a new frame without being absolutely sure that all previous
     //have already been displayed. Using 0 causes the animation to stop.
     let (frame_sender, frame_receiver) = calloop::channel::sync_channel(1);
-    let processor = Rc::new(RefCell::new(processor::Processor::new(frame_sender)));
+    let processor = Rc::new(RefCell::new(Processor::new(frame_sender)));
     let mut event_loop = calloop::EventLoop::<calloop::LoopSignal>::try_new().unwrap();
     let event_handle = event_loop.handle();
 
@@ -432,16 +432,16 @@ fn recv_socket_msg(
     mut bgs: RefMut<Vec<Bg>>,
     mut stream: UnixStream,
     loop_signal: &calloop::LoopSignal,
-    processor: &mut processor::Processor,
+    proc: &mut Processor,
 ) -> Result<(), String> {
     let request = Fswww::receive(&mut stream);
     let answer = match request {
-        Ok(Fswww::Clear(clear)) => clear_outputs(&mut bgs, clear, processor),
+        Ok(Fswww::Clear(clear)) => clear_outputs(&mut bgs, clear, proc),
         Ok(Fswww::Kill) => {
             loop_signal.stop();
             Answer::Ok
         }
-        Ok(Fswww::Img(img)) => send_processor_request(processor, &mut bgs, img),
+        Ok(Fswww::Img(img)) => send_processor_request(proc, &mut bgs, img),
         Ok(Fswww::Init { img, color, .. }) => {
             if let Some(img) = img {
                 let request = Img {
@@ -450,7 +450,7 @@ fn recv_socket_msg(
                     filter: crate::cli::Filter::Lanczos3,
                     transition_step: 255,
                 };
-                send_processor_request(processor, &mut bgs, request)
+                send_processor_request(proc, &mut bgs, request)
             } else {
                 if let Some(color) = color {
                     bgs.iter_mut().for_each(|bg| bg.clear(color));
@@ -469,11 +469,7 @@ fn recv_socket_msg(
     answer.send(&stream)
 }
 
-fn send_processor_request(
-    processor: &mut processor::Processor,
-    bgs: &mut RefMut<Vec<Bg>>,
-    img: Img,
-) -> Answer {
+fn send_processor_request(proc: &mut Processor, bgs: &mut RefMut<Vec<Bg>>, img: Img) -> Answer {
     let requests = make_processor_requests(bgs, &img);
     if requests.is_empty() {
         error!("None of the outputs sent were valid.");
@@ -481,7 +477,7 @@ fn send_processor_request(
             msg: "none of the outputs sent are valid.".to_string(),
         }
     } else {
-        let answer = processor.process(requests);
+        let answer = proc.process(requests);
         if let Answer::Ok = answer {
             let outputs = get_real_outputs(bgs, &img.outputs);
             bgs.iter_mut()
@@ -546,18 +542,14 @@ fn get_real_outputs(bgs: &RefMut<Vec<Bg>>, outputs: &str) -> Vec<String> {
     }
 }
 
-fn clear_outputs(
-    bgs: &mut RefMut<Vec<Bg>>,
-    clear: Clear,
-    processor: &mut processor::Processor,
-) -> Answer {
+fn clear_outputs(bgs: &mut RefMut<Vec<Bg>>, clear: Clear, proc: &mut Processor) -> Answer {
     let outputs = get_real_outputs(bgs, &clear.outputs);
-    if outputs.is_empty(){
+    if outputs.is_empty() {
         Answer::Err {
             msg: "None of the specified outputs exist!".to_string(),
         }
     } else {
-        processor.stop_animations(&outputs);
+        proc.stop_animations(&outputs);
         bgs.iter_mut()
             .filter(|bg| outputs.contains(&bg.output_name))
             .for_each(|bg| bg.clear(clear.color));
