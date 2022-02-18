@@ -215,20 +215,18 @@ fn complete_transition(
     let mut done = true;
     let mut now = Instant::now();
     let duration = Duration::from_millis(34); //A little less than 30 fps
-    let mut transition_img = Vec::with_capacity(goal.len());
+    let mut transition_img: Vec<u8> = Vec::with_capacity(goal.len());
     loop {
-        let mut i = 0;
-        for old_pixel in old_img.chunks_exact(4) {
-            for (j, old_color) in old_pixel.iter().enumerate().take(3) {
-                let k = i + j;
-                let distance = if *old_color > goal[k] {
-                    old_color - goal[k]
+        for (old, new) in old_img.chunks_exact(4).zip(goal.chunks_exact(4)) {
+            for (old_color, new_color) in old.iter().zip(new.iter()).take(3) {
+                let distance = if old_color > new_color {
+                    old_color - new_color
                 } else {
-                    goal[k] - old_color
+                    new_color - old_color
                 };
                 if distance < step {
-                    transition_img.push(goal[k]);
-                } else if *old_color > goal[k] {
+                    transition_img.push(*new_color);
+                } else if old_color > new_color {
                     done = false;
                     transition_img.push(old_color - step);
                 } else {
@@ -236,20 +234,19 @@ fn complete_transition(
                     transition_img.push(old_color + step);
                 }
             }
-            transition_img.push(old_pixel[3]);
-            i += 4;
+            transition_img.push(255);
         }
 
         let compressed_img = Packed::pack(&old_img, &transition_img);
-        compressed_img.unpack(&mut old_img);
-
         if send_frame(compressed_img, outputs, &duration, &mut now, sender) {
             return false;
         }
+
         if done {
             break;
         } else {
-            transition_img.clear();
+            old_img.clear();
+            old_img.append(&mut transition_img);
             now = Instant::now();
             done = true;
         }
