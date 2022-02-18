@@ -551,24 +551,16 @@ fn clear_outputs(
     clear: Clear,
     processor: &mut processor::Processor,
 ) -> Answer {
-    let bgs_to_change: Vec<&mut Bg> = if clear.outputs.is_empty() {
-        bgs.iter_mut().collect()
-    } else {
-        bgs.iter_mut()
-            .filter(|bg| clear.outputs.split(',').any(|o| o == bg.output_name))
-            .collect()
-    };
-
-    if bgs_to_change.is_empty() {
-        return Answer::Err {
+    let outputs = get_real_outputs(bgs, &clear.outputs);
+    if outputs.is_empty(){
+        Answer::Err {
             msg: "None of the specified outputs exist!".to_string(),
-        };
+        }
+    } else {
+        processor.stop_animations(&outputs);
+        bgs.iter_mut()
+            .filter(|bg| outputs.contains(&bg.output_name))
+            .for_each(|bg| bg.clear(clear.color));
+        Answer::Ok
     }
-
-    for bg in bgs_to_change {
-        processor.stop_animations(&[bg.output_name.clone()]);
-        bg.clear(clear.color);
-    }
-
-    Answer::Ok
 }

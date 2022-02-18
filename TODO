@@ -1,3 +1,7 @@
+DEADLOCK: when stopping animation when doing a 'clear' we might deadlock.
+-> suggestion: go back to a simple outputs, fully owned by the thread solution.
+This also have the benefit of giving us a better way of timing out.
+
 Fully automated, complete testing, for every option
 
 Update READEME.md
