@@ -1,6 +1,4 @@
-DEADLOCK: when stopping animation when doing a 'clear' we might deadlock.
--> suggestion: go back to a simple outputs, fully owned by the thread solution.
-This also have the benefit of giving us a better way of timing out.
+There might be a condition where we send an extra frame after stopping and animation
 
 Fully automated, complete testing, for every option
 

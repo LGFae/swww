@@ -2,14 +2,14 @@ use image::{
     self, codecs::gif::GifDecoder, imageops::FilterType, io::Reader, AnimationDecoder,
     GenericImageView, ImageFormat,
 };
-use log::{debug, error, info};
+use log::{debug, info};
 
 use smithay_client_toolkit::reexports::calloop::channel::SyncSender;
 
 use std::{
     io::BufReader,
     path::PathBuf,
-    sync::{Arc, RwLock},
+    sync::mpsc,
     thread,
     time::{Duration, Instant},
 };
@@ -27,20 +27,15 @@ pub struct ProcessorRequest {
     pub step: u8,
 }
 
-struct Animator {
-    outputs: Arc<RwLock<Vec<String>>>,
-    thread_handle: thread::JoinHandle<()>,
-}
-
 pub struct Processor {
     frame_sender: SyncSender<(Vec<String>, Packed)>,
-    animations: Vec<Animator>,
+    animation_stoppers: Vec<mpsc::Sender<Vec<String>>>,
 }
 
 impl Processor {
     pub fn new(frame_sender: SyncSender<(Vec<String>, Packed)>) -> Self {
         Self {
-            animations: Vec::new(),
+            animation_stoppers: Vec::new(),
             frame_sender,
         }
     }
@@ -75,24 +70,8 @@ impl Processor {
     }
 
     pub fn stop_animations(&mut self, to_stop: &[String]) {
-        let mut to_remove = Vec::with_capacity(self.animations.len());
-        for (i, animator) in self.animations.iter().enumerate() {
-            //NOTE: this blocks the calloop! We might want to change this with something with a timeout
-            if let Ok(mut outputs) = animator.outputs.write() {
-                outputs.retain(|o| !to_stop.contains(o));
-                if outputs.is_empty() {
-                    to_remove.push(i);
-                }
-            }
-        }
-        //If we remove one 'i', the next indexes will become i - 1. If we remove two 'i's, the next
-        //indexes will become i - 2. So on and so forth.
-        for (offset, i) in to_remove.iter().enumerate() {
-            let animator = self.animations.remove(i - offset);
-            if let Err(e) = animator.thread_handle.join() {
-                error!("Animation thread panicked: {:?}", e);
-            };
-        }
+        self.animation_stoppers
+            .retain(|a| a.send(to_stop.to_vec()).is_ok());
     }
 
     //TODO: if two images will have the same animation, but have differen current images,
@@ -108,38 +87,28 @@ impl Processor {
         let old_img = request.old_img;
         let path = request.path;
         let step = request.step;
+        let mut outputs = request.outputs;
         let sender = self.frame_sender.clone();
-        let out_arc = Arc::new(RwLock::new(request.outputs));
-        let mut out_clone = out_arc.clone();
-        self.animations.push(Animator {
-            outputs: out_arc,
-            thread_handle: thread::spawn(move || {
-                let mut ani = format == Some(ImageFormat::Gif);
-                ani &= complete_transition(old_img, &new_img, step, &mut out_clone, &sender);
-                debug!("Transition has finished!");
+        let (stopper, stop_recv) = mpsc::channel();
+        self.animation_stoppers.push(stopper);
+        thread::spawn(move || {
+            let mut ani = format == Some(ImageFormat::Gif);
+            ani &= complete_transition(old_img, &new_img, step, &mut outputs, &sender, &stop_recv);
+            debug!("Transition has finished!");
 
-                if ani {
-                    let gif = image::io::Reader::open(path).unwrap();
-                    animate(gif, new_img, &mut out_clone, dimensions, filter, sender);
-                }
-            }),
-        })
+            if ani {
+                let gif = image::io::Reader::open(path).unwrap();
+                animate(gif, new_img, outputs, dimensions, filter, sender, stop_recv);
+            }
+        });
     }
 }
 
 impl Drop for Processor {
     //We need to make sure to kill all pending animators
     fn drop(&mut self) {
-        for animator in &self.animations {
-            if let Ok(mut outputs) = animator.outputs.write() {
-                outputs.clear();
-            }
-        }
-        while !self.animations.is_empty() {
-            let anim = self.animations.pop().unwrap();
-            if let Err(e) = anim.thread_handle.join() {
-                error!("Animation thread panicked on drop: {:?}", e);
-            };
+        while !self.animation_stoppers.is_empty() {
+            self.stop_animations(&Vec::new());
         }
     }
 }
@@ -149,8 +118,9 @@ fn complete_transition(
     mut old_img: Vec<u8>,
     goal: &[u8],
     step: u8,
-    outputs: &mut Arc<RwLock<Vec<String>>>,
+    outputs: &mut Vec<String>,
     sender: &SyncSender<(Vec<String>, Packed)>,
+    stop_recv: &mpsc::Receiver<Vec<String>>,
 ) -> bool {
     let mut done = true;
     let mut now = Instant::now();
@@ -178,7 +148,13 @@ fn complete_transition(
         }
 
         let compressed_img = Packed::pack(&old_img, &transition_img);
-        if send_frame(compressed_img, outputs, &duration, &now, sender) {
+        if send_frame(
+            compressed_img,
+            outputs,
+            duration.saturating_sub(now.elapsed()),
+            sender,
+            stop_recv,
+        ) {
             return false;
         }
 
@@ -197,10 +173,11 @@ fn complete_transition(
 fn animate(
     gif: Reader<BufReader<std::fs::File>>,
     first_frame: Vec<u8>,
-    outputs: &mut Arc<RwLock<Vec<String>>>,
+    mut outputs: Vec<String>,
     dimensions: (u32, u32),
     filter: FilterType,
     sender: SyncSender<(Vec<String>, Packed)>,
+    stop_recv: mpsc::Receiver<Vec<String>>,
 ) {
     let mut frames = GifDecoder::new(gif.into_inner())
         .expect("Couldn't decode gif, though this should be impossible...")
@@ -228,7 +205,13 @@ fn animate(
         canvas = img;
         cached_frames.push((compressed_frame.clone(), duration));
 
-        if send_frame(compressed_frame, outputs, &duration, &now, &sender) {
+        if send_frame(
+            compressed_frame,
+            &mut outputs,
+            duration.saturating_sub(now.elapsed()),
+            &sender,
+            &stop_recv,
+        ) {
             return;
         };
 
@@ -242,20 +225,27 @@ fn animate(
         drop(canvas);
         drop(frames);
         cached_frames.shrink_to_fit();
-        loop_animation(&cached_frames, outputs, sender, now);
+        loop_animation(&cached_frames, outputs, sender, stop_recv, now);
     }
 }
 
 fn loop_animation(
     cached_frames: &[(Packed, Duration)],
-    outputs: &mut Arc<RwLock<Vec<String>>>,
+    mut outputs: Vec<String>,
     sender: SyncSender<(Vec<String>, Packed)>,
+    stop_recv: mpsc::Receiver<Vec<String>>,
     mut now: Instant,
 ) {
     info!("Finished caching the frames!");
     loop {
         for (cached_img, duration) in cached_frames {
-            if send_frame(cached_img.clone(), outputs, duration, &now, &sender) {
+            if send_frame(
+                cached_img.clone(),
+                &mut outputs,
+                duration.saturating_sub(now.elapsed()),
+                &sender,
+                &stop_recv,
+            ) {
                 return;
             };
             now = Instant::now();
@@ -292,28 +282,26 @@ fn img_resize(img: image::DynamicImage, dimensions: (u32, u32), filter: FilterTy
 ///Returns whether the calling function should exit or not
 fn send_frame(
     frame: Packed,
-    outputs: &mut Arc<RwLock<Vec<String>>>,
-    timeout: &Duration,
-    now: &Instant,
+    outputs: &mut Vec<String>,
+    timeout: Duration,
     sender: &SyncSender<(Vec<String>, Packed)>,
+    stop_recv: &mpsc::Receiver<Vec<String>>,
 ) -> bool {
-    thread::sleep(timeout.saturating_sub(now.elapsed())); //TODO: better timeout?
-    match outputs.read() {
-        Ok(outputs) => {
-            //This means a new image will be displayed instead, and this animation must end
+    match stop_recv.recv_timeout(timeout) {
+        Ok(to_remove) => {
+            outputs.retain(|o| !to_remove.contains(o));
             if outputs.is_empty() {
                 return true;
             }
-            let clone = outputs.clone();
-            drop(outputs); //drop to release the lock
-            match sender.send((clone, frame)) {
+            match sender.send((outputs.clone(), frame)) {
                 Ok(()) => false,
                 Err(_) => true,
             }
         }
-        Err(e) => {
-            error!("Error when sending frame from processor: {}", e);
-            true
-        }
+        Err(mpsc::RecvTimeoutError::Timeout) => match sender.send((outputs.clone(), frame)) {
+            Ok(()) => false,
+            Err(_) => true,
+        },
+        Err(mpsc::RecvTimeoutError::Disconnected) => true,
     }
 }
