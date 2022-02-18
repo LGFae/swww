@@ -92,8 +92,8 @@ impl Processor {
         let (stopper, stop_recv) = mpsc::channel();
         self.animation_stoppers.push(stopper);
         thread::spawn(move || {
-            let mut ani = format == Some(ImageFormat::Gif);
-            ani &= complete_transition(old_img, &new_img, step, &mut outputs, &sender, &stop_recv);
+            let ani = format == Some(ImageFormat::Gif)
+                && complete_transition(old_img, &new_img, step, &mut outputs, &sender, &stop_recv);
             debug!("Transition has finished!");
 
             if ani {
