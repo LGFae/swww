@@ -34,7 +34,7 @@ use crate::Answer;
 mod processor;
 mod wayland;
 
-use processor::comp_decomp::Packed;
+use processor::{comp_decomp::Packed, ProcessorRequest};
 
 #[derive(PartialEq, Copy, Clone)]
 enum RenderEvent {
@@ -178,6 +178,7 @@ impl Bg {
     fn draw(&mut self, img: &Packed) {
         //It's possible to receive one extra img from the processor before it shuts down the
         //animation. With this test we stop that (there might be a better way of doing this)
+        //TODO: THIS IS ACTUALLY A PROBLEM!!!
         if let BgImg::Img(_) = self.img {
             let stride = 4 * self.dimensions.0 as i32;
             let width = self.dimensions.0 as i32;
@@ -211,40 +212,6 @@ impl Drop for Bg {
     fn drop(&mut self) {
         self.layer_surface.destroy();
         self.surface.destroy();
-    }
-}
-
-//TODO: think of a better name for this
-struct ProcessingGroups {
-    outputs: Vec<String>,
-    dimensions: (u32, u32),
-    old_img: Vec<u8>,
-}
-
-impl ProcessingGroups {
-    ///Returns one group per output with same dimensions and current image
-    fn make(bgs: &mut RefMut<Vec<Bg>>, outputs: &[String]) -> Vec<Self> {
-        let mut groups: Vec<(ProcessingGroups, BgImg)> = Vec::with_capacity(outputs.len());
-        bgs.iter_mut()
-            .filter(|bg| outputs.contains(&bg.output_name))
-            .for_each(|bg| {
-                if let Some(i) = groups
-                    .iter()
-                    .position(|g| bg.dimensions == g.0.dimensions && bg.img == g.1)
-                {
-                    groups[i].0.outputs.push(bg.output_name.clone());
-                } else {
-                    groups.push((
-                        ProcessingGroups {
-                            outputs: vec![bg.output_name.clone()],
-                            dimensions: bg.dimensions,
-                            old_img: bg.get_current_img().to_vec(),
-                        },
-                        bg.img.clone(),
-                    ));
-                }
-            });
-        groups.into_iter().map(|g| g.0).collect()
     }
 }
 
@@ -512,29 +479,18 @@ fn send_processor_request(
     bgs: &mut RefMut<Vec<Bg>>,
     img: Img,
 ) -> Answer {
-    let outputs = get_real_outputs(bgs, &img.outputs);
-    let groups = ProcessingGroups::make(bgs, &outputs);
-    if groups.is_empty() {
+    let requests = make_processor_requests(bgs, &img);
+    if requests.is_empty() {
         error!("None of the outputs sent were valid.");
         Answer::Err {
             msg: "none of the outputs sent are valid.".to_string(),
         }
     } else {
-        let requests = groups
-            .into_iter()
-            .map(|g| processor::ProcessorRequest {
-                outputs: g.outputs,
-                dimensions: g.dimensions,
-                old_img: g.old_img,
-                path: img.path.clone(),
-                filter: img.filter.get_image_filter(),
-                step: img.transition_step,
-            })
-            .collect();
         let answer = processor.process(requests);
         if let Answer::Ok = answer {
+            let outputs = get_real_outputs(bgs, &img.outputs);
             bgs.iter_mut()
-                .filter(|bg| outputs.contains(&bg.output_name))
+                .filter(|bg| outputs.iter().any(|o| o == &bg.output_name))
                 .for_each(|bg| bg.img = BgImg::Img(img.path.clone()));
         }
         answer
@@ -550,6 +506,36 @@ fn handle_recv_img(bgs: &mut RefMut<Vec<Bg>>, msg: &(Vec<String>, Packed)) {
         .filter(|bg| outputs.contains(&bg.output_name))
         .for_each(|bg| bg.draw(img));
 }
+
+///Returns one request per output with same dimensions and current image
+fn make_processor_requests(bgs: &mut RefMut<Vec<Bg>>, img: &Img) -> Vec<ProcessorRequest> {
+    let outputs = get_real_outputs(bgs, &img.outputs);
+    let mut groups: Vec<(ProcessorRequest, BgImg)> = Vec::with_capacity(outputs.len());
+    bgs.iter_mut()
+        .filter(|bg| outputs.contains(&bg.output_name))
+        .for_each(|bg| {
+            if let Some(i) = groups
+                .iter()
+                .position(|g| bg.dimensions == g.0.dimensions && bg.img == g.1)
+            {
+                groups[i].0.outputs.push(bg.output_name.clone());
+            } else {
+                groups.push((
+                    ProcessorRequest {
+                        outputs: vec![bg.output_name.clone()],
+                        dimensions: bg.dimensions,
+                        old_img: bg.get_current_img().to_vec(),
+                        path: img.path.clone(),
+                        filter: img.filter.get_image_filter(),
+                        step: img.transition_step,
+                    },
+                    bg.img.clone(),
+                ));
+            }
+        });
+    groups.into_iter().map(|g| g.0).collect()
+}
+
 
 ///Return only the outputs that actually exist
 ///Also puts in all outputs if an empty string was offered
