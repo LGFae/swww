@@ -92,11 +92,10 @@ impl Processor {
         let (stopper, stop_recv) = mpsc::channel();
         self.animation_stoppers.push(stopper);
         thread::spawn(move || {
-            let ani = format == Some(ImageFormat::Gif)
-                && complete_transition(old_img, &new_img, step, &mut outputs, &sender, &stop_recv);
-            debug!("Transition has finished!");
-
-            if ani {
+            if !complete_transition(old_img, &new_img, step, &mut outputs, &sender, &stop_recv) {
+                return;
+            }
+            if format == Some(ImageFormat::Gif) {
                 let gif = image::io::Reader::open(path).unwrap();
                 animate(gif, new_img, outputs, dimensions, filter, sender, stop_recv);
             }
@@ -155,6 +154,7 @@ fn complete_transition(
             sender,
             stop_recv,
         ) {
+            debug!("Transition was interrupted!");
             return false;
         }
 
@@ -167,6 +167,7 @@ fn complete_transition(
             done = true;
         }
     }
+    debug!("Transition has finished.");
     true
 }
 
