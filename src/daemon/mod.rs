@@ -445,7 +445,7 @@ fn recv_socket_msg(
             loop_signal.stop();
             Answer::Ok
         }
-        Ok(Fswww::Img(img)) => processor.process(&mut bgs, img),
+        Ok(Fswww::Img(img)) => send_processor_request(processor, &mut bgs, img),
         Ok(Fswww::Init { img, color, .. }) => {
             if let Some(img) = img {
                 let request = Img {
@@ -454,7 +454,7 @@ fn recv_socket_msg(
                     filter: crate::cli::Filter::Lanczos3,
                     transition_step: 255,
                 };
-                processor.process(&mut bgs, request)
+                send_processor_request(processor, &mut bgs, request)
             } else {
                 if let Some(color) = color {
                     bgs.iter_mut().for_each(|bg| bg.clear(color));
@@ -473,6 +473,30 @@ fn recv_socket_msg(
     answer.send(&stream)
 }
 
+fn send_processor_request(
+    processor: &mut processor::Processor,
+    bgs: &mut RefMut<Vec<Bg>>,
+    img: Img,
+) -> Answer {
+    let outputs = get_real_outputs(bgs, &img.outputs);
+    let groups = processor::ProcessingGroups::make(bgs, &outputs);
+    if groups.is_empty() {
+        error!("None of the outputs sent were valid.");
+        Answer::Err {
+            msg: "none of the outputs sent are valid.".to_string(),
+        }
+    } else {
+        let path = img.path.clone();
+        let answer = processor.process(groups, img);
+        if let Answer::Ok = answer {
+            bgs.iter_mut()
+                .filter(|bg| outputs.contains(&bg.output_name))
+                .for_each(|bg| bg.img = BgImg::Img(path.clone()));
+        }
+        answer
+    }
+}
+
 fn handle_recv_img(bgs: &mut RefMut<Vec<Bg>>, msg: &(Vec<String>, Packed)) {
     let (outputs, img) = msg;
     if outputs.is_empty() {
@@ -481,6 +505,21 @@ fn handle_recv_img(bgs: &mut RefMut<Vec<Bg>>, msg: &(Vec<String>, Packed)) {
     bgs.iter_mut()
         .filter(|bg| outputs.contains(&bg.output_name))
         .for_each(|bg| bg.draw(img));
+}
+
+///Return only the outputs that actually exist
+///Also puts in all outputs if an empty string was offered
+fn get_real_outputs(bgs: &RefMut<Vec<Bg>>, outputs: &str) -> Vec<String> {
+    //An empty line means all outputs
+    if outputs.is_empty() {
+        bgs.iter().map(|bg| bg.output_name.clone()).collect()
+    } else {
+        outputs
+            .split(',')
+            .filter(|o| bgs.iter().any(|bg| o == &bg.output_name))
+            .map(|o| o.to_string())
+            .collect()
+    }
 }
 
 fn clear_outputs(

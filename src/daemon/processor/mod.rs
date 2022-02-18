@@ -20,7 +20,7 @@ use crate::Answer;
 pub mod comp_decomp;
 use comp_decomp::Packed;
 
-struct ProcessingGroups {
+pub struct ProcessingGroups {
     outputs: Vec<String>,
     dimensions: (u32, u32),
     old_img: Vec<u8>,
@@ -28,7 +28,7 @@ struct ProcessingGroups {
 
 impl ProcessingGroups {
     ///Returns one group per output with same dimensions and current image
-    fn make(bgs: &mut RefMut<Vec<Bg>>, outputs: Vec<String>) -> Vec<Self> {
+    pub fn make(bgs: &mut RefMut<Vec<Bg>>, outputs: &[String]) -> Vec<Self> {
         let mut groups: Vec<(ProcessingGroups, BgImg)> = Vec::with_capacity(outputs.len());
         bgs.iter_mut()
             .filter(|bg| outputs.contains(&bg.output_name))
@@ -71,20 +71,12 @@ impl Processor {
         }
     }
 
-    pub fn process(&mut self, bgs: &mut RefMut<Vec<Bg>>, request: Img) -> Answer {
-        let outputs = get_real_outputs(bgs, &request.outputs);
-        if outputs.is_empty() {
-            error!("None of the outputs sent were valid.");
-            return Answer::Err {
-                msg: "None of the outputs sent are valid.".to_string(),
-            };
-        }
-
+    pub fn process(&mut self, groups: Vec<ProcessingGroups>, request: Img) -> Answer {
         for ProcessingGroups {
             outputs,
             dimensions,
             old_img,
-        } in ProcessingGroups::make(bgs, outputs)
+        } in groups
         {
             self.stop_animations(&outputs);
             //Note these can't be moved outside the loop without creating some memory overhead
@@ -105,10 +97,6 @@ impl Processor {
                     }
                 }
             };
-
-            bgs.iter_mut()
-                .filter(|bg| outputs.contains(&bg.output_name))
-                .for_each(|bg| bg.img = BgImg::Img(request.path.clone()));
 
             let new_img = img_resize(img, dimensions, request.filter.get_image_filter());
 
@@ -189,20 +177,6 @@ impl Drop for Processor {
     }
 }
 
-///Return only the outputs that actually exist
-///Also puts in all outpus if an empty string was offered
-fn get_real_outputs(bgs: &mut RefMut<Vec<Bg>>, outputs: &str) -> Vec<String> {
-    //An empty line means all outputs
-    if outputs.is_empty() {
-        bgs.iter().map(|bg| bg.output_name.clone()).collect()
-    } else {
-        outputs
-            .split(',')
-            .filter(|o| bgs.iter().any(|bg| o == &bg.output_name))
-            .map(|o| o.to_string())
-            .collect()
-    }
-}
 
 ///Returns whether the transition completed or was interrupted
 fn complete_transition(
