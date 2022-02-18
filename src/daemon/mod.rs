@@ -176,29 +176,24 @@ impl Bg {
     }
 
     fn draw(&mut self, img: &Packed) {
-        //It's possible to receive one extra img from the processor before it shuts down the
-        //animation. With this test we stop that (there might be a better way of doing this)
-        //TODO: THIS IS ACTUALLY A PROBLEM!!!
-        if let BgImg::Img(_) = self.img {
-            let stride = 4 * self.dimensions.0 as i32;
-            let width = self.dimensions.0 as i32;
-            let height = self.dimensions.1 as i32;
+        let stride = 4 * self.dimensions.0 as i32;
+        let width = self.dimensions.0 as i32;
+        let height = self.dimensions.1 as i32;
 
-            debug!(
-                "Current state of mempoll for output {}:{:?}",
-                self.output_name, self.pool
-            );
-            let buffer = self
-                .pool
-                .buffer(0, width, height, stride, wl_shm::Format::Xrgb8888);
-            let canvas = self.pool.mmap();
-            img.unpack(canvas);
-            debug!("Decompressed img.");
+        debug!(
+            "Current state of mempoll for output {}:{:?}",
+            self.output_name, self.pool
+        );
+        let buffer = self
+            .pool
+            .buffer(0, width, height, stride, wl_shm::Format::Xrgb8888);
+        let canvas = self.pool.mmap();
+        img.unpack(canvas);
+        debug!("Decompressed img.");
 
-            self.surface.attach(Some(&buffer), 0, 0);
-            self.surface.damage_buffer(0, 0, width, height);
-            self.surface.commit();
-        }
+        self.surface.attach(Some(&buffer), 0, 0);
+        self.surface.damage_buffer(0, 0, width, height);
+        self.surface.commit();
     }
 
     ///This method is what makes necessary that we use the mempoll, instead of the "easier"
@@ -346,7 +341,7 @@ fn main_loop(
     listener: UnixListener,
 ) {
     //We use 1 because we can't send a new frame without being absolutely sure that all previous
-    //have already been displayed
+    //have already been displayed. Using 0 causes the animation to stop.
     let (frame_sender, frame_receiver) = calloop::channel::sync_channel(1);
     let processor = Rc::new(RefCell::new(processor::Processor::new(frame_sender)));
     let mut event_loop = calloop::EventLoop::<calloop::LoopSignal>::try_new().unwrap();
@@ -535,7 +530,6 @@ fn make_processor_requests(bgs: &mut RefMut<Vec<Bg>>, img: &Img) -> Vec<Processo
         });
     groups.into_iter().map(|g| g.0).collect()
 }
-
 
 ///Return only the outputs that actually exist
 ///Also puts in all outputs if an empty string was offered

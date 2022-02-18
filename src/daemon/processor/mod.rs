@@ -178,7 +178,7 @@ fn complete_transition(
         }
 
         let compressed_img = Packed::pack(&old_img, &transition_img);
-        if send_frame(compressed_img, outputs, &duration, &mut now, sender) {
+        if send_frame(compressed_img, outputs, &duration, &now, sender) {
             return false;
         }
 
@@ -228,7 +228,7 @@ fn animate(
         canvas = img;
         cached_frames.push((compressed_frame.clone(), duration));
 
-        if send_frame(compressed_frame, outputs, &duration, &mut now, &sender) {
+        if send_frame(compressed_frame, outputs, &duration, &now, &sender) {
             return;
         };
 
@@ -255,7 +255,7 @@ fn loop_animation(
     info!("Finished caching the frames!");
     loop {
         for (cached_img, duration) in cached_frames {
-            if send_frame(cached_img.clone(), outputs, duration, &mut now, &sender) {
+            if send_frame(cached_img.clone(), outputs, duration, &now, &sender) {
                 return;
             };
             now = Instant::now();
@@ -291,34 +291,29 @@ fn img_resize(img: image::DynamicImage, dimensions: (u32, u32), filter: FilterTy
 
 ///Returns whether the calling function should exit or not
 fn send_frame(
-    mut frame: Packed,
+    frame: Packed,
     outputs: &mut Arc<RwLock<Vec<String>>>,
     timeout: &Duration,
-    now: &mut Instant,
+    now: &Instant,
     sender: &SyncSender<(Vec<String>, Packed)>,
 ) -> bool {
-    loop {
-        thread::sleep(timeout.saturating_sub(now.elapsed())); //TODO: better timeout?
-        match outputs.read() {
-            Ok(outputs) => {
-                //This means a new image will be displayed instead, and this animation must end
-                if outputs.is_empty() {
-                    return true;
-                }
-                match sender.try_send((outputs.clone(), frame)) {
-                    Ok(()) => return false,
-                    //we try again in this case
-                    Err(std::sync::mpsc::TrySendError::Full(e)) => {
-                        *now = Instant::now();
-                        frame = e.1
-                    }
-                    Err(std::sync::mpsc::TrySendError::Disconnected(_)) => return true,
-                }
-            }
-            Err(e) => {
-                error!("Error when sending frame from processor: {}", e);
+    thread::sleep(timeout.saturating_sub(now.elapsed())); //TODO: better timeout?
+    match outputs.read() {
+        Ok(outputs) => {
+            //This means a new image will be displayed instead, and this animation must end
+            if outputs.is_empty() {
                 return true;
             }
+            let clone = outputs.clone();
+            drop(outputs); //drop to release the lock
+            match sender.send((clone, frame)) {
+                Ok(()) => false,
+                Err(_) => true,
+            }
+        }
+        Err(e) => {
+            error!("Error when sending frame from processor: {}", e);
+            true
         }
     }
 }
