@@ -61,7 +61,7 @@ impl fmt::Display for BgImg {
     }
 }
 
-pub struct Bg {
+struct Bg {
     output_name: String,
     surface: wl_surface::WlSurface,
     layer_surface: Main<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1>,
@@ -211,6 +211,40 @@ impl Drop for Bg {
     fn drop(&mut self) {
         self.layer_surface.destroy();
         self.surface.destroy();
+    }
+}
+
+//TODO: think of a better name for this
+struct ProcessingGroups {
+    outputs: Vec<String>,
+    dimensions: (u32, u32),
+    old_img: Vec<u8>,
+}
+
+impl ProcessingGroups {
+    ///Returns one group per output with same dimensions and current image
+    fn make(bgs: &mut RefMut<Vec<Bg>>, outputs: &[String]) -> Vec<Self> {
+        let mut groups: Vec<(ProcessingGroups, BgImg)> = Vec::with_capacity(outputs.len());
+        bgs.iter_mut()
+            .filter(|bg| outputs.contains(&bg.output_name))
+            .for_each(|bg| {
+                if let Some(i) = groups
+                    .iter()
+                    .position(|g| bg.dimensions == g.0.dimensions && bg.img == g.1)
+                {
+                    groups[i].0.outputs.push(bg.output_name.clone());
+                } else {
+                    groups.push((
+                        ProcessingGroups {
+                            outputs: vec![bg.output_name.clone()],
+                            dimensions: bg.dimensions,
+                            old_img: bg.get_current_img().to_vec(),
+                        },
+                        bg.img.clone(),
+                    ));
+                }
+            });
+        groups.into_iter().map(|g| g.0).collect()
     }
 }
 
@@ -479,19 +513,29 @@ fn send_processor_request(
     img: Img,
 ) -> Answer {
     let outputs = get_real_outputs(bgs, &img.outputs);
-    let groups = processor::ProcessingGroups::make(bgs, &outputs);
+    let groups = ProcessingGroups::make(bgs, &outputs);
     if groups.is_empty() {
         error!("None of the outputs sent were valid.");
         Answer::Err {
             msg: "none of the outputs sent are valid.".to_string(),
         }
     } else {
-        let path = img.path.clone();
-        let answer = processor.process(groups, img);
+        let requests = groups
+            .into_iter()
+            .map(|g| processor::ProcessorRequest {
+                outputs: g.outputs,
+                dimensions: g.dimensions,
+                old_img: g.old_img,
+                path: img.path.clone(),
+                filter: img.filter.get_image_filter(),
+                step: img.transition_step,
+            })
+            .collect();
+        let answer = processor.process(requests);
         if let Answer::Ok = answer {
             bgs.iter_mut()
                 .filter(|bg| outputs.contains(&bg.output_name))
-                .for_each(|bg| bg.img = BgImg::Img(path.clone()));
+                .for_each(|bg| bg.img = BgImg::Img(img.path.clone()));
         }
         answer
     }

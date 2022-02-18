@@ -7,50 +7,24 @@ use log::{debug, error, info};
 use smithay_client_toolkit::reexports::calloop::channel::SyncSender;
 
 use std::{
-    cell::RefMut,
     io::BufReader,
+    path::PathBuf,
     sync::{Arc, RwLock},
     thread,
     time::{Duration, Instant},
 };
 
-use super::{Bg, BgImg};
-use crate::cli::Img;
 use crate::Answer;
 pub mod comp_decomp;
 use comp_decomp::Packed;
 
-pub struct ProcessingGroups {
-    outputs: Vec<String>,
-    dimensions: (u32, u32),
-    old_img: Vec<u8>,
-}
-
-impl ProcessingGroups {
-    ///Returns one group per output with same dimensions and current image
-    pub fn make(bgs: &mut RefMut<Vec<Bg>>, outputs: &[String]) -> Vec<Self> {
-        let mut groups: Vec<(ProcessingGroups, BgImg)> = Vec::with_capacity(outputs.len());
-        bgs.iter_mut()
-            .filter(|bg| outputs.contains(&bg.output_name))
-            .for_each(|bg| {
-                if let Some(i) = groups
-                    .iter()
-                    .position(|g| bg.dimensions == g.0.dimensions && bg.img == g.1)
-                {
-                    groups[i].0.outputs.push(bg.output_name.clone());
-                } else {
-                    groups.push((
-                        ProcessingGroups {
-                            outputs: vec![bg.output_name.clone()],
-                            dimensions: bg.dimensions,
-                            old_img: bg.get_current_img().to_vec(),
-                        },
-                        bg.img.clone(),
-                    ));
-                }
-            });
-        groups.into_iter().map(|g| g.0).collect()
-    }
+pub struct ProcessorRequest {
+    pub outputs: Vec<String>,
+    pub dimensions: (u32, u32),
+    pub old_img: Vec<u8>,
+    pub path: PathBuf,
+    pub filter: FilterType,
+    pub step: u8,
 }
 
 struct Animator {
@@ -71,14 +45,9 @@ impl Processor {
         }
     }
 
-    pub fn process(&mut self, groups: Vec<ProcessingGroups>, request: Img) -> Answer {
-        for ProcessingGroups {
-            outputs,
-            dimensions,
-            old_img,
-        } in groups
-        {
-            self.stop_animations(&outputs);
+    pub fn process(&mut self, requests: Vec<ProcessorRequest>) -> Answer {
+        for request in requests {
+            self.stop_animations(&request.outputs);
             //Note these can't be moved outside the loop without creating some memory overhead
             let img_buf = match image::io::Reader::open(&request.path) {
                 Ok(i) => i,
@@ -98,9 +67,8 @@ impl Processor {
                 }
             };
 
-            let new_img = img_resize(img, dimensions, request.filter.get_image_filter());
-
-            self.transition(&request, old_img, new_img, dimensions, outputs, format);
+            let new_img = img_resize(img, request.dimensions, request.filter);
+            self.transition(request, new_img, format);
         }
         debug!("Finished image processing!");
         Answer::Ok
@@ -131,18 +99,17 @@ impl Processor {
     //this will make the animations independent from each other, which isn't really necessary
     fn transition(
         &mut self,
-        request: &Img,
-        old_img: Vec<u8>,
+        request: ProcessorRequest,
         new_img: Vec<u8>,
-        dimensions: (u32, u32),
-        outputs: Vec<String>,
         format: Option<ImageFormat>,
     ) {
-        let filter = request.filter.get_image_filter();
-        let path = request.path.clone();
-        let step = request.transition_step;
+        let dimensions = request.dimensions;
+        let filter = request.filter;
+        let old_img = request.old_img;
+        let path = request.path;
+        let step = request.step;
         let sender = self.frame_sender.clone();
-        let out_arc = Arc::new(RwLock::new(outputs));
+        let out_arc = Arc::new(RwLock::new(request.outputs));
         let mut out_clone = out_arc.clone();
         self.animations.push(Animator {
             outputs: out_arc,
@@ -176,7 +143,6 @@ impl Drop for Processor {
         }
     }
 }
-
 
 ///Returns whether the transition completed or was interrupted
 fn complete_transition(
