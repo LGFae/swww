@@ -1,5 +1,5 @@
 use image::{
-    self, codecs::gif::GifDecoder, imageops::FilterType, io::Reader, AnimationDecoder,
+    self, codecs::gif::GifDecoder, imageops::FilterType, AnimationDecoder, Frames,
     GenericImageView, ImageFormat,
 };
 use log::{debug, info};
@@ -7,7 +7,6 @@ use log::{debug, info};
 use smithay_client_toolkit::reexports::calloop::channel::SyncSender;
 
 use std::{
-    io::BufReader,
     path::PathBuf,
     sync::mpsc,
     thread,
@@ -52,7 +51,6 @@ impl Processor {
                     }
                 }
             };
-            let format = img_buf.format();
             let img = match img_buf.decode() {
                 Ok(i) => i,
                 Err(e) => {
@@ -63,7 +61,7 @@ impl Processor {
             };
 
             let new_img = img_resize(img, request.dimensions, request.filter);
-            self.transition(request, new_img, format);
+            self.transition(request, new_img);
         }
         debug!("Finished image processing!");
         Answer::Ok
@@ -76,7 +74,7 @@ impl Processor {
 
     //TODO: if two images will have the same animation, but have differen current images,
     //this will make the animations independent from each other, which isn't really necessary
-    fn transition(&mut self, req: ProcessorRequest, new_img: Vec<u8>, format: Option<ImageFormat>) {
+    fn transition(&mut self, req: ProcessorRequest, new_img: Vec<u8>) {
         let ProcessorRequest {
             mut outputs,
             dimensions,
@@ -92,9 +90,14 @@ impl Processor {
             if !complete_transition(old_img, &new_img, step, &mut outputs, &sender, &stop_recv) {
                 return;
             }
-            if format == Some(ImageFormat::Gif) {
-                let gif = image::io::Reader::open(path).unwrap();
-                animate(gif, new_img, outputs, dimensions, filter, sender, stop_recv);
+            let img = image::io::Reader::open(path).unwrap();
+            if img.format() == Some(ImageFormat::Gif) {
+                let frames = GifDecoder::new(img.into_inner())
+                    .expect("Couldn't decode gif, though this should be impossible...")
+                    .into_frames();
+                animate(
+                    frames, new_img, outputs, dimensions, filter, sender, stop_recv,
+                );
             }
         });
     }
@@ -169,7 +172,7 @@ fn complete_transition(
 }
 
 fn animate(
-    gif: Reader<BufReader<std::fs::File>>,
+    mut frames: Frames,
     first_frame: Vec<u8>,
     mut outputs: Vec<String>,
     dimensions: (u32, u32),
@@ -177,10 +180,6 @@ fn animate(
     sender: SyncSender<(Vec<String>, Packed)>,
     stop_recv: mpsc::Receiver<Vec<String>>,
 ) {
-    let mut frames = GifDecoder::new(gif.into_inner())
-        .expect("Couldn't decode gif, though this should be impossible...")
-        .into_frames();
-
     //The first frame should always exist
     let duration_first_frame = frames.next().unwrap().unwrap().delay().numer_denom_ms();
     let duration_first_frame =
