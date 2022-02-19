@@ -29,11 +29,8 @@ fn main() -> Result<(), String> {
     match Answer::receive(&mut socket)? {
         Answer::Err { msg } => return Err(msg),
         Answer::Info { out_dim_img } => {
-            for (output, (width, height), img) in out_dim_img {
-                println!(
-                    "{} - {}x{}, currently displaying: {}",
-                    output, width, height, img
-                );
+            for info in out_dim_img {
+                println!("{}", info);
             }
         }
         Answer::Ok => {

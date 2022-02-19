@@ -62,14 +62,29 @@ impl fmt::Display for BgImg {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BgInfo {
+    name: String,
+    dim: (u32, u32),
+    img: BgImg,
+}
+
+impl fmt::Display for BgInfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{} = {}x{}, currently displaying: {}",
+            self.name, self.dim.0, self.dim.1, self.img
+        )
+    }
+}
+
 struct Bg {
-    output_name: String,
+    info: BgInfo,
     surface: wl_surface::WlSurface,
     layer_surface: Main<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1>,
     next_render_event: Rc<Cell<Option<RenderEvent>>>,
     pool: MemPool,
-    dimensions: (u32, u32),
-    img: BgImg,
 }
 
 impl Bg {
@@ -120,9 +135,11 @@ impl Bg {
             layer_surface,
             next_render_event,
             pool,
-            output_name,
-            dimensions: (0, 0),
-            img: BgImg::Color([0, 0, 0]),
+            info: BgInfo {
+                name: output_name,
+                dim: (0, 0),
+                img: BgImg::Color([0, 0, 0]),
+            },
         })
     }
 
@@ -133,19 +150,16 @@ impl Bg {
         match self.next_render_event.take() {
             Some(RenderEvent::Closed) => Some(true),
             Some(RenderEvent::Configure { width, height }) => {
-                if self.dimensions != (width, height) {
-                    self.dimensions = (width, height);
+                if self.info.dim != (width, height) {
+                    self.info.dim = (width, height);
                     self.pool
                         .resize(width as usize * height as usize * 4)
                         .unwrap();
                     self.clear([0, 0, 0]);
-                    debug!("Configured output: {}", self.output_name);
+                    debug!("Configured output: {}", self.info.name);
                     Some(false)
                 } else {
-                    debug!(
-                        "Output {} is already configured correctly.",
-                        self.output_name
-                    );
+                    debug!("Output {} is already configured correctly.", self.info.name);
                     None
                 }
             }
@@ -155,10 +169,10 @@ impl Bg {
 
     ///'color' argument is in rbg. We copy it correctly to brgx inside the function
     fn clear(&mut self, color: [u8; 3]) {
-        self.img = BgImg::Color(color);
-        let stride = 4 * self.dimensions.0 as i32;
-        let width = self.dimensions.0 as i32;
-        let height = self.dimensions.1 as i32;
+        self.info.img = BgImg::Color(color);
+        let stride = 4 * self.info.dim.0 as i32;
+        let width = self.info.dim.0 as i32;
+        let height = self.info.dim.1 as i32;
 
         let buffer = self
             .pool
@@ -170,20 +184,20 @@ impl Bg {
             pixel[1] = color[1];
             pixel[2] = color[0];
         }
-        debug!("Clearing output: {}", self.output_name);
+        debug!("Clearing output: {}", self.info.name);
         self.surface.attach(Some(&buffer), 0, 0);
         self.surface.damage_buffer(0, 0, width, height);
         self.surface.commit();
     }
 
     fn draw(&mut self, img: &Packed) {
-        let stride = 4 * self.dimensions.0 as i32;
-        let width = self.dimensions.0 as i32;
-        let height = self.dimensions.1 as i32;
+        let stride = 4 * self.info.dim.0 as i32;
+        let width = self.info.dim.0 as i32;
+        let height = self.info.dim.1 as i32;
 
         debug!(
             "Current state of mempoll for output {}:{:?}",
-            self.output_name, self.pool
+            self.info.name, self.pool
         );
         let buffer = self
             .pool
@@ -295,7 +309,7 @@ fn create_backgrounds(
 ) {
     if info.obsolete {
         // an output has been removed, release it
-        bgs.borrow_mut().retain(|bg| bg.output_name != info.name);
+        bgs.borrow_mut().retain(|bg| bg.info.name != info.name);
         output.release();
     } else {
         // an output has been created, construct a surface for it
@@ -409,7 +423,7 @@ fn main_loop(
             while i != bgs.len() {
                 if let Some(should_remove) = bgs[i].handle_events() {
                     let mut processor = processor.borrow_mut();
-                    processor.stop_animations(&[bgs[i].output_name.clone()]);
+                    processor.stop_animations(&[bgs[i].info.name.clone()]);
                     if should_remove {
                         bgs.remove(i);
                     } else {
@@ -461,10 +475,7 @@ fn recv_socket_msg(
             }
         }
         Ok(Fswww::Query) => Answer::Info {
-            out_dim_img: bgs
-                .iter()
-                .map(|bg| (bg.output_name.clone(), bg.dimensions, bg.img.clone()))
-                .collect(),
+            out_dim_img: bgs.iter().map(|bg| bg.info.clone()).collect(),
         },
         Err(e) => Answer::Err { msg: e },
     };
@@ -483,8 +494,8 @@ fn send_processor_request(proc: &mut Processor, bgs: &mut RefMut<Vec<Bg>>, img: 
         if let Answer::Ok = answer {
             let outputs = get_real_outputs(bgs, &img.outputs);
             bgs.iter_mut()
-                .filter(|bg| outputs.iter().any(|o| o == &bg.output_name))
-                .for_each(|bg| bg.img = BgImg::Img(img.path.clone()));
+                .filter(|bg| outputs.iter().any(|o| o == &bg.info.name))
+                .for_each(|bg| bg.info.img = BgImg::Img(img.path.clone()));
         }
         answer
     }
@@ -496,7 +507,7 @@ fn handle_recv_img(bgs: &mut RefMut<Vec<Bg>>, msg: &(Vec<String>, Packed)) {
         warn!("Received empty list of outputs from processor, which should be impossible");
     }
     bgs.iter_mut()
-        .filter(|bg| outputs.contains(&bg.output_name))
+        .filter(|bg| outputs.contains(&bg.info.name))
         .for_each(|bg| bg.draw(img));
 }
 
@@ -505,25 +516,25 @@ fn make_processor_requests(bgs: &mut RefMut<Vec<Bg>>, img: &Img) -> Vec<Processo
     let outputs = get_real_outputs(bgs, &img.outputs);
     let mut groups: Vec<(ProcessorRequest, BgImg)> = Vec::with_capacity(outputs.len());
     bgs.iter_mut()
-        .filter(|bg| outputs.contains(&bg.output_name))
+        .filter(|bg| outputs.contains(&bg.info.name))
         .for_each(|bg| {
             if let Some(i) = groups
                 .iter()
-                .position(|g| bg.dimensions == g.0.dimensions && bg.img == g.1)
+                .position(|g| bg.info.dim == g.0.dimensions && bg.info.img == g.1)
             {
-                groups[i].0.outputs.push(bg.output_name.clone());
+                groups[i].0.outputs.push(bg.info.name.clone());
             } else {
                 groups.push((
                     ProcessorRequest {
-                        outputs: vec![bg.output_name.clone()],
-                        dimensions: bg.dimensions,
+                        outputs: vec![bg.info.name.clone()],
+                        dimensions: bg.info.dim,
                         old_img: bg.get_current_img().to_vec(),
                         path: img.path.clone(),
                         filter: img.filter.get_image_filter(),
                         step: img.transition_step,
                         fps: Duration::from_nanos(1_000_000_000 / img.transition_fps as u64),
                     },
-                    bg.img.clone(),
+                    bg.info.img.clone(),
                 ));
             }
         });
@@ -535,11 +546,11 @@ fn make_processor_requests(bgs: &mut RefMut<Vec<Bg>>, img: &Img) -> Vec<Processo
 fn get_real_outputs(bgs: &RefMut<Vec<Bg>>, outputs: &str) -> Vec<String> {
     //An empty line means all outputs
     if outputs.is_empty() {
-        bgs.iter().map(|bg| bg.output_name.clone()).collect()
+        bgs.iter().map(|bg| bg.info.name.clone()).collect()
     } else {
         outputs
             .split(',')
-            .filter(|o| bgs.iter().any(|bg| o == &bg.output_name))
+            .filter(|o| bgs.iter().any(|bg| o == &bg.info.name))
             .map(|o| o.to_string())
             .collect()
     }
@@ -554,7 +565,7 @@ fn clear_outputs(bgs: &mut RefMut<Vec<Bg>>, clear: Clear, proc: &mut Processor) 
     } else {
         proc.stop_animations(&outputs);
         bgs.iter_mut()
-            .filter(|bg| outputs.contains(&bg.output_name))
+            .filter(|bg| outputs.contains(&bg.info.name))
             .for_each(|bg| bg.clear(clear.color));
         Answer::Ok
     }

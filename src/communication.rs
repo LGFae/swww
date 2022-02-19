@@ -2,7 +2,7 @@
 //! some helper functions to make communication more streamlined
 use crate::{
     cli::{Filter, Fswww},
-    daemon,
+    daemon:: BgInfo
 };
 use serde::{Deserialize, Serialize};
 use std::{os::unix::net::UnixStream, time::Duration};
@@ -14,7 +14,7 @@ pub enum Answer {
         msg: String,
     },
     Info {
-        out_dim_img: Vec<(String, (u32, u32), daemon::BgImg)>,
+        out_dim_img: Vec<BgInfo>,
     },
 }
 
