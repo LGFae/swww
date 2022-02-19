@@ -125,7 +125,11 @@ impl Processor {
                 return;
             }
             if let Some(animation) = animation {
-                animate(animation, new_img, outputs, sender, stop_recv);
+                if let Some((cached_frames, now)) =
+                    animate(animation, new_img, &mut outputs, &sender, &stop_recv)
+                {
+                    loop_animation(cached_frames, outputs, sender, stop_recv, now);
+                }
             }
         });
     }
@@ -197,10 +201,10 @@ fn complete_transition(
 fn animate(
     animation: Animation,
     first_frame: Vec<u8>,
-    mut outputs: Vec<String>,
-    sender: SyncSender<(Vec<String>, Packed)>,
-    stop_recv: mpsc::Receiver<Vec<String>>,
-) {
+    outputs: &mut Vec<String>,
+    sender: &SyncSender<(Vec<String>, Packed)>,
+    stop_recv: &mpsc::Receiver<Vec<String>>,
+) -> Option<(Vec<(Packed, Duration)>, Instant)> {
     let Animation {
         mut frames,
         dimensions,
@@ -229,8 +233,8 @@ fn animate(
         cached_frames.push((compressed_frame.clone(), duration));
 
         let timeout = duration.saturating_sub(now.elapsed());
-        if send_frame(compressed_frame, &mut outputs, timeout, &sender, &stop_recv) {
-            return;
+        if send_frame(compressed_frame, outputs, timeout, sender, stop_recv) {
+            return None;
         };
         now = Instant::now();
     }
@@ -238,16 +242,15 @@ fn animate(
     let first_frame_comp = Packed::pack(&canvas, &first_frame);
     cached_frames.insert(0, (first_frame_comp, duration_first_frame));
     if cached_frames.len() > 1 {
-        drop(first_frame);
-        drop(canvas);
-        drop(frames);
         cached_frames.shrink_to_fit();
-        loop_animation(&cached_frames, outputs, sender, stop_recv, now);
+        Some((cached_frames, now))
+    } else {
+        None
     }
 }
 
 fn loop_animation(
-    cached_frames: &[(Packed, Duration)],
+    cached_frames: Vec<(Packed, Duration)>,
     mut outputs: Vec<String>,
     sender: SyncSender<(Vec<String>, Packed)>,
     stop_recv: mpsc::Receiver<Vec<String>>,
@@ -255,7 +258,7 @@ fn loop_animation(
 ) {
     info!("Finished caching the frames!");
     loop {
-        for (cached_img, duration) in cached_frames {
+        for (cached_img, duration) in &cached_frames {
             let frame = cached_img.clone();
             let timeout = duration.saturating_sub(now.elapsed());
             if send_frame(frame, &mut outputs, timeout, &sender, &stop_recv) {
