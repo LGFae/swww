@@ -27,12 +27,8 @@ fn main() -> Result<(), String> {
     let mut socket = get_socket(5, 100)?;
     fswww.send(&socket)?;
     match Answer::receive(&mut socket)? {
-        Answer::Err { msg } => return Err(msg),
-        Answer::Info { out_dim_img } => {
-            for info in out_dim_img {
-                println!("{}", info);
-            }
-        }
+        Answer::Err(msg) => return Err(msg),
+        Answer::Info(info) => info.into_iter().for_each(|i| println!("{}", i)),
         Answer::Ok => {
             if let Fswww::Kill = fswww {
                 #[cfg(debug_assertions)]

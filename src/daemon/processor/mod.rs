@@ -47,17 +47,19 @@ impl Processor {
             let img_buf = match image::io::Reader::open(&request.path) {
                 Ok(i) => i,
                 Err(e) => {
-                    return Answer::Err {
-                        msg: format!("failed to open image '{:#?}': {}", &request.path, e),
-                    }
+                    return Answer::Err(format!(
+                        "failed to open image '{:#?}': {}",
+                        &request.path, e
+                    ))
                 }
             };
             let img = match img_buf.decode() {
                 Ok(i) => i,
                 Err(e) => {
-                    return Answer::Err {
-                        msg: format!("failed to decode image '{:#?}': {}", &request.path, e),
-                    }
+                    return Answer::Err(format!(
+                        "failed to decode image '{:#?}': {}",
+                        &request.path, e
+                    ))
                 }
             };
 

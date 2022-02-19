@@ -44,7 +44,7 @@ enum RenderEvent {
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub enum BgImg {
+enum BgImg {
     Color([u8; 3]),
     Img(PathBuf),
 }
@@ -474,10 +474,8 @@ fn recv_socket_msg(
                 Answer::Ok
             }
         }
-        Ok(Fswww::Query) => Answer::Info {
-            out_dim_img: bgs.iter().map(|bg| bg.info.clone()).collect(),
-        },
-        Err(e) => Answer::Err { msg: e },
+        Ok(Fswww::Query) => Answer::Info(bgs.iter().map(|bg| bg.info.clone()).collect()),
+        Err(e) => Answer::Err(e),
     };
     answer.send(&stream)
 }
@@ -486,9 +484,7 @@ fn send_processor_request(proc: &mut Processor, bgs: &mut RefMut<Vec<Bg>>, img: 
     let requests = make_processor_requests(bgs, &img);
     if requests.is_empty() {
         error!("None of the outputs sent were valid.");
-        Answer::Err {
-            msg: "none of the outputs sent are valid.".to_string(),
-        }
+        Answer::Err("none of the outputs sent are valid.".to_string())
     } else {
         let answer = proc.process(requests);
         if let Answer::Ok = answer {
@@ -559,9 +555,7 @@ fn get_real_outputs(bgs: &RefMut<Vec<Bg>>, outputs: &str) -> Vec<String> {
 fn clear_outputs(bgs: &mut RefMut<Vec<Bg>>, clear: Clear, proc: &mut Processor) -> Answer {
     let outputs = get_real_outputs(bgs, &clear.outputs);
     if outputs.is_empty() {
-        Answer::Err {
-            msg: "None of the specified outputs exist!".to_string(),
-        }
+        Answer::Err("None of the specified outputs exist!".to_string())
     } else {
         proc.stop_animations(&outputs);
         bgs.iter_mut()

@@ -10,12 +10,8 @@ use std::{os::unix::net::UnixStream, time::Duration};
 #[derive(Serialize, Deserialize)]
 pub enum Answer {
     Ok,
-    Err {
-        msg: String,
-    },
-    Info {
-        out_dim_img: Vec<BgInfo>,
-    },
+    Err(String) ,
+    Info(Vec<BgInfo>)
 }
 
 impl Answer {
