@@ -27,6 +27,44 @@ pub struct ProcessorRequest {
     pub fps: Duration,
 }
 
+struct Transition {
+    old_img: Vec<u8>,
+    step: u8,
+    fps: Duration,
+}
+
+struct Animation<'a> {
+    frames: Frames<'a>,
+    dimensions: (u32, u32),
+    filter: FilterType,
+}
+
+impl ProcessorRequest {
+    fn split<'a>(self) -> (Vec<String>, Transition, Option<Animation<'a>>) {
+        let transition = Transition {
+            old_img: self.old_img,
+            step: self.step,
+            fps: self.fps,
+        };
+        let animation = {
+            let img = image::io::Reader::open(self.path).unwrap();
+            if img.format() == Some(ImageFormat::Gif) {
+                let frames = GifDecoder::new(img.into_inner())
+                    .expect("Couldn't decode gif, though this should be impossible...")
+                    .into_frames();
+                Some(Animation {
+                    frames,
+                    dimensions: self.dimensions,
+                    filter: self.filter,
+                })
+            } else {
+                None
+            }
+        };
+        (self.outputs, transition, animation)
+    }
+}
+
 pub struct Processor {
     frame_sender: SyncSender<(Vec<String>, Packed)>,
     anim_stoppers: Vec<mpsc::Sender<Vec<String>>>,
@@ -77,39 +115,17 @@ impl Processor {
 
     //TODO: if two images will have the same animation, but have differen current images,
     //this will make the animations independent from each other, which isn't really necessary
-    fn transition(&mut self, req: ProcessorRequest, new_img: Vec<u8>) {
-        let ProcessorRequest {
-            mut outputs,
-            dimensions,
-            old_img,
-            path,
-            filter,
-            step,
-            fps,
-        } = req;
+    fn transition(&mut self, request: ProcessorRequest, new_img: Vec<u8>) {
         let sender = self.frame_sender.clone();
         let (stopper, stop_recv) = mpsc::channel();
         self.anim_stoppers.push(stopper);
         thread::spawn(move || {
-            if !complete_transition(
-                old_img,
-                &new_img,
-                step,
-                fps,
-                &mut outputs,
-                &sender,
-                &stop_recv,
-            ) {
+            let (mut outputs, transition, animation) = request.split();
+            if !complete_transition(transition, &new_img, &mut outputs, &sender, &stop_recv) {
                 return;
             }
-            let img = image::io::Reader::open(path).unwrap();
-            if img.format() == Some(ImageFormat::Gif) {
-                let frames = GifDecoder::new(img.into_inner())
-                    .expect("Couldn't decode gif, though this should be impossible...")
-                    .into_frames();
-                animate(
-                    frames, new_img, outputs, dimensions, filter, sender, stop_recv,
-                );
+            if let Some(animation) = animation {
+                animate(animation, new_img, outputs, sender, stop_recv);
             }
         });
     }
@@ -126,14 +142,17 @@ impl Drop for Processor {
 
 ///Returns whether the transition completed or was interrupted
 fn complete_transition(
-    mut old_img: Vec<u8>,
+    transition: Transition,
     new_img: &[u8],
-    step: u8,
-    fps: Duration,
     outputs: &mut Vec<String>,
     sender: &SyncSender<(Vec<String>, Packed)>,
     stop_recv: &mpsc::Receiver<Vec<String>>,
 ) -> bool {
+    let Transition {
+        mut old_img,
+        step,
+        fps,
+    } = transition;
     let mut done = true;
     let mut now = Instant::now();
     let mut transition_img: Vec<u8> = Vec::with_capacity(new_img.len());
@@ -176,14 +195,17 @@ fn complete_transition(
 }
 
 fn animate(
-    mut frames: Frames,
+    animation: Animation,
     first_frame: Vec<u8>,
     mut outputs: Vec<String>,
-    dimensions: (u32, u32),
-    filter: FilterType,
     sender: SyncSender<(Vec<String>, Packed)>,
     stop_recv: mpsc::Receiver<Vec<String>>,
 ) {
+    let Animation {
+        mut frames,
+        dimensions,
+        filter,
+    } = animation;
     //The first frame should always exist
     let duration_first_frame = frames.next().unwrap().unwrap().delay().numer_denom_ms();
     let duration_first_frame =
