@@ -47,7 +47,7 @@ The second is that, to my knowledge, there is no wallpaper daemon for wayland
 that allows you to change the wallpaper at runtime. That is, is order to, for
 example, cycle through the images of a directory, you'd have to kill the daemon
 and restart it. Not only does it make simple shell scripts a pain to write, it
-makes switch from one image to the next to happen very abruptly.
+makes switching from one image to the next to happen very abruptly.
 
 ## Usage
 
