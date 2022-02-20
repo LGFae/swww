@@ -24,7 +24,6 @@
 
 use lzzzz::lz4f;
 
-///Note: in its current form, this will panic when len of the arrays is not divisible by 8
 fn diff_byte_header(prev: &[u8], curr: &[u8]) -> Vec<u8> {
     let prev_chunks = prev.chunks_exact(64);
     let curr_chunks = curr.chunks_exact(64);
