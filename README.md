@@ -110,3 +110,10 @@ get there, here are some issues with it:
  force its shutdown), it will leave a `swww.socket` file behind in
  `$XDG_RUNTIME_DIR` (or `/tmp/swww` if it isn't set). If you want to
  reinitialize the daemon, you will have to remove that file first.
+
+## Acknowledgments
+
+A huge thanks to everyone involed in the [smithay](https://github.com/Smithay)
+project. Making this program would not have been possible without it. In fact,
+the first versions of swww were quite literaly copy pasted from the [layer shell
+example in the client-toolkit](https://github.com/Smithay/client-toolkit/blob/master/examples/layer_shell.rs)
