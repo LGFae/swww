@@ -15,7 +15,7 @@
   - Up to date stable rustc compiler and cargo
 
 To build, clone this directory and run:
-```
+```bash
 cargo build --release
 ```
 Then, put the binary at `target/release/fswww` in your path.
@@ -52,29 +52,30 @@ makes switch from one image to the next to happen very abruptly.
 ## Usage
 
 Start by initializing the daemon:
-```
+```bash
 fswww init
 ```
 Then, simply pass the image you want to display:
-```
+```bash
 fswww img <path/to/img>
 
 # You can also specify outputs:
 fswww img -o <outputs> <path/to/img>
 
-# And control how smoothly the transition will happen
-# Smaller values = more smooth. Default = 20
-fswww img --transition-step <number from 1 to 255>
+# Control how smoothly the transition will happen and/or it's frame rate
+# For the step, smaller values = more smooth. Default = 20
+# For the frame rate, default is 30.
+fswww img --transition-step <1 to 255> --transition-fps <1 to 255>
 ```
 If you would like to know the valid values for *\<outputs\>* then you can query
 the daemon. This will also tell you what the current image being displayed is,
 as well as the dimensions detected for the outputs. If you need more detailed
 information, I would recommend using [wlr-randr](https://sr.ht/~emersion/wlr-randr/).
-```
+```bash
 fswww query
 ```
 Finally, to stop the daemon, kill it:
-```
+```bash
 fswww kill
 ```
 For a more complete description, run *fswww --help* or *fswww \<subcommand\>
@@ -85,32 +86,24 @@ For a more complete description, run *fswww --help* or *fswww \<subcommand\>
 I had a glorious name when I started this project, but alas, I couldn't quite
 get there, here are some issues with it:
 
+ - To initialize the daemon already displaying and image, use:
+ ```bash
+ fswww init --img <path/to/img> # Do this
+ ```
+ Do **NOT** use something like:
+ ```bash
+ fswww init && fswww img <path/to/img> # Don't do this
+ ```
+ As that might straight up not work. In particular, it tends to fail when using
+ it in a compositor's init script (which is probably where you will want to 
+ `init` the daemon).
  - Despite trying my best to make this as resource efficient as possible,
  **memory can still be an issue**. From my testing, this seems to be mostly
  related to how images are loaded with the
  [image](https://github.com/image-rs/image#supported-image-formats) crate.
- For certain formats, it seems that openning the images will bump up the
- programs memory usage. Strangenly, it also seems that openning the same image
- again will *not* increase usage further. Still trying to understand what's
- going on here.
-
-- If you try to initialize `fswww` and display an image as fast as possible using
-your compositor's init script, like so:
-     ```
-	 fswww init && fswww img <path/to/img>
-	 ```
-  `fswww` might fail. Further, if it does fail, it will significantly slow down
-  the initializating process of your compositor. One solution is to do this
-  instead:
-  ```
-  	(fswww init && fswww img <path/to/img>) &
-  ```
-  This will send the commands to the background, so if they fail it won't be a
-  problem. Interestingly, for me, in river, the first version above will fail,
-  and the second one succed, every time, though it does leave a zombie process
-  permanently attached to the river process.
-
-- If the daemon exits in an unexpected way (for example, if you send SIGKILL to
-force its shutdown), it will leave a `fswww.socket` file behind in 
-`$XDG_RUNTIME_DIR` (or `/tmp/fswww` if it isn't set). If you want to 
-reinitialize the daemon, you will have to remove that file first.
+ Strangenly, it also seems that openning the same image again will *not*
+ increase usage further. Still trying to understand what's going on here.
+ - If the daemon exits in an unexpected way (for example, if you send SIGKILL to
+ force its shutdown), it will leave a `fswww.socket` file behind in 
+ `$XDG_RUNTIME_DIR` (or `/tmp/fswww` if it isn't set). If you want to 
+ reinitialize the daemon, you will have to remove that file first.
