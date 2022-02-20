@@ -8,12 +8,12 @@ use std::{
 mod cli;
 mod communication;
 mod daemon;
-use cli::Fswww;
+use cli::Swww;
 use communication::Answer;
 
 fn main() -> Result<(), String> {
-    let mut fswww = Fswww::parse();
-    if let Fswww::Init { no_daemon, .. } = fswww {
+    let mut swww = Swww::parse();
+    if let Swww::Init { no_daemon, .. } = swww {
         if get_socket(1, 0).is_err() {
             spawn_daemon(no_daemon)?;
             if no_daemon {
@@ -25,12 +25,12 @@ fn main() -> Result<(), String> {
     }
 
     let mut socket = get_socket(5, 100)?;
-    fswww.send(&socket)?;
+    swww.send(&socket)?;
     match Answer::receive(&mut socket)? {
         Answer::Err(msg) => return Err(msg),
         Answer::Info(info) => info.into_iter().for_each(|i| println!("{}", i)),
         Answer::Ok => {
-            if let Fswww::Kill = fswww {
+            if let Swww::Kill = swww {
                 #[cfg(debug_assertions)]
                 let tries = 20;
                 #[cfg(not(debug_assertions))]
@@ -98,8 +98,8 @@ fn get_socket_path() -> PathBuf {
     let runtime_dir = if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
         dir
     } else {
-        "/tmp/fswww".to_string()
+        "/tmp/swww".to_string()
     };
     let runtime_dir = Path::new(&runtime_dir);
-    runtime_dir.join("fswww.socket")
+    runtime_dir.join("swww.socket")
 }

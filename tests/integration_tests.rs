@@ -44,7 +44,7 @@ fn make_test_imgs() {
 }
 
 fn cmd() -> Command {
-    Command::cargo_bin("fswww").unwrap()
+    Command::cargo_bin("swww").unwrap()
 }
 
 fn main() {

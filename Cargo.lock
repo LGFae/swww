@@ -325,25 +325,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fswww"
-version = "0.1.0"
-dependencies = [
- "assert_cmd",
- "bincode",
- "clap",
- "clap_complete",
- "fork",
- "hex",
- "image",
- "log",
- "lzzzz",
- "rand",
- "serde",
- "simplelog",
- "smithay-client-toolkit",
-]
-
-[[package]]
 name = "futures-core"
 version = "0.3.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -957,6 +938,25 @@ name = "strsim"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "73473c0e59e6d5812c5dfe2a064a6444949f089e20eec9a2e5506596494e4623"
+
+[[package]]
+name = "swww"
+version = "0.1.0"
+dependencies = [
+ "assert_cmd",
+ "bincode",
+ "clap",
+ "clap_complete",
+ "fork",
+ "hex",
+ "image",
+ "log",
+ "lzzzz",
+ "rand",
+ "serde",
+ "simplelog",
+ "smithay-client-toolkit",
+]
 
 [[package]]
 name = "syn"

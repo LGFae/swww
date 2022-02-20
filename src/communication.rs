@@ -1,7 +1,7 @@
 //! This module creates the Answer struct to send back stuff from the daemon, and also implements
 //! some helper functions to make communication more streamlined
 use crate::{
-    cli::{Filter, Fswww},
+    cli::{Filter, Swww},
     daemon:: BgInfo
 };
 use serde::{Deserialize, Serialize};
@@ -39,9 +39,9 @@ impl Answer {
     }
 }
 
-impl Fswww {
+impl Swww {
     pub fn send(&mut self, stream: &UnixStream) -> Result<(), String> {
-        if let Fswww::Img(img) = self {
+        if let Swww::Img(img) = self {
             img.path = match img.path.canonicalize() {
                 Ok(p) => p,
                 Err(e) => return Err(format!("Coulnd't get absolute path: {}", e)),
@@ -55,7 +55,7 @@ impl Fswww {
                 img.transition_fps = 1;
             }
         }
-        if let Fswww::Init { img: Some(img), .. } = self {
+        if let Swww::Init { img: Some(img), .. } = self {
             *img = match img.canonicalize() {
                 Ok(p) => p,
                 Err(e) => return Err(format!("Coulnd't get absolute path: {}", e)),

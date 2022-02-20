@@ -6,11 +6,11 @@ use clap_complete::{generate_to, Shell};
 include!("src/cli.rs");
 
 const COMPLETION_DIR: &str = "completions";
-const APP_NAME: &str = "fswww";
+const APP_NAME: &str = "swww";
 
 fn main() -> Result<(), Error> {
     let outdir = completion_dir()?;
-    let mut app = Fswww::command();
+    let mut app = Swww::command();
 
     let shells = [Shell::Bash, Shell::Zsh, Shell::Fish, Shell::Elvish];
     for shell in shells {

@@ -31,13 +31,13 @@ impl std::str::FromStr for Filter {
 }
 
 #[derive(Parser, Serialize, Deserialize)]
-#[clap(version, name = "fswww")]
+#[clap(version, name = "swww")]
 ///The Final Solution to your Wayland Wallpaper Woes
 ///
-///Change what your monitors display as a background by controlling the fswww daemon at runtime.
+///Change what your monitors display as a background by controlling the swww daemon at runtime.
 ///Supports animated gifs and putting different stuff in different monitors. I also did my best to
 ///make it as resource efficient as possible.
-pub enum Fswww {
+pub enum Swww {
     ///Fills the specified outputs with the given color.
     ///
     ///Defaults to filling all outputs with black.
@@ -49,7 +49,7 @@ pub enum Fswww {
     /// Initialize the daemon.
     ///
     /// Exits if there is already a daemon running. We check thay by seeing if
-    /// $XDG_RUNTIME_DIR/fswww.socket exists.
+    /// $XDG_RUNTIME_DIR/swww.socket exists.
     Init {
         ///Don't fork the daemon. This will keep it running in the current terminal.
         ///
@@ -76,7 +76,7 @@ pub enum Fswww {
 
     ///Asks the daemon to print output information (names and dimensions).
     ///
-    ///You may use this to find out valid values for the <fswww-img --outputs> option. If you want
+    ///You may use this to find out valid values for the <swww-img --outputs> option. If you want
     ///more detailed information about your outputs, I would recommed trying wlr-randr.
     Query,
 }
@@ -108,10 +108,10 @@ pub struct Img {
     #[clap(short, long, default_value = "")]
     pub outputs: String,
 
-    ///Filter to use when scaling images (run fswww img --help to see options).
+    ///Filter to use when scaling images (run swww img --help to see options).
     ///
     ///Note that image scaling can sometimes significantly increase RAM usage. If you want to use
-    ///as little RAM as possible, I recommend scaling the images before sending them to fswww
+    ///as little RAM as possible, I recommend scaling the images before sending them to swww
     ///
     ///Available options are:
     ///

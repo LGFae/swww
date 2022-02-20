@@ -29,7 +29,7 @@ use std::{
     time::Duration,
 };
 
-use crate::cli::{Clear, Fswww, Img};
+use crate::cli::{Clear, Swww, Img};
 use crate::Answer;
 
 mod processor;
@@ -99,7 +99,7 @@ impl Bg {
             &surface,
             Some(output),
             zwlr_layer_shell_v1::Layer::Background,
-            "fswww".to_owned(),
+            "swww".to_owned(),
         );
 
         layer_surface.set_anchor(zwlr_layer_surface_v1::Anchor::all());
@@ -336,7 +336,7 @@ fn get_socket_addr() -> PathBuf {
     let runtime_dir = if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
         dir
     } else {
-        "/tmp/fswww".to_string()
+        "/tmp/swww".to_string()
     };
 
     let runtime_dir = Path::new(&runtime_dir);
@@ -345,7 +345,7 @@ fn get_socket_addr() -> PathBuf {
         fs::create_dir(runtime_dir).expect("Failed to create runtime dir...");
     }
 
-    runtime_dir.join("fswww.socket")
+    runtime_dir.join("swww.socket")
 }
 
 ///bgs and display can't be moved into here because it causes a segfault
@@ -449,15 +449,15 @@ fn recv_socket_msg(
     loop_signal: &calloop::LoopSignal,
     proc: &mut Processor,
 ) -> Result<(), String> {
-    let request = Fswww::receive(&mut stream);
+    let request = Swww::receive(&mut stream);
     let answer = match request {
-        Ok(Fswww::Clear(clear)) => clear_outputs(&mut bgs, clear, proc),
-        Ok(Fswww::Kill) => {
+        Ok(Swww::Clear(clear)) => clear_outputs(&mut bgs, clear, proc),
+        Ok(Swww::Kill) => {
             loop_signal.stop();
             Answer::Ok
         }
-        Ok(Fswww::Img(img)) => send_processor_request(proc, &mut bgs, img),
-        Ok(Fswww::Init { img, color, .. }) => {
+        Ok(Swww::Img(img)) => send_processor_request(proc, &mut bgs, img),
+        Ok(Swww::Init { img, color, .. }) => {
             if let Some(img) = img {
                 let request = Img {
                     path: img,
@@ -474,7 +474,7 @@ fn recv_socket_msg(
                 Answer::Ok
             }
         }
-        Ok(Fswww::Query) => Answer::Info(bgs.iter().map(|bg| bg.info.clone()).collect()),
+        Ok(Swww::Query) => Answer::Info(bgs.iter().map(|bg| bg.info.clone()).collect()),
         Err(e) => Answer::Err(e),
     };
     answer.send(&stream)
