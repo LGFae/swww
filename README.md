@@ -98,11 +98,14 @@ get there, here are some issues with it:
  it in a compositor's init script (which is probably where you will want to
  `init` the daemon).
  - Despite trying my best to make this as resource efficient as possible,
- **memory can still be an issue**. From my testing, this seems to be mostly
- related to how images are loaded with the
- [image](https://github.com/image-rs/image#supported-image-formats) crate.
+ **memory usage seems to increase a little bit with every new image openned**.
+ From my testing, this seems to be mostly related to how images are loaded with
+ the [image](https://github.com/image-rs/image#supported-image-formats) crate.
  Strangenly, it also seems that openning the same image again will *not*
  increase usage further. Still trying to understand what's going on here.
+ It shouldn't be a big issue unless you want to go through all images in a huge
+ directory (say, 100+ images). Note that, after going through it once, memory
+ usage should more or less stabilize.
  - If the daemon exits in an unexpected way (for example, if you send SIGKILL to
  force its shutdown), it will leave a `swww.socket` file behind in
  `$XDG_RUNTIME_DIR` (or `/tmp/swww` if it isn't set). If you want to
