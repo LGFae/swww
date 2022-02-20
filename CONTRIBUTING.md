@@ -1,4 +1,4 @@
-Bug fixed are obviously welcome. Also if I did anything terribly wrong in terms
+Bug fixes are obviously welcome. Also if I did anything terribly wrong in terms
 of code quality you may point it out and try to fix it.
 
 The primary reason I made this file is to explain that **NEW FEATURES WILL NOT
