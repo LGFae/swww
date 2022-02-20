@@ -86,15 +86,15 @@ For a more complete description, run *swww --help* or *swww \<subcommand\>
 I had a glorious name when I started this project, but alas, I couldn't quite
 get there, here are some issues with it:
 
- - To initialize the daemon already displaying and image, use:
- ```
- swww init --img <path/to/img> # Do this
- ```
- Do **NOT** use something like:
- ```
- swww init && swww img <path/to/img> # Don't do this
- ```
- As that might straight up not work. In particular, it tends to fail when using
+ - To initialize the daemon already displaying an image, use:
+   ```
+   swww init --img <path/to/img> # Do this
+   ```
+   Do **NOT** use something like:
+   ```
+   swww init && swww img <path/to/img> # Don't do this
+   ```
+   As that might straight up not work. In particular, it tends to fail when using
  it in a compositor's init script (which is probably where you will want to
  `init` the daemon).
  - Despite trying my best to make this as resource efficient as possible,
