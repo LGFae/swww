@@ -14,7 +14,7 @@
 
   - Up to date stable rustc compiler and cargo
 
-To build, clone this directory and run:
+To build, clone this repository and run:
 ```
 cargo build --release
 ```
