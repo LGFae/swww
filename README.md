@@ -18,14 +18,15 @@ To build, clone this repository and run:
 ```
 cargo build --release
 ```
-Then, put the binary at `target/release/swww` in your path.
-Optionally, autocompletion scripts for bash, zsh, fish and elvish are offered
-in the `completions` directory.
+Then, put the binary at `target/release/swww` in your path. Optionally,
+autocompletion scripts for bash, zsh, fish and elvish are offered in the
+`completions` directory.
 
 ## Features
 
  - Display animated gifs on your desktop
- - Display any image in a format that is decodable by the [image](https://github.com/image-rs/image#supported-image-formats) crate.
+ - Display any image in a format that is decodable by the
+ [image](https://github.com/image-rs/image#supported-image-formats) crate.
  - Clear the screen with an arbitrary rrggbb color
  - Smooth transition effect when you switch images
 
@@ -34,9 +35,11 @@ in the `completions` directory.
 There are two main reasons that compelled me to make this, the first, that
 [oguri](https://github.com/vilhalmer/oguri) hasn't updated in over a year as I
 am writting this (02 Feb 2022), despite there being serious problems with
-excess of memory use while displaying certain gifs (see [this](https://github.com/vilhalmer/oguri/issues/38),
-for example). The best alternative I've found for oguri was [mpvpaper](https://github.com/GhostNaN/mpvpaper),
-but if felt like quite the overkill for my purposes.
+excess of memory use while displaying certain gifs (see
+[this](https://github.com/vilhalmer/oguri/issues/38),for example). The best
+alternative I've found for oguri was
+[mpvpaper](https://github.com/GhostNaN/mpvpaper), but if felt like quite the
+overkill for my purposes.
 
 Comparing to `oguri`, `swww` uses less cpu power to animate once it has cached
 all the frames in the animation. It should also be **significantly** more
@@ -94,22 +97,40 @@ get there, here are some issues with it:
    ```
    swww init && swww img <path/to/img> # Don't do this
    ```
-   As that might straight up not work. In particular, it tends to fail when using
- it in a compositor's init script (which is probably where you will want to
- `init` the daemon).
+   As that might straight up not work. In particular, it tends to fail when
+   using it in a compositor's init script (which is probably where you will want
+   to `init` the daemon).
  - Despite trying my best to make this as resource efficient as possible,
  **memory usage seems to increase a little bit with every new image openned**.
  From my testing, this seems to be mostly related to how images are loaded with
  the [image](https://github.com/image-rs/image#supported-image-formats) crate.
  Strangenly, it also seems that openning the same image again will *not*
- increase usage further. Still trying to understand what's going on here.
- It shouldn't be a big issue unless you want to go through all images in a huge
+ increase usage further. Still trying to understand what's going on here. It
+ shouldn't be a big issue unless you want to go through all images in a huge
  directory (say, 100+ images). Note that, after going through it once, memory
  usage should more or less stabilize.
  - If the daemon exits in an unexpected way (for example, if you send SIGKILL to
  force its shutdown), it will leave a `swww.socket` file behind in
  `$XDG_RUNTIME_DIR` (or `/tmp/swww` if it isn't set). If you want to
  reinitialize the daemon, you will have to remove that file first.
+
+## About new features
+
+Broadly speaking, **NEW FEATURES WILL NOT BE ADDED, UNLESS THEY ARE EGREGIOUSLY
+SIMPLE**. I made `swww` with the specific usecase of making shell scripts in
+mind. So, for example, stuff like timed wallpapers, or a setup that loads a
+different image at different times of the day, and so on, should all be done by
+combining `swww` with other programs.
+
+That said, I am considering adding an option to set the default transition-step
+and transition-fps values with an environment variable. I will probably end up
+doing that eventually, since it makes calling the `swww img` a lot less painful
+if you don't like the defaults. Alternatively, I might use config files for
+that. Or maybe both. I don't know. Open an issue if you feel strongly one way
+or the other.
+
+If you want any new feature besides the above I would suggest forking this
+repository.
 
 ## Acknowledgments
 
