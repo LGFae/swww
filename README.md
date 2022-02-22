@@ -76,7 +76,8 @@ swww img --transition-step <1 to 255> --transition-fps <1 to 255>
 If you would like to know the valid values for *\<outputs\>* then you can query
 the daemon. This will also tell you what the current image being displayed is,
 as well as the dimensions detected for the outputs. If you need more detailed
-information, I would recommend using [wlr-randr](https://sr.ht/~emersion/wlr-randr/).
+information, I would recommend using
+[wlr-randr](https://sr.ht/~emersion/wlr-randr/).
 ```
 swww query
 ```
@@ -137,4 +138,5 @@ image transition logic itself.
 A huge thanks to everyone involed in the [smithay](https://github.com/Smithay)
 project. Making this program would not have been possible without it. In fact,
 the first versions of swww were quite literaly copy pasted from the [layer shell
-example in the client-toolkit](https://github.com/Smithay/client-toolkit/blob/master/examples/layer_shell.rs)
+example in the client-toolkit
+](https://github.com/Smithay/client-toolkit/blob/master/examples/layer_shell.rs)
