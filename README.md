@@ -69,6 +69,9 @@ swww img -o <outputs> <path/to/img>
 # For the step, smaller values = more smooth. Default = 20
 # For the frame rate, default is 30.
 swww img --transition-step <1 to 255> --transition-fps <1 to 255>
+
+# Note you may also control the above by setting up the SWWW_TRANSITION_FPS and
+# SWWW_TRANSITION_STEP environment variables.
 ```
 If you would like to know the valid values for *\<outputs\>* then you can query
 the daemon. This will also tell you what the current image being displayed is,
@@ -122,15 +125,11 @@ mind. So, for example, stuff like timed wallpapers, or a setup that loads a
 different image at different times of the day, and so on, should all be done by
 combining `swww` with other programs.
 
-That said, I am considering adding an option to set the default transition-step
-and transition-fps values with an environment variable. I will probably end up
-doing that eventually, since it makes calling the `swww img` a lot less painful
-if you don't like the defaults. Alternatively, I might use config files for
-that. Or maybe both. I don't know. Open an issue if you feel strongly one way
-or the other.
+If you really want some new feature within `swww` itself, I would recommend
+forking the repository.
 
-If you want any new feature besides the above I would suggest forking this
-repository.
+That said, I might *consider* adding some different transition effects, if time
+allows (don't count on it).
 
 ## Acknowledgments
 

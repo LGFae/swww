@@ -132,7 +132,7 @@ pub struct Img {
     ///
     ///Larger values will make the transition faster, but more abrupt. A value of 255 will always
     ///switch to the new image immediately.
-    #[clap(long, default_value = "20")]
+    #[clap(long, env = "SWWW_TRANSITION_STEP", default_value = "20")]
     pub transition_step: u8,
 
     ///Frame rate for the transition effect.
@@ -140,6 +140,6 @@ pub struct Img {
     ///Note there is no point in setting this to a value smaller than what your monitor supports.
     ///Also note this is **different** from the transition-step. That one controls by how much we
     ///approach the new image every frame.
-    #[clap(long, default_value = "30")]
+    #[clap(long, env = "SWWW_TRANSITION_FPS", default_value = "30")]
     pub transition_fps: u8,
 }
