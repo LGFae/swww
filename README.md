@@ -129,7 +129,8 @@ If you really want some new feature within `swww` itself, I would recommend
 forking the repository.
 
 That said, I might *consider* adding some different transition effects, if time
-allows (don't count on it).
+allows. It shouldn't be too hard to implement. The difficult part would be the
+image transition logic itself.
 
 ## Acknowledgments
 
