@@ -17,6 +17,10 @@ use crate::Answer;
 pub mod comp_decomp;
 use comp_decomp::Packed;
 
+///Note: since this entire struct will be going to a new thread, it has to own all of its values.
+///This means even though, in the case of multiple outputs with different dimensions, they would
+///all have the same path, filter, step and fps, we still need to store all those values multiple
+///times, because we would simply have to clone them when moving them into the thread anyway
 pub struct ProcessorRequest {
     pub outputs: Vec<String>,
     pub dimensions: (u32, u32),
