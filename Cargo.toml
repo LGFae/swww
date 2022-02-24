@@ -21,7 +21,7 @@ image = "0.24"
 log = {version = "0.4", features = ["max_level_debug", "release_max_level_info"]}
 simplelog = "0.11"
 fork = "0.1"
-clap = {version = "3.1.1", features = ["derive", "wrap_help", "env"]}
+clap = {version = "3.1.2", features = ["derive", "wrap_help", "env"]}
 hex = "0.4"
 lzzzz = "1.0"
 serde = {version = "1.0", features = [ "derive" ]}
