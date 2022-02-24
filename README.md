@@ -26,9 +26,10 @@ autocompletion scripts for bash, zsh, fish and elvish are offered in the
 
  - Display animated gifs on your desktop
  - Display any image in a format that is decodable by the
- [image](https://github.com/image-rs/image#supported-image-formats) crate.
+ [image](https://github.com/image-rs/image#supported-image-formats) crate
  - Clear the screen with an arbitrary rrggbb color
  - Smooth transition effect when you switch images
+ - Do all of that without having to shutdown and reinitialize the daemon
 
 ## Why
 
