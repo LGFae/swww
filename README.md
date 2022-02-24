@@ -134,11 +134,27 @@ That said, I might *consider* adding some different transition effects, if time
 allows. It shouldn't be too hard to implement. The difficult part would be the
 image transition logic itself.
 
+## Alternatives
+
+`swww` isn't really the simplest, mostest minimalest software you could find
+for managing wallpapers. If you are looking for something simpler, have a look
+at the [awesome-wayland repository list of wallpaper programs
+](https://github.com/natpen/awesome-wayland#wallpaper). I can personally
+recommend:
+
+ - [wbg](https://codeberg.org/dnkl/wbg) - probably the simplest of them all.
+ Strongly recommend if you just care about setting a single png as your
+ permanent wallpaper on something like a laptop.
+ - [swaybg](https://github.com/swaywm/swaybg) - made by the wlroots gods
+ themselves.
+ - [mpvpaper](https://github.com/GhostNaN/mpvpaper) - if you want to display
+ videos as your wallpapers. This is also what I used for gifs before making
+ `swww`.
+
 ## Acknowledgments
 
 A huge thanks to everyone involed in the [smithay](https://github.com/Smithay)
 project. Making this program would not have been possible without it. In fact,
 the first versions of swww were quite literaly copy pasted from the [layer shell
 example in the client-toolkit
-](https://github.com/Smithay/client-toolkit/blob/master/examples/layer_shell.rs)
-.
+](https://github.com/Smithay/client-toolkit/blob/master/examples/layer_shell.rs).
