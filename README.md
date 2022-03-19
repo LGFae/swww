@@ -89,6 +89,9 @@ swww kill
 For a more complete description, run *swww --help* or *swww \<subcommand\>
 --help*.
 
+Finally, to get a feel for what you can do with some shell scripting, check out
+the 'example_scripts' folder. It can help you get started.
+
 ## Caveats/Limitations
 
 I had a glorious name when I started this project, but alas, I couldn't quite
@@ -125,7 +128,8 @@ Broadly speaking, **NEW FEATURES WILL NOT BE ADDED, UNLESS THEY ARE EGREGIOUSLY
 SIMPLE**. I made `swww` with the specific usecase of making shell scripts in
 mind. So, for example, stuff like timed wallpapers, or a setup that loads a
 different image at different times of the day, and so on, should all be done by
-combining `swww` with other programs.
+combining `swww` with other programs (see the 'example_scripts' for some
+examples).
 
 If you really want some new feature within `swww` itself, I would recommend
 forking the repository.
