@@ -21,3 +21,15 @@ if ! type "at" > /dev/null 2>&1; then
 fi
 
 echo "swww img $1" | at "$2"
+
+# NOTE: the above line is really the only one that matters, so if you are
+# making a script and want to schedule a bunch of things at once, I recommend
+# creating a function, like:
+#
+# swww_schedule() {
+#     echo "swww img $1" | at "$2"
+# }
+#
+# Then, you can simply call:
+#     swww_schedule <path/to/img> <HH:MM>
+# as many time as you need
