@@ -97,17 +97,6 @@ the 'example_scripts' folder. It can help you get started.
 I had a glorious name when I started this project, but alas, I couldn't quite
 get there, here are some issues with it:
 
- - To initialize the daemon already displaying an image, use:
-   ```
-   swww init --img <path/to/img> # Do this
-   ```
-   Do **NOT** use something like:
-   ```
-   swww init && swww img <path/to/img> # Don't do this
-   ```
-   As that might straight up not work. In particular, it tends to fail when
-   using it in a compositor's init script (which is probably where you will want
-   to `init` the daemon).
  - Despite trying my best to make this as resource efficient as possible,
  **memory usage seems to increase a little bit with every new image openned**.
  From my testing, this seems to be mostly related to how images are loaded with
