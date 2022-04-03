@@ -24,9 +24,9 @@ fn main() -> Result<(), String> {
         }
     }
 
-    let mut socket = get_socket(5, 100)?;
+    let socket = get_socket(5, 100)?;
     swww.send(&socket)?;
-    match Answer::receive(&mut socket)? {
+    match Answer::receive(socket)? {
         Answer::Err(msg) => return Err(msg),
         Answer::Info(info) => info.into_iter().for_each(|i| println!("{}", i)),
         Answer::Ok => {

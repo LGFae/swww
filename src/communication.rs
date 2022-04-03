@@ -22,7 +22,7 @@ impl Answer {
         }
     }
 
-    pub fn receive(stream: &mut UnixStream) -> Result<Self, String> {
+    pub fn receive(stream: UnixStream) -> Result<Self, String> {
         #[cfg(debug_assertions)]
         let timeout = Duration::from_secs(15); //Some operations take a while to respond in debug mode
         #[cfg(not(debug_assertions))]
