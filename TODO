@@ -4,3 +4,5 @@ animation with the clear command. I haven't seen this yet though.
 Fully automated, complete testing, for every option
 
 Manpages
+
+Longterm: change rust edition (clap is currently breaking)
