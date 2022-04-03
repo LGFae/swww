@@ -75,9 +75,16 @@ fn diff_byte_header_copy_onto(buf: &mut [u8], diff: &[u8]) {
         if header != 0 {
             for j in (0..8).rev() {
                 if (header >> j) % 2 == 1 {
-                    buf[pix_idx..pix_idx + 3].clone_from_slice(&diff[byte_idx..byte_idx + 3]);
-                    buf[pix_idx + 4..pix_idx + 7]
-                        .clone_from_slice(&diff[byte_idx + 3..byte_idx + 6]);
+                    // This should always be safe, since we check if the buffer is big enough
+                    // before unpacking (see the Packed struct)
+                    // Going unsafe here makes decompression significantly faster in my
+                    // (Horus645) computer
+                    unsafe {
+                        buf.get_unchecked_mut(pix_idx..pix_idx + 3)
+                            .clone_from_slice(diff.get_unchecked(byte_idx..byte_idx + 3));
+                        buf.get_unchecked_mut(pix_idx + 4..pix_idx + 7)
+                            .clone_from_slice(diff.get_unchecked(byte_idx + 3..byte_idx + 6));
+                    }
                     byte_idx += 6;
                 }
                 pix_idx += 8;
@@ -89,12 +96,15 @@ fn diff_byte_header_copy_onto(buf: &mut [u8], diff: &[u8]) {
 }
 
 #[derive(Clone)]
+/// Wrapper struct for compression and decompression. This makes sure we operating on a Vec<u8> with
+/// the correct properties, simply by virtue of the type checking.
 pub struct Packed {
     inner: Vec<u8>,
+    /// This field will ensure we won't ever try to unpack the images on a buffer of the wrong size,
+    /// which ultimately is what allows us to use unsafe in the diff_byte_header_copy_onto function
+    expected_buf_size: usize,
 }
 
-///Wrapper struct for compression and decompression. This makes sure we operating on a Vec<u8> with
-///the correct properties, simply by virtue of the type checking.
 impl Packed {
     ///Compresses a frame of animation by getting the difference between the previous and the
     ///current frame
@@ -108,13 +118,18 @@ impl Packed {
             .build();
         lzzzz::lz4f::compress_to_vec(&bit_pack, &mut v, &prefs).unwrap();
         v.shrink_to_fit();
-        Packed { inner: v }
+        Packed {
+            inner: v,
+            expected_buf_size: prev.len(),
+        }
     }
 
     pub fn unpack(&self, buf: &mut [u8]) {
-        let mut v = Vec::with_capacity(self.inner.len() * 3);
-        lz4f::decompress_to_vec(&self.inner, &mut v).unwrap();
-        diff_byte_header_copy_onto(buf, &v);
+        if buf.len() == self.expected_buf_size {
+            let mut v = Vec::with_capacity(self.inner.len() * 3);
+            lz4f::decompress_to_vec(&self.inner, &mut v).unwrap();
+            diff_byte_header_copy_onto(buf, &v);
+        }
     }
 }
 
