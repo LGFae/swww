@@ -25,19 +25,23 @@
 use lzzzz::lz4f;
 
 fn diff_byte_header(prev: &[u8], curr: &[u8]) -> Vec<u8> {
-    let prev_chunks = prev.chunks_exact(64);
-    let curr_chunks = curr.chunks_exact(64);
-    let remainder = prev_chunks
-        .remainder()
-        .chunks_exact(8)
-        .zip(curr_chunks.remainder().chunks_exact(8));
+    let remainder = prev.len() - prev.len() % 64;
+    let prev_chunks = bytemuck::cast_slice::<u8, [u8; 64]>(&prev[0..remainder]);
+    let curr_chunks = bytemuck::cast_slice::<u8, [u8; 64]>(&curr[0..remainder]);
+    let remainder = bytemuck::cast_slice::<u8, [u8; 8]>(&prev[remainder..])
+        .iter()
+        .zip(bytemuck::cast_slice::<u8, [u8; 8]>(&curr[remainder..]));
 
     let mut last_zero_header = 0;
     let mut vec = Vec::with_capacity(56 + (prev.len() * 49) / 64);
     let mut header_idx = 0;
-    for (prev, curr) in prev_chunks.zip(curr_chunks) {
+    for (prev, curr) in prev_chunks.iter().zip(curr_chunks) {
         vec.push(0);
-        for (k, (prev, curr)) in prev.chunks_exact(8).zip(curr.chunks_exact(8)).enumerate() {
+        for (k, (prev, curr)) in bytemuck::cast_slice::<u8, [u8; 8]>(prev)
+            .iter()
+            .zip(bytemuck::cast_slice::<u8, [u8; 8]>(curr))
+            .enumerate()
+        {
             if prev != curr {
                 vec[header_idx] |= 0x80 >> k;
                 vec.extend_from_slice(&curr[0..3]);

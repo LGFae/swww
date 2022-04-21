@@ -946,6 +946,7 @@ version = "0.2.0"
 dependencies = [
  "assert_cmd",
  "bincode",
+ "bytemuck",
  "clap",
  "clap_complete",
  "fork",
