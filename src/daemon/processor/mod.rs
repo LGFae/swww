@@ -31,6 +31,33 @@ pub struct ProcessorRequest {
     pub fps: Duration,
 }
 
+impl ProcessorRequest {
+    fn split(self) -> (Vec<String>, Transition, Option<GifProcessor>) {
+        let transition = Transition {
+            old_img: self.old_img,
+            step: self.step,
+            fps: self.fps,
+        };
+        let img = image::io::Reader::open(&self.path);
+        let animation = {
+            if let Ok(img) = img {
+                if img.format() == Some(ImageFormat::Gif) {
+                    Some(GifProcessor {
+                        gif: self.path,
+                        dimensions: self.dimensions,
+                        filter: self.filter,
+                    })
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        };
+        (self.outputs, transition, animation)
+    }
+}
+
 struct Transition {
     old_img: Vec<u8>,
     step: u8,
@@ -113,33 +140,6 @@ impl GifProcessor {
     }
 }
 
-impl ProcessorRequest {
-    fn split(self) -> (Vec<String>, Transition, Option<GifProcessor>) {
-        let transition = Transition {
-            old_img: self.old_img,
-            step: self.step,
-            fps: self.fps,
-        };
-        let img = image::io::Reader::open(&self.path);
-        let animation = {
-            if let Ok(img) = img {
-                if img.format() == Some(ImageFormat::Gif) {
-                    Some(GifProcessor {
-                        gif: self.path,
-                        dimensions: self.dimensions,
-                        filter: self.filter,
-                    })
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        };
-        (self.outputs, transition, animation)
-    }
-}
-
 pub struct Processor {
     frame_sender: SyncSender<(Vec<String>, Packed)>,
     anim_stoppers: Vec<mpsc::Sender<Vec<String>>>,
@@ -185,7 +185,7 @@ impl Processor {
         self.anim_stoppers.push(stopper);
         thread::spawn(move || {
             let (mut out, transition, gif) = request.split();
-            let tran_anim = |img| {
+            let transition = |img| {
                 animation(
                     |a| transition.default(img, a),
                     false,
@@ -196,7 +196,7 @@ impl Processor {
             };
             if let Some(gif) = gif {
                 let img_clone = new_img.clone();
-                if tran_anim(img_clone){
+                if transition(img_clone){
                     return;
                 };
                 animation(
@@ -207,7 +207,7 @@ impl Processor {
                     &stop_recv,
                 );
             } else {
-                tran_anim(new_img);
+                transition(new_img);
             }
         });
     }
