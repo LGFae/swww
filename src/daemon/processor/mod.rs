@@ -1,8 +1,8 @@
 use image::{
-    self, codecs::gif::GifDecoder, imageops::FilterType, AnimationDecoder, Frames,
-    GenericImageView, ImageFormat,
+    self, codecs::gif::GifDecoder, imageops::FilterType, AnimationDecoder, DynamicImage,
+    ImageFormat,
 };
-use log::{debug, info};
+use log::debug;
 
 use smithay_client_toolkit::reexports::calloop::channel::SyncSender;
 
@@ -38,7 +38,7 @@ struct Transition {
 }
 
 impl Transition {
-    fn default(mut self, new_img: &[u8], fr_sender: mpsc::Sender<(Packed, Duration)>) {
+    fn default(mut self, new_img: Vec<u8>, fr_sender: mpsc::Sender<(Packed, Duration)>) {
         let mut done = true;
         let mut transition_img: Vec<u8> = Vec::with_capacity(new_img.len());
         loop {
@@ -82,11 +82,10 @@ struct GifProcessor {
     gif: PathBuf,
     dimensions: (u32, u32),
     filter: FilterType,
-    first_frame: Vec<u8>,
 }
 
 impl GifProcessor {
-    fn process(self, fr_sender: mpsc::Sender<(Packed, Duration)>) {
+    fn process(self, first_frame: Vec<u8>, fr_sender: mpsc::Sender<(Packed, Duration)>) {
         let gif_reader = image::io::Reader::open(self.gif).unwrap();
         let mut frames = GifDecoder::new(gif_reader.into_inner())
             .expect("Couldn't decode gif, though this should be impossible...")
@@ -95,15 +94,11 @@ impl GifProcessor {
         let dur_first_frame = frames.next().unwrap().unwrap().delay().numer_denom_ms();
         let dur_first_frame = Duration::from_millis((dur_first_frame.0 / dur_first_frame.1).into());
 
-        let mut canvas = self.first_frame.clone();
+        let mut canvas = first_frame.clone();
         while let Some(Ok(frame)) = frames.next() {
             let (dur_num, dur_div) = frame.delay().numer_denom_ms();
             let duration = Duration::from_millis((dur_num / dur_div).into());
-            let img = img_resize(
-                image::DynamicImage::ImageRgba8(frame.into_buffer()),
-                self.dimensions,
-                self.filter,
-            );
+            let img = img_resize(frame.into_buffer(), self.dimensions, self.filter);
 
             let compressed_frame = Packed::pack(&canvas, &img);
             canvas = img;
@@ -113,35 +108,30 @@ impl GifProcessor {
             };
         }
         //Add the first frame we got earlier:
-        let first_frame_comp = Packed::pack(&canvas, &self.first_frame);
+        let first_frame_comp = Packed::pack(&canvas, &first_frame);
         let _ = fr_sender.send((first_frame_comp, dur_first_frame));
     }
 }
 
-struct Animation<'a> {
-    frames: Frames<'a>,
-    dimensions: (u32, u32),
-    filter: FilterType,
-}
-
 impl ProcessorRequest {
-    fn split<'a>(self) -> (Vec<String>, Transition, Option<Animation<'a>>) {
+    fn split(self) -> (Vec<String>, Transition, Option<GifProcessor>) {
         let transition = Transition {
             old_img: self.old_img,
             step: self.step,
             fps: self.fps,
         };
+        let img = image::io::Reader::open(&self.path);
         let animation = {
-            let img = image::io::Reader::open(self.path).unwrap();
-            if img.format() == Some(ImageFormat::Gif) {
-                let frames = GifDecoder::new(img.into_inner())
-                    .expect("Couldn't decode gif, though this should be impossible...")
-                    .into_frames();
-                Some(Animation {
-                    frames,
-                    dimensions: self.dimensions,
-                    filter: self.filter,
-                })
+            if let Ok(img) = img {
+                if img.format() == Some(ImageFormat::Gif) {
+                    Some(GifProcessor {
+                        gif: self.path,
+                        dimensions: self.dimensions,
+                        filter: self.filter,
+                    })
+                } else {
+                    None
+                }
             } else {
                 None
             }
@@ -167,20 +157,11 @@ impl Processor {
         for request in requests {
             self.stop_animations(&request.outputs);
             //Note these can't be moved outside the loop without creating some memory overhead
-            let img_buf = match image::io::Reader::open(&request.path) {
-                Ok(i) => i,
+            let img = match image::open(&request.path) {
+                Ok(i) => i.into_rgba8(),
                 Err(e) => {
                     return Answer::Err(format!(
                         "failed to open image '{:#?}': {}",
-                        &request.path, e
-                    ))
-                }
-            };
-            let img = match img_buf.decode() {
-                Ok(i) => i,
-                Err(e) => {
-                    return Answer::Err(format!(
-                        "failed to decode image '{:#?}': {}",
                         &request.path, e
                     ))
                 }
@@ -198,23 +179,28 @@ impl Processor {
             .retain(|a| a.send(to_stop.to_vec()).is_ok());
     }
 
-    //TODO: if two images will have the same animation, but have differen current images,
-    //this will make the animations independent from each other, which isn't really necessary
     fn transition(&mut self, request: ProcessorRequest, new_img: Vec<u8>) {
         let sender = self.frame_sender.clone();
         let (stopper, stop_recv) = mpsc::channel();
         self.anim_stoppers.push(stopper);
         thread::spawn(move || {
-            let (mut outputs, transition, animation) = request.split();
-            if !complete_transition(transition, &new_img, &mut outputs, &sender, &stop_recv) {
-                return;
-            }
-            if let Some(animation) = animation {
-                if let Some((cached_frames, now)) =
-                    animate(animation, new_img, &mut outputs, &sender, &stop_recv)
-                {
-                    loop_animation(cached_frames, outputs, sender, stop_recv, now);
-                }
+            let (mut outputs, transition, gif) = request.split();
+            let img = new_img.clone();
+            if animation(
+                |a| transition.default(img, a),
+                false,
+                &mut outputs,
+                &sender,
+                &stop_recv,
+            ) {}
+            if let Some(gif) = gif {
+                animation(
+                    |a| gif.process(new_img, a),
+                    true,
+                    &mut outputs,
+                    &sender,
+                    &stop_recv,
+                );
             }
         });
     }
@@ -229,172 +215,22 @@ impl Drop for Processor {
     }
 }
 
-///Returns whether the transition completed or was interrupted
-fn complete_transition(
-    transition: Transition,
-    new_img: &[u8],
+// returns whether or not it was interrupted
+fn animation<F: FnOnce(mpsc::Sender<(Packed, Duration)>) + Send + 'static>(
+    frame_generator: F,
+    infinite: bool,
     outputs: &mut Vec<String>,
     sender: &SyncSender<(Vec<String>, Packed)>,
     stop_recv: &mpsc::Receiver<Vec<String>>,
 ) -> bool {
-    let Transition {
-        mut old_img,
-        step,
-        fps,
-    } = transition;
-    let mut done = true;
-    let mut now = Instant::now();
-    let mut transition_img: Vec<u8> = Vec::with_capacity(new_img.len());
-    loop {
-        for (old, new) in old_img.chunks_exact(4).zip(new_img.chunks_exact(4)) {
-            for (old_color, new_color) in old.iter().zip(new.iter()).take(3) {
-                let distance = if old_color > new_color {
-                    old_color - new_color
-                } else {
-                    new_color - old_color
-                };
-                if distance < step {
-                    transition_img.push(*new_color);
-                } else if old_color > new_color {
-                    done = false;
-                    transition_img.push(old_color - step);
-                } else {
-                    done = false;
-                    transition_img.push(old_color + step);
-                }
-            }
-            transition_img.push(255);
-        }
-
-        let compressed_img = Packed::pack(&old_img, &transition_img);
-        let timeout = fps.saturating_sub(now.elapsed());
-        if send_frame(compressed_img, outputs, timeout, sender, stop_recv) {
-            debug!("Transition was interrupted!");
-            return false;
-        }
-        if done {
-            debug!("Transition has finished.");
-            return true;
-        }
-        old_img.clear();
-        old_img.append(&mut transition_img);
-        now = Instant::now();
-        done = true;
-    }
-}
-
-fn animate(
-    animation: Animation,
-    first_frame: Vec<u8>,
-    outputs: &mut Vec<String>,
-    sender: &SyncSender<(Vec<String>, Packed)>,
-    stop_recv: &mpsc::Receiver<Vec<String>>,
-) -> Option<(Vec<(Packed, Duration)>, Instant)> {
-    let Animation {
-        mut frames,
-        dimensions,
-        filter,
-    } = animation;
-    //The first frame should always exist
-    let duration_first_frame = frames.next().unwrap().unwrap().delay().numer_denom_ms();
-    let duration_first_frame =
-        Duration::from_millis((duration_first_frame.0 / duration_first_frame.1).into());
-
-    let mut cached_frames = Vec::new();
-
-    let mut canvas = first_frame.clone();
-    let mut now = Instant::now();
-    while let Some(Ok(frame)) = frames.next() {
-        let (dur_num, dur_div) = frame.delay().numer_denom_ms();
-        let duration = Duration::from_millis((dur_num / dur_div).into());
-        let img = img_resize(
-            image::DynamicImage::ImageRgba8(frame.into_buffer()),
-            dimensions,
-            filter,
-        );
-
-        let compressed_frame = Packed::pack(&canvas, &img);
-        canvas = img;
-        cached_frames.push((compressed_frame.clone(), duration));
-
-        let timeout = duration.saturating_sub(now.elapsed());
-        if send_frame(compressed_frame, outputs, timeout, sender, stop_recv) {
-            return None;
-        };
-        now = Instant::now();
-    }
-    //Add the first frame we got earlier:
-    let first_frame_comp = Packed::pack(&canvas, &first_frame);
-    cached_frames.insert(0, (first_frame_comp, duration_first_frame));
-    if cached_frames.len() > 1 {
-        cached_frames.shrink_to_fit();
-        Some((cached_frames, now))
-    } else {
-        None
-    }
-}
-
-fn loop_animation(
-    cached_frames: Vec<(Packed, Duration)>,
-    mut outputs: Vec<String>,
-    sender: SyncSender<(Vec<String>, Packed)>,
-    stop_recv: mpsc::Receiver<Vec<String>>,
-    mut now: Instant,
-) {
-    info!("Finished caching the frames!");
-    loop {
-        for (cached_img, duration) in &cached_frames {
-            let frame = cached_img.clone();
-            let timeout = duration.saturating_sub(now.elapsed());
-            if send_frame(frame, &mut outputs, timeout, &sender, &stop_recv) {
-                return;
-            };
-            now = Instant::now();
-        }
-    }
-}
-
-fn img_resize(img: image::DynamicImage, dimensions: (u32, u32), filter: FilterType) -> Vec<u8> {
-    let (width, height) = dimensions;
-    let img_dimensions = img.dimensions();
-    debug!("Output dimensions: width: {} height: {}", width, height);
-    debug!(
-        "Image dimensions:  width: {} height: {}",
-        img_dimensions.0, img_dimensions.1
-    );
-    let resized_img = if img_dimensions != (width, height) {
-        debug!("Image dimensions are different from output's. Resizing...");
-        img.resize_to_fill(width, height, filter)
-    } else {
-        debug!("Image dimensions are identical to output's. Skipped resize!!");
-        img
-    };
-
-    // The ARGB is 'little endian', so here we must  put the order
-    // of bytes 'in reverse', so it needs to be BGRA.
-    let mut result = resized_img.into_rgba8().into_raw();
-    for pixel in result.chunks_exact_mut(4) {
-        pixel.swap(0, 2);
-    }
-    result.shrink_to_fit();
-    result
-}
-
-fn animation<F: FnOnce(mpsc::Sender<(Packed, Duration)>) + Send + 'static>(
-    frame_generator: F,
-    infinite: bool,
-    mut outputs: Vec<String>,
-    sender: SyncSender<(Vec<String>, Packed)>,
-    stop_recv: mpsc::Receiver<Vec<String>>,
-) {
     let (fr_send, fr_recv) = mpsc::channel();
     thread::spawn(|| frame_generator(fr_send));
     let mut cached_frames = Vec::new();
     let mut now = Instant::now();
     while let Ok((frame, dur)) = fr_recv.recv() {
         let timeout = dur.saturating_sub(now.elapsed());
-        if send_frame(frame.clone(), &mut outputs, timeout, &sender, &stop_recv) {
-            return;
+        if send_frame(frame.clone(), outputs, timeout, sender, stop_recv) {
+            return true;
         };
         cached_frames.push((frame, dur));
         now = Instant::now();
@@ -404,13 +240,38 @@ fn animation<F: FnOnce(mpsc::Sender<(Packed, Duration)>) + Send + 'static>(
         loop {
             for (frame, dur) in &cached_frames {
                 let timeout = dur.saturating_sub(now.elapsed());
-                if send_frame(frame.to_owned(), &mut outputs, timeout, &sender, &stop_recv) {
-                    return;
+                if send_frame(frame.to_owned(), outputs, timeout, sender, stop_recv) {
+                    return true;
                 };
                 now = Instant::now();
             }
         }
     }
+
+    false
+}
+
+fn img_resize(img: image::RgbaImage, dimensions: (u32, u32), filter: FilterType) -> Vec<u8> {
+    let (width, height) = dimensions;
+    debug!("Output dimensions: {:?}", (width, height));
+    debug!("Image dimensions:  {:?}", img.dimensions());
+    let mut resized_img = if img.dimensions() != (width, height) {
+        debug!("Image dimensions are different from output's. Resizing...");
+        DynamicImage::ImageRgba8(img)
+            .resize_to_fill(width, height, filter)
+            .into_rgba8()
+            .into_raw()
+    } else {
+        img.into_raw()
+    };
+
+    // The ARGB is 'little endian', so here we must  put the order
+    // of bytes 'in reverse', so it needs to be BGRA.
+    for pixel in resized_img.chunks_exact_mut(4) {
+        pixel.swap(0, 2);
+    }
+
+    resized_img
 }
 
 ///Returns whether the calling function should exit or not
