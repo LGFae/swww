@@ -1,3 +1,13 @@
+### Unreleased
+
+* Bumbed rust edition to 2021
+* Our custom compression is now even faster
+* I did a rewrite of the way the code that handled animations was structed.
+  This made caching a LOT faster, but it incurs in more memory usage, since
+  we spawn an extra thread to make a pipeline. That said, since this also 
+  greatly simplified the code itself, I considered it an overall positive
+  change.
+
 #### 0.2.0
 Using unsafe to speed up decompression.
 Also, `swww init -i` and `swww init -c` may now be considered deprecated.
