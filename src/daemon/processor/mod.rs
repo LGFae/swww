@@ -184,23 +184,30 @@ impl Processor {
         let (stopper, stop_recv) = mpsc::channel();
         self.anim_stoppers.push(stopper);
         thread::spawn(move || {
-            let (mut outputs, transition, gif) = request.split();
-            let img = new_img.clone();
-            if animation(
-                |a| transition.default(img, a),
-                false,
-                &mut outputs,
-                &sender,
-                &stop_recv,
-            ) {}
+            let (mut out, transition, gif) = request.split();
+            let tran_anim = |img| {
+                animation(
+                    |a| transition.default(img, a),
+                    false,
+                    &mut out,
+                    &sender,
+                    &stop_recv,
+                )
+            };
             if let Some(gif) = gif {
+                let img_clone = new_img.clone();
+                if tran_anim(img_clone){
+                    return;
+                };
                 animation(
                     |a| gif.process(new_img, a),
                     true,
-                    &mut outputs,
+                    &mut out,
                     &sender,
                     &stop_recv,
                 );
+            } else {
+                tran_anim(new_img);
             }
         });
     }
@@ -215,7 +222,7 @@ impl Drop for Processor {
     }
 }
 
-// returns whether or not it was interrupted
+/// returns whether or not it was interrupted
 fn animation<F: FnOnce(mpsc::Sender<(Packed, Duration)>) + Send + 'static>(
     frame_generator: F,
     infinite: bool,
