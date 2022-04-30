@@ -102,8 +102,8 @@ get there, here are some issues with it:
  Strangenly, it also seems that openning the same image again will *not*
  increase usage further.  It shouldn't be a big issue unless you want to go
  through all images in a huge directory (say, 100+ images). Note that, after
- going through it once, memory usage should more or less stabilize. See [#4]
- for some extra details.
+ going through it once, memory usage should more or less stabilize. See
+ https://github.com/Horus645/swww/issues/4 for some extra details.
  - If the daemon exits in an unexpected way (for example, if you send SIGKILL to
  force its shutdown), it will leave a `swww.socket` file behind in
  `$XDG_RUNTIME_DIR` (or `/tmp/swww` if it isn't set). If you want to
