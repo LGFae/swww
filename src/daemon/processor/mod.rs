@@ -243,6 +243,8 @@ fn animation<F: FnOnce(mpsc::Sender<(Packed, Duration)>) + Send + 'static>(
         now = Instant::now();
     }
 
+    drop(fr_recv);
+    cached_frames.shrink_to_fit();
     if infinite && cached_frames.len() > 1 {
         loop {
             for (frame, dur) in &cached_frames {
