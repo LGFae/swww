@@ -23,6 +23,7 @@
 //! difference.
 
 use lzzzz::lz4f;
+use itertools::Itertools;
 
 fn diff_byte_header(prev: &[u8], curr: &[u8]) -> Vec<u8> {
     let remainder = prev.len() - prev.len() % 64;
@@ -30,16 +31,16 @@ fn diff_byte_header(prev: &[u8], curr: &[u8]) -> Vec<u8> {
     let curr_chunks = bytemuck::cast_slice::<u8, [u8; 64]>(&curr[0..remainder]);
     let remainder = bytemuck::cast_slice::<u8, [u8; 8]>(&prev[remainder..])
         .iter()
-        .zip(bytemuck::cast_slice::<u8, [u8; 8]>(&curr[remainder..]));
+        .zip_eq(bytemuck::cast_slice::<u8, [u8; 8]>(&curr[remainder..]));
 
     let mut last_zero_header = 0;
     let mut vec = Vec::with_capacity(56 + (prev.len() * 49) / 64);
     let mut header_idx = 0;
-    for (prev, curr) in prev_chunks.iter().zip(curr_chunks) {
+    for (prev, curr) in prev_chunks.iter().zip_eq(curr_chunks) {
         vec.push(0);
         for (k, (prev, curr)) in bytemuck::cast_slice::<u8, [u8; 8]>(prev)
             .iter()
-            .zip(bytemuck::cast_slice::<u8, [u8; 8]>(curr))
+            .zip_eq(bytemuck::cast_slice::<u8, [u8; 8]>(curr))
             .enumerate()
         {
             if prev != curr {
