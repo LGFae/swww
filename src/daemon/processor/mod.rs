@@ -134,16 +134,13 @@ impl GifProcessor {
             let duration = Duration::from_millis((dur_num / dur_div).into());
             let img = img_resize(frame.into_buffer(), self.dimensions, self.filter);
 
-            let compressed_frame = Packed::pack(&canvas, &img);
-            canvas = img;
-
-            if fr_sender.send((compressed_frame, duration)).is_err() {
+            if fr_sender.send((Packed::pack(&canvas, &img), duration)).is_err() {
                 return;
             };
+            canvas = img;
         }
         //Add the first frame we got earlier:
-        let first_frame_comp = Packed::pack(&canvas, &first_frame);
-        let _ = fr_sender.send((first_frame_comp, dur_first_frame));
+        let _ = fr_sender.send((Packed::pack(&canvas, &first_frame), dur_first_frame));
     }
 }
 
@@ -163,7 +160,6 @@ impl Processor {
     pub fn process(&mut self, requests: Vec<ProcessorRequest>) -> Answer {
         for request in requests {
             self.stop_animations(&request.outputs);
-            //Note these can't be moved outside the loop without creating some memory overhead
             let img = match image::open(&request.path) {
                 Ok(i) => i.into_rgba8(),
                 Err(e) => {
@@ -220,19 +216,21 @@ fn animation(
 ) {
     let mut cached_frames = Vec::new();
     let mut now = Instant::now();
+    let handle;
     {
         let (fr_send, fr_recv) = mpsc::channel();
-        thread::spawn(move || gif.process(new_img, fr_send));
+        handle = thread::spawn(move || gif.process(new_img, fr_send));
         while let Ok((frame, dur)) = fr_recv.recv() {
             let timeout = dur.saturating_sub(now.elapsed());
             if send_frame(frame.clone(), &mut outputs, timeout, sender, stop_recv) {
+                let _ = handle.join();
                 return;
             };
             cached_frames.push((frame, dur));
             now = Instant::now();
         }
     }
-
+    let _ = handle.join();
     cached_frames.shrink_to_fit();
     if cached_frames.len() > 1 {
         loop {
