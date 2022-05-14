@@ -78,8 +78,7 @@ pub fn pack_bytes(prev: &[u8], cur: &[u8]) -> Vec<u8> {
             }
         }
         v.push(next_byte);
-        v.extend_from_slice(&to_add);
-        to_add.clear();
+        v.append(&mut to_add);
     }
     v
 }

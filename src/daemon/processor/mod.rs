@@ -64,8 +64,15 @@ struct Transition {
     fps: Duration,
 }
 
+/// All transitions return whether or not they completed
 impl Transition {
-    fn default(mut self, new_img: Vec<u8>, fr_sender: mpsc::Sender<(Packed, Duration)>) {
+    fn default(
+        mut self,
+        new_img: &[u8],
+        outputs: &mut Vec<String>,
+        sender: &SyncSender<(Vec<String>, Packed)>,
+        stop_recv: &mpsc::Receiver<Vec<String>>,
+    ) -> bool {
         let mut done = true;
         let mut transition_img: Vec<u8> = Vec::with_capacity(new_img.len());
         loop {
@@ -90,13 +97,13 @@ impl Transition {
             }
 
             let compressed_img = Packed::pack(&self.old_img, &transition_img);
-            if fr_sender.send((compressed_img, self.fps)).is_err() {
+            if send_frame(compressed_img, outputs, self.fps, sender, stop_recv) {
                 debug!("Transition was interrupted!");
-                return;
-            }
+                return false;
+            };
             if done {
                 debug!("Transition has finished.");
-                return;
+                return true;
             }
             self.old_img.clear();
             self.old_img.append(&mut transition_img);
@@ -185,29 +192,11 @@ impl Processor {
         self.anim_stoppers.push(stopper);
         thread::spawn(move || {
             let (mut out, transition, gif) = request.split();
-            let transition = |img| {
-                animation(
-                    |a| transition.default(img, a),
-                    false,
-                    &mut out,
-                    &sender,
-                    &stop_recv,
-                )
+            if !transition.default(&new_img, &mut out, &sender, &stop_recv) {
+                return;
             };
             if let Some(gif) = gif {
-                let img_clone = new_img.clone();
-                if transition(img_clone) {
-                    return;
-                };
-                animation(
-                    |a| gif.process(new_img, a),
-                    true,
-                    &mut out,
-                    &sender,
-                    &stop_recv,
-                );
-            } else {
-                transition(new_img);
+                animation(gif, new_img, out, &sender, &stop_recv);
             }
         });
     }
@@ -222,42 +211,40 @@ impl Drop for Processor {
     }
 }
 
-/// returns whether or not it was interrupted
-fn animation<F: FnOnce(mpsc::Sender<(Packed, Duration)>) + Send + 'static>(
-    frame_generator: F,
-    infinite: bool,
-    outputs: &mut Vec<String>,
+fn animation(
+    gif: GifProcessor,
+    new_img: Vec<u8>,
+    mut outputs: Vec<String>,
     sender: &SyncSender<(Vec<String>, Packed)>,
     stop_recv: &mpsc::Receiver<Vec<String>>,
-) -> bool {
-    let (fr_send, fr_recv) = mpsc::channel();
-    thread::spawn(|| frame_generator(fr_send));
+) {
     let mut cached_frames = Vec::new();
     let mut now = Instant::now();
-    while let Ok((frame, dur)) = fr_recv.recv() {
-        let timeout = dur.saturating_sub(now.elapsed());
-        if send_frame(frame.clone(), outputs, timeout, sender, stop_recv) {
-            return true;
-        };
-        cached_frames.push((frame, dur));
-        now = Instant::now();
+    {
+        let (fr_send, fr_recv) = mpsc::channel();
+        thread::spawn(move || gif.process(new_img, fr_send));
+        while let Ok((frame, dur)) = fr_recv.recv() {
+            let timeout = dur.saturating_sub(now.elapsed());
+            if send_frame(frame.clone(), &mut outputs, timeout, sender, stop_recv) {
+                return;
+            };
+            cached_frames.push((frame, dur));
+            now = Instant::now();
+        }
     }
 
-    drop(fr_recv);
     cached_frames.shrink_to_fit();
-    if infinite && cached_frames.len() > 1 {
+    if cached_frames.len() > 1 {
         loop {
             for (frame, dur) in &cached_frames {
                 let timeout = dur.saturating_sub(now.elapsed());
-                if send_frame(frame.to_owned(), outputs, timeout, sender, stop_recv) {
-                    return true;
+                if send_frame(frame.to_owned(), &mut outputs, timeout, sender, stop_recv) {
+                    return;
                 };
                 now = Instant::now();
             }
         }
     }
-
-    false
 }
 
 fn img_resize(img: image::RgbaImage, dimensions: (u32, u32), filter: FilterType) -> Vec<u8> {
