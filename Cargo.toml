@@ -10,7 +10,7 @@ lto = true
 opt-level = 3
 codegen-units = 1
 panic = "abort" # stack unwinding is mostly useless since the user won't be able to see it during normal operation
-strip = "symbols"
+strip = true
 
 [profile.bench]
 debug = 1
