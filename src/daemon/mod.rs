@@ -29,7 +29,7 @@ use std::{
     time::Duration,
 };
 
-use crate::cli::{Clear, Swww, Img};
+use crate::cli::{Clear, Img, Swww};
 use crate::Answer;
 
 mod processor;
@@ -277,7 +277,6 @@ fn make_logger() {
     {
         let config = simplelog::ConfigBuilder::new()
             .set_thread_level(LevelFilter::Info) //let me see where the processing is happenning
-            .set_time_format_str("%H:%M:%S%.f") //let me see those nanoseconds
             .build();
         TermLogger::init(
             LevelFilter::Debug,
