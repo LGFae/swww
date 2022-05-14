@@ -5,98 +5,117 @@
 //!
 //! For what's left, we store only the difference from the last frame to this one. We do that as
 //! follows:
-//! * We store a byte header, which indicate which pixels changed. For example, 1010 0000 would
-//! mean that, from the current position, pixels 1 and 2 and 5 and 6 changed.
-//! * After the header, we store the pixels we indicated.
+//! * First, we count how many pixels didn't change. We store that value as a u8.
+//!   Everytime the u8 hits the max (i.e. 255, or 0xFF), we push in onto the vector
+//!   and restart the counting.
+//! * Once we find a pixel that has changed, we count, starting from that one, how many changed,
+//!   the same way we counted above (i.e. store as u8, everytime it hits the max push and restart
+//!   the counting)
+//! * Then, we store all the new bytes.
+//! * Start from the top until we are done with the image
 //!
-//! NOTE THAT EVERY BIT IN THE HEADER CORRESPONDS TO 2, NOT 1, PIXELS.
-//!
-//! Finally, after all that, we use Lz4 to compress the result.
-//!
-//! # Decompressing
-//!
-//! For decompression, we must do everything backwards:
-//! * First we decompress with Lz4
-//! * Then we replace in the frame the difference we stored before.
-//!
-//! Note that the frame itself has 4 byte pixels, so take that into account when copying the
-//! difference.
 
-use lzzzz::lz4f;
 use itertools::Itertools;
+use lzzzz::lz4f;
 
-fn diff_byte_header(prev: &[u8], curr: &[u8]) -> Vec<u8> {
-    let remainder = prev.len() - prev.len() % 64;
-    let prev_chunks = bytemuck::cast_slice::<u8, [u8; 64]>(&prev[0..remainder]);
-    let curr_chunks = bytemuck::cast_slice::<u8, [u8; 64]>(&curr[0..remainder]);
-    let remainder = bytemuck::cast_slice::<u8, [u8; 8]>(&prev[remainder..])
-        .iter()
-        .zip_eq(bytemuck::cast_slice::<u8, [u8; 8]>(&curr[remainder..]));
-
-    let mut last_zero_header = 0;
-    let mut vec = Vec::with_capacity(56 + (prev.len() * 49) / 64);
-    let mut header_idx = 0;
-    for (prev, curr) in prev_chunks.iter().zip_eq(curr_chunks) {
-        vec.push(0);
-        for (k, (prev, curr)) in bytemuck::cast_slice::<u8, [u8; 8]>(prev)
-            .iter()
-            .zip_eq(bytemuck::cast_slice::<u8, [u8; 8]>(curr))
-            .enumerate()
-        {
-            if prev != curr {
-                vec[header_idx] |= 0x80 >> k;
-                vec.extend_from_slice(&curr[0..3]);
-                vec.extend_from_slice(&curr[4..7]);
-            }
-        }
-
-        if vec[header_idx] != 0 {
-            last_zero_header = vec.len();
-        }
-        header_idx = vec.len();
-    }
-    vec.push(0);
-    for (k, (prev, curr)) in remainder.enumerate() {
-        if prev != curr {
-            vec[header_idx] |= 0x80 >> k;
-            vec.extend_from_slice(&curr[0..3]);
-            vec.extend_from_slice(&curr[4..7]);
-        }
-    }
-    //Remove the trailing 0 headers, if any:
-    if vec[header_idx] == 0 {
-        vec.truncate(last_zero_header);
-    }
-
-    vec
+lazy_static::lazy_static! {
+    static ref COMPRESSION_PREFERENCES: lz4f::Preferences = lz4f::PreferencesBuilder::new()
+            .favor_dec_speed(lz4f::FavorDecSpeed::Enabled)
+            .block_size(lz4f::BlockSize::Max256KB)
+            .compression_level(8)
+            .build();
 }
 
-fn diff_byte_header_copy_onto(buf: &mut [u8], diff: &[u8]) {
-    let mut byte_idx = 0;
-    let mut pix_idx = 0;
-    while byte_idx < diff.len() {
-        let header = diff[byte_idx];
-        byte_idx += 1;
-        if header != 0 {
-            for j in (0..8).rev() {
-                if (header >> j) % 2 == 1 {
-                    // This should always be safe, since we check if the buffer is big enough
-                    // before unpacking (see the Packed struct)
-                    // Going unsafe here makes decompression significantly faster in my
-                    // (Horus645) computer
-                    unsafe {
-                        buf.get_unchecked_mut(pix_idx..pix_idx + 3)
-                            .clone_from_slice(diff.get_unchecked(byte_idx..byte_idx + 3));
-                        buf.get_unchecked_mut(pix_idx + 4..pix_idx + 7)
-                            .clone_from_slice(diff.get_unchecked(byte_idx + 3..byte_idx + 6));
-                    }
-                    byte_idx += 6;
-                }
-                pix_idx += 8;
+pub fn pack_bytes(prev: &[u8], cur: &[u8]) -> Vec<u8> {
+    let mut v = Vec::with_capacity((prev.len() * 3) / 4);
+
+    let prev_chunks = bytemuck::cast_slice::<u8, [u8; 4]>(prev);
+    let cur_chunks = bytemuck::cast_slice::<u8, [u8; 4]>(cur);
+    let mut iter = prev_chunks.iter().zip_eq(cur_chunks);
+
+    let mut next_byte;
+    let mut to_add = Vec::with_capacity(333); // 100 pixels
+    while let Some((mut prev, mut cur)) = iter.next() {
+        next_byte = 0;
+        while prev == cur {
+            next_byte += 1;
+            if next_byte == u8::MAX {
+                v.push(next_byte);
+                next_byte = 0;
             }
-        } else {
-            pix_idx += 64;
+            match iter.next() {
+                None => {
+                    v.push(next_byte);
+                    v.push(0);
+                    return v;
+                }
+                Some((p, c)) => {
+                    prev = p;
+                    cur = c;
+                }
+            }
         }
+        v.push(next_byte);
+
+        next_byte = 0;
+        while prev != cur {
+            to_add.extend_from_slice(&cur[0..3]);
+            next_byte += 1;
+            if next_byte == u8::MAX {
+                v.push(next_byte);
+                next_byte = 0;
+            }
+            match iter.next() {
+                None => {
+                    v.push(next_byte);
+                    v.extend(to_add);
+                    return v;
+                }
+                Some((p, c)) => {
+                    prev = p;
+                    cur = c;
+                }
+            }
+        }
+        v.push(next_byte);
+        v.extend_from_slice(&to_add);
+        to_add.clear();
+    }
+    v
+}
+
+pub fn unpack_bytes(buf: &mut [u8], diff: &[u8]) {
+    let buf_chunks = bytemuck::cast_slice_mut::<u8, [u8; 4]>(buf);
+    let mut diff_idx = 0;
+    let mut pix_idx = 0;
+    let mut to_cpy = 0;
+    while diff_idx < diff.len() {
+        while diff[diff_idx] == u8::MAX {
+            pix_idx += u8::MAX as usize;
+            diff_idx += 1;
+        }
+        pix_idx += diff[diff_idx] as usize;
+        diff_idx += 1;
+
+        while diff[diff_idx] == u8::MAX {
+            to_cpy += u8::MAX as usize;
+            diff_idx += 1;
+        }
+        to_cpy += diff[diff_idx] as usize;
+        diff_idx += 1;
+
+        while to_cpy != 0 {
+            unsafe {
+                buf_chunks
+                    .get_unchecked_mut(pix_idx)
+                    .get_unchecked_mut(0..3)
+                    .clone_from_slice(diff.get_unchecked(diff_idx..diff_idx + 3));
+            }
+            diff_idx += 3;
+            pix_idx += 1;
+            to_cpy -= 1;
+        }
+        pix_idx += 1;
     }
 }
 
@@ -114,14 +133,9 @@ impl Packed {
     ///Compresses a frame of animation by getting the difference between the previous and the
     ///current frame
     pub fn pack(prev: &[u8], curr: &[u8]) -> Self {
-        let bit_pack = diff_byte_header(prev, curr);
+        let bit_pack = pack_bytes(prev, curr);
         let mut v = Vec::with_capacity(bit_pack.len() / 2);
-        let prefs = lz4f::PreferencesBuilder::new()
-            .favor_dec_speed(lz4f::FavorDecSpeed::Enabled)
-            .block_size(lz4f::BlockSize::Max256KB)
-            .compression_level(8)
-            .build();
-        lzzzz::lz4f::compress_to_vec(&bit_pack, &mut v, &prefs).unwrap();
+        lzzzz::lz4f::compress_to_vec(&bit_pack, &mut v, &COMPRESSION_PREFERENCES).unwrap();
         v.shrink_to_fit();
         Packed {
             inner: v,
@@ -133,7 +147,7 @@ impl Packed {
         if buf.len() == self.expected_buf_size {
             let mut v = Vec::with_capacity(self.inner.len() * 3);
             lz4f::decompress_to_vec(&self.inner, &mut v).unwrap();
-            diff_byte_header_copy_onto(buf, &v);
+            unpack_bytes(buf, &v);
         }
     }
 }

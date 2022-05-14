@@ -196,7 +196,7 @@ impl Processor {
             };
             if let Some(gif) = gif {
                 let img_clone = new_img.clone();
-                if transition(img_clone){
+                if transition(img_clone) {
                     return;
                 };
                 animation(

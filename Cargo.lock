@@ -942,6 +942,7 @@ dependencies = [
  "hex",
  "image",
  "itertools",
+ "lazy_static",
  "log",
  "lzzzz",
  "rand",
