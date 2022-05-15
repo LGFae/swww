@@ -134,7 +134,10 @@ impl GifProcessor {
             let duration = Duration::from_millis((dur_num / dur_div).into());
             let img = img_resize(frame.into_buffer(), self.dimensions, self.filter);
 
-            if fr_sender.send((Packed::pack(&canvas, &img), duration)).is_err() {
+            if fr_sender
+                .send((Packed::pack(&canvas, &img), duration))
+                .is_err()
+            {
                 return;
             };
             canvas = img;
@@ -192,7 +195,7 @@ impl Processor {
                 return;
             };
             if let Some(gif) = gif {
-                animation(gif, new_img, out, &sender, &stop_recv);
+                animation(gif, new_img, out, sender, stop_recv);
             }
         });
     }
@@ -211,32 +214,31 @@ fn animation(
     gif: GifProcessor,
     new_img: Vec<u8>,
     mut outputs: Vec<String>,
-    sender: &SyncSender<(Vec<String>, Packed)>,
-    stop_recv: &mpsc::Receiver<Vec<String>>,
+    sender: SyncSender<(Vec<String>, Packed)>,
+    stop_recv: mpsc::Receiver<Vec<String>>,
 ) {
     let mut cached_frames = Vec::new();
     let mut now = Instant::now();
-    let handle;
     {
         let (fr_send, fr_recv) = mpsc::channel();
-        handle = thread::spawn(move || gif.process(new_img, fr_send));
+        let handle = thread::spawn(move || gif.process(new_img, fr_send));
         while let Ok((frame, dur)) = fr_recv.recv() {
             let timeout = dur.saturating_sub(now.elapsed());
-            if send_frame(frame.clone(), &mut outputs, timeout, sender, stop_recv) {
+            if send_frame(frame.clone(), &mut outputs, timeout, &sender, &stop_recv) {
                 let _ = handle.join();
                 return;
             };
             cached_frames.push((frame, dur));
             now = Instant::now();
         }
+        let _ = handle.join();
     }
-    let _ = handle.join();
     cached_frames.shrink_to_fit();
     if cached_frames.len() > 1 {
         loop {
             for (frame, dur) in &cached_frames {
                 let timeout = dur.saturating_sub(now.elapsed());
-                if send_frame(frame.to_owned(), &mut outputs, timeout, sender, stop_recv) {
+                if send_frame(frame.to_owned(), &mut outputs, timeout, &sender, &stop_recv) {
                     return;
                 };
                 now = Instant::now();
