@@ -27,7 +27,7 @@ lazy_static::lazy_static! {
 }
 
 pub fn pack_bytes(prev: &[u8], cur: &[u8]) -> Vec<u8> {
-    let mut v = Vec::with_capacity((prev.len() * 3) / 4);
+    let mut v = Vec::with_capacity((prev.len() * 5) / 8);
 
     let prev_chunks = bytemuck::cast_slice::<u8, [u8; 4]>(prev);
     let cur_chunks = bytemuck::cast_slice::<u8, [u8; 4]>(cur);
@@ -132,7 +132,8 @@ impl Packed {
     ///Compresses a frame of animation by getting the difference between the previous and the
     ///current frame
     pub fn pack(prev: &[u8], curr: &[u8]) -> Self {
-        let bit_pack = pack_bytes(prev, curr);
+        let mut bit_pack = pack_bytes(prev, curr);
+        bit_pack.shrink_to_fit();
         let mut v = Vec::with_capacity(bit_pack.len() / 2);
         lzzzz::lz4f::compress_to_vec(&bit_pack, &mut v, &COMPRESSION_PREFERENCES).unwrap();
         v.shrink_to_fit();
