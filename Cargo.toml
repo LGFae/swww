@@ -14,6 +14,7 @@ strip = true
 
 [profile.bench]
 debug = 1
+strip = false
 
 [dependencies]
 smithay-client-toolkit = "0.15"
