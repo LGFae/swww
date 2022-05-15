@@ -26,7 +26,7 @@ lazy_static::lazy_static! {
             .build();
 }
 
-pub fn pack_bytes(prev: &[u8], cur: &[u8]) -> Vec<u8> {
+pub fn pack_bytes(prev: &[u8], cur: &[u8]) -> Box<[u8]> {
     let mut v = Vec::with_capacity((prev.len() * 5) / 8);
 
     let prev_chunks = bytemuck::cast_slice::<u8, [u8; 4]>(prev);
@@ -47,7 +47,7 @@ pub fn pack_bytes(prev: &[u8], cur: &[u8]) -> Vec<u8> {
                 None => {
                     v.push(next_byte);
                     v.push(0);
-                    return v;
+                    return v.into_boxed_slice();
                 }
                 Some((p, c)) => {
                     prev = p;
@@ -69,7 +69,7 @@ pub fn pack_bytes(prev: &[u8], cur: &[u8]) -> Vec<u8> {
                 None => {
                     v.push(next_byte);
                     v.extend(to_add);
-                    return v;
+                    return v.into_boxed_slice();
                 }
                 Some((p, c)) => {
                     prev = p;
@@ -80,7 +80,7 @@ pub fn pack_bytes(prev: &[u8], cur: &[u8]) -> Vec<u8> {
         v.push(next_byte);
         v.append(&mut to_add);
     }
-    v
+    v.into_boxed_slice()
 }
 
 pub fn unpack_bytes(buf: &mut [u8], diff: Vec<u8>) {
@@ -119,10 +119,8 @@ pub fn unpack_bytes(buf: &mut [u8], diff: Vec<u8>) {
 }
 
 #[derive(Clone)]
-/// Wrapper struct for compression and decompression. This makes sure we operating on a Vec<u8> with
-/// the correct properties, simply by virtue of the type checking.
 pub struct Packed {
-    inner: Vec<u8>,
+    inner: Box<[u8]>,
     /// This field will ensure we won't ever try to unpack the images on a buffer of the wrong size,
     /// which ultimately is what allows us to use unsafe in the diff_byte_header_copy_onto function
     expected_buf_size: usize,
@@ -132,13 +130,11 @@ impl Packed {
     ///Compresses a frame of animation by getting the difference between the previous and the
     ///current frame
     pub fn pack(prev: &[u8], curr: &[u8]) -> Self {
-        let mut bit_pack = pack_bytes(prev, curr);
-        bit_pack.shrink_to_fit();
+        let bit_pack = pack_bytes(prev, curr);
         let mut v = Vec::with_capacity(bit_pack.len() / 2);
         lzzzz::lz4f::compress_to_vec(&bit_pack, &mut v, &COMPRESSION_PREFERENCES).unwrap();
-        v.shrink_to_fit();
         Packed {
-            inner: v,
+            inner: v.into_boxed_slice(),
             expected_buf_size: prev.len(),
         }
     }

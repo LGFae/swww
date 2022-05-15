@@ -119,7 +119,7 @@ struct GifProcessor {
 }
 
 impl GifProcessor {
-    fn process(self, first_frame: Vec<u8>, fr_sender: mpsc::Sender<(Packed, Duration)>) {
+    fn process(self, first_frame: Box<[u8]>, fr_sender: mpsc::Sender<(Packed, Duration)>) {
         let gif_reader = image::io::Reader::open(self.gif).unwrap();
         let mut frames = GifDecoder::new(gif_reader.into_inner())
             .expect("Couldn't decode gif, though this should be impossible...")
@@ -185,17 +185,16 @@ impl Processor {
             .retain(|a| a.send(to_stop.to_vec()).is_ok());
     }
 
-    fn transition(&mut self, request: ProcessorRequest, new_img: Vec<u8>) {
+    fn transition(&mut self, request: ProcessorRequest, new_img: Box<[u8]>) {
         let sender = self.frame_sender.clone();
         let (stopper, stop_recv) = mpsc::sync_channel(1);
         self.anim_stoppers.push(stopper);
         thread::spawn(move || {
             let (mut out, transition, gif) = request.split();
-            if !transition.default(&new_img, &mut out, &sender, &stop_recv) {
-                return;
-            };
-            if let Some(gif) = gif {
-                animation(gif, new_img, out, sender, stop_recv);
+            if transition.default(&new_img, &mut out, &sender, &stop_recv) {
+                if let Some(gif) = gif {
+                    animation(gif, new_img, out, sender, stop_recv);
+                }
             }
         });
     }
@@ -212,7 +211,7 @@ impl Drop for Processor {
 
 fn animation(
     gif: GifProcessor,
-    new_img: Vec<u8>,
+    new_img: Box<[u8]>,
     mut outputs: Vec<String>,
     sender: SyncSender<(Vec<String>, Packed)>,
     stop_recv: mpsc::Receiver<Vec<String>>,
@@ -247,7 +246,7 @@ fn animation(
     }
 }
 
-fn img_resize(img: image::RgbaImage, dimensions: (u32, u32), filter: FilterType) -> Vec<u8> {
+fn img_resize(img: image::RgbaImage, dimensions: (u32, u32), filter: FilterType) -> Box<[u8]> {
     let (width, height) = dimensions;
     debug!("Output dimensions: {:?}", (width, height));
     debug!("Image dimensions:  {:?}", img.dimensions());
@@ -267,7 +266,7 @@ fn img_resize(img: image::RgbaImage, dimensions: (u32, u32), filter: FilterType)
         pixel.swap(0, 2);
     }
 
-    resized_img
+    resized_img.into_boxed_slice()
 }
 
 ///Returns whether the calling function should exit or not
