@@ -149,7 +149,7 @@ impl GifProcessor {
 
 pub struct Processor {
     frame_sender: SyncSender<(Vec<String>, Packed)>,
-    anim_stoppers: Vec<mpsc::Sender<Vec<String>>>,
+    anim_stoppers: Vec<mpsc::SyncSender<Vec<String>>>,
 }
 
 impl Processor {
@@ -187,7 +187,7 @@ impl Processor {
 
     fn transition(&mut self, request: ProcessorRequest, new_img: Vec<u8>) {
         let sender = self.frame_sender.clone();
-        let (stopper, stop_recv) = mpsc::channel();
+        let (stopper, stop_recv) = mpsc::sync_channel(1);
         self.anim_stoppers.push(stopper);
         thread::spawn(move || {
             let (mut out, transition, gif) = request.split();
@@ -281,7 +281,7 @@ fn send_frame(
     match stop_recv.recv_timeout(timeout) {
         Ok(to_remove) => {
             outputs.retain(|o| !to_remove.contains(o));
-            if outputs.is_empty() {
+            if outputs.is_empty() || to_remove.is_empty() {
                 return true;
             }
         }
