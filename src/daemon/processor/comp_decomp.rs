@@ -83,7 +83,7 @@ pub fn pack_bytes(prev: &[u8], cur: &[u8]) -> Vec<u8> {
     v
 }
 
-pub fn unpack_bytes(buf: &mut [u8], diff: &[u8]) {
+pub fn unpack_bytes(buf: &mut [u8], diff: Vec<u8>) {
     let buf_chunks = bytemuck::cast_slice_mut::<u8, [u8; 4]>(buf);
     let mut diff_idx = 0;
     let mut pix_idx = 0;
@@ -147,7 +147,7 @@ impl Packed {
         if buf.len() == self.expected_buf_size {
             let mut v = Vec::with_capacity(self.inner.len() * 3);
             lz4f::decompress_to_vec(&self.inner, &mut v).unwrap();
-            unpack_bytes(buf, &v);
+            unpack_bytes(buf, v);
         }
     }
 }
