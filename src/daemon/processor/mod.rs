@@ -73,6 +73,7 @@ impl Transition {
         sender: &SyncSender<(Vec<String>, ReadiedPack)>,
         stop_recv: &mpsc::Receiver<Vec<String>>,
     ) -> bool {
+        let mut now = Instant::now();
         let mut done = true;
         let mut transition_img: Vec<u8> = Vec::with_capacity(new_img.len());
         loop {
@@ -97,7 +98,8 @@ impl Transition {
             }
 
             let compressed_img = BitPack::pack(&self.old_img, &transition_img).ready(new_img.len());
-            if send_frame(compressed_img, outputs, self.fps, sender, stop_recv) {
+            let timeout = self.fps.saturating_sub(now.elapsed());
+            if send_frame(compressed_img, outputs, timeout, sender, stop_recv) {
                 debug!("Transition was interrupted!");
                 return false;
             };
@@ -108,6 +110,7 @@ impl Transition {
             self.old_img.clear();
             self.old_img.append(&mut transition_img);
             done = true;
+            now = Instant::now();
         }
     }
 }
