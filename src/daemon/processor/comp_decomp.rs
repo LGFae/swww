@@ -83,7 +83,7 @@ fn pack_bytes(prev: &[u8], cur: &[u8]) -> Box<[u8]> {
     v.into_boxed_slice()
 }
 
-fn unpack_bytes(buf: &mut [u8], diff: Vec<u8>) {
+fn unpack_bytes(buf: &mut [u8], diff: &[u8]) {
     let buf_chunks = bytemuck::cast_slice_mut::<u8, [u8; 4]>(buf);
     let mut diff_idx = 0;
     let mut pix_idx = 0;
@@ -136,8 +136,10 @@ impl BitPack {
 
     /// Produces a "ReadiedPack", which can be sent through a channel to be unpacked later
     pub fn ready(&self, expected_buf_size: usize) -> ReadiedPack {
+        let mut v = Vec::with_capacity(self.inner.len() * 3);
+        lz4f::decompress_to_vec(&self.inner, &mut v).unwrap();
         ReadiedPack {
-            inner: self.inner.clone(),
+            inner: v.into_boxed_slice(),
             expected_buf_size,
         }
     }
@@ -153,9 +155,7 @@ pub struct ReadiedPack {
 impl ReadiedPack {
     pub fn unpack(&self, buf: &mut [u8]) {
         if buf.len() == self.expected_buf_size {
-            let mut v = Vec::with_capacity(self.inner.len() * 3);
-            lz4f::decompress_to_vec(&self.inner, &mut v).unwrap();
-            unpack_bytes(buf, v);
+            unpack_bytes(buf, &self.inner);
         }
     }
 }
