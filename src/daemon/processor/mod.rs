@@ -232,10 +232,10 @@ fn animation(
         }
         let _ = handle.join();
     }
-    cached_frames.shrink_to_fit();
+    let cached_frames = cached_frames.into_boxed_slice();
     if cached_frames.len() > 1 {
         loop {
-            for (frame, dur) in &cached_frames {
+            for (frame, dur) in cached_frames.iter() {
                 let timeout = dur.saturating_sub(now.elapsed());
                 if send_frame(frame.to_owned(), &mut outputs, timeout, &sender, &stop_recv) {
                     return;
