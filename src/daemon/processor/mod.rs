@@ -223,8 +223,9 @@ fn animation(
         let (fr_send, fr_recv) = mpsc::channel();
         let handle = thread::spawn(move || gif.process(new_img, fr_send));
         while let Ok((fr, dur)) = fr_recv.recv() {
+            let frame = fr.ready(img_len);
             let timeout = dur.saturating_sub(now.elapsed());
-            if send_frame(fr.ready(img_len), &mut outputs, timeout, &sender, &stopper) {
+            if send_frame(frame, &mut outputs, timeout, &sender, &stopper) {
                 let _ = handle.join();
                 return;
             };
@@ -237,8 +238,9 @@ fn animation(
     if cached_frames.len() > 1 {
         loop {
             for (fr, dur) in cached_frames.iter() {
+                let frame = fr.ready(img_len);
                 let timeout = dur.saturating_sub(now.elapsed());
-                if send_frame(fr.ready(img_len), &mut outputs, timeout, &sender, &stopper) {
+                if send_frame(frame, &mut outputs, timeout, &sender, &stopper) {
                     return;
                 };
                 now = Instant::now();
