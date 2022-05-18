@@ -118,6 +118,7 @@ fn unpack_bytes(buf: &mut [u8], diff: &[u8]) {
     }
 }
 
+/// This struct represents the cached difference between the previous frame and the next
 pub struct BitPack {
     inner: Box<[u8]>,
 }
@@ -125,8 +126,8 @@ pub struct BitPack {
 impl BitPack {
     /// Compresses a frame of animation by getting the difference between the previous and the
     /// current frame
-    pub fn pack(prev: &[u8], curr: &[u8]) -> Self {
-        let bit_pack = pack_bytes(prev, curr);
+    pub fn pack(prev: &[u8], cur: &[u8]) -> Self {
+        let bit_pack = pack_bytes(prev, cur);
         let mut v = Vec::with_capacity(bit_pack.len() / 2);
         lzzzz::lz4f::compress_to_vec(&bit_pack, &mut v, &COMPRESSION_PREFERENCES).unwrap();
         BitPack {
@@ -145,6 +146,7 @@ impl BitPack {
     }
 }
 
+/// This is what we send through the channel to be drawn
 pub struct ReadiedPack {
     inner: Box<[u8]>,
     /// This field will ensure we won't ever try to unpack the images on a buffer of the wrong size,
@@ -153,6 +155,16 @@ pub struct ReadiedPack {
 }
 
 impl ReadiedPack {
+    /// This should only be used in the transitions. For caching the animation frames, use the
+    /// Bitpack struct
+    pub fn new(prev: &[u8], cur: &[u8]) -> Self {
+        let bit_pack = pack_bytes(prev, cur);
+        ReadiedPack {
+            inner: bit_pack,
+            expected_buf_size: cur.len(),
+        }
+    }
+
     pub fn unpack(&self, buf: &mut [u8]) {
         if buf.len() == self.expected_buf_size {
             unpack_bytes(buf, &self.inner);

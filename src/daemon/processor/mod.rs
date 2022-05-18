@@ -97,7 +97,7 @@ impl Transition {
                 transition_img.push(255);
             }
 
-            let compressed_img = BitPack::pack(&self.old_img, &transition_img).ready(new_img.len());
+            let compressed_img = ReadiedPack::new(&self.old_img, &transition_img);
             let timeout = self.fps.saturating_sub(now.elapsed());
             if send_frame(compressed_img, outputs, timeout, sender, stop_recv) {
                 debug!("Transition was interrupted!");
