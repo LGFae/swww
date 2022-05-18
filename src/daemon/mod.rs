@@ -35,7 +35,7 @@ use crate::Answer;
 mod processor;
 mod wayland;
 
-use processor::{comp_decomp::Packed, Processor, ProcessorRequest};
+use processor::{comp_decomp::ReadiedPack, Processor, ProcessorRequest};
 
 #[derive(PartialEq, Copy, Clone)]
 enum RenderEvent {
@@ -190,7 +190,7 @@ impl Bg {
         self.surface.commit();
     }
 
-    fn draw(&mut self, img: &Packed) {
+    fn draw(&mut self, img: &ReadiedPack) {
         let stride = 4 * self.info.dim.0 as i32;
         let width = self.info.dim.0 as i32;
         let height = self.info.dim.1 as i32;
@@ -496,7 +496,7 @@ fn send_processor_request(proc: &mut Processor, bgs: &mut RefMut<Vec<Bg>>, img: 
     }
 }
 
-fn handle_recv_img(bgs: &mut RefMut<Vec<Bg>>, msg: &(Vec<String>, Packed)) {
+fn handle_recv_img(bgs: &mut RefMut<Vec<Bg>>, msg: &(Vec<String>, ReadiedPack)) {
     let (outputs, img) = msg;
     if outputs.is_empty() {
         warn!("Received empty list of outputs from processor, which should be impossible");

@@ -26,7 +26,7 @@ lazy_static::lazy_static! {
             .build();
 }
 
-pub fn pack_bytes(prev: &[u8], cur: &[u8]) -> Box<[u8]> {
+fn pack_bytes(prev: &[u8], cur: &[u8]) -> Box<[u8]> {
     let mut v = Vec::with_capacity((prev.len() * 5) / 8);
 
     let prev_chunks = bytemuck::cast_slice::<u8, [u8; 4]>(prev);
@@ -83,7 +83,7 @@ pub fn pack_bytes(prev: &[u8], cur: &[u8]) -> Box<[u8]> {
     v.into_boxed_slice()
 }
 
-pub fn unpack_bytes(buf: &mut [u8], diff: Vec<u8>) {
+fn unpack_bytes(buf: &mut [u8], diff: Vec<u8>) {
     let buf_chunks = bytemuck::cast_slice_mut::<u8, [u8; 4]>(buf);
     let mut diff_idx = 0;
     let mut pix_idx = 0;
@@ -118,27 +118,39 @@ pub fn unpack_bytes(buf: &mut [u8], diff: Vec<u8>) {
     }
 }
 
-#[derive(Clone)]
-pub struct Packed {
+pub struct BitPack {
     inner: Box<[u8]>,
-    /// This field will ensure we won't ever try to unpack the images on a buffer of the wrong size,
-    /// which ultimately is what allows us to use unsafe in the diff_byte_header_copy_onto function
-    expected_buf_size: usize,
 }
 
-impl Packed {
-    ///Compresses a frame of animation by getting the difference between the previous and the
-    ///current frame
+impl BitPack {
+    /// Compresses a frame of animation by getting the difference between the previous and the
+    /// current frame
     pub fn pack(prev: &[u8], curr: &[u8]) -> Self {
         let bit_pack = pack_bytes(prev, curr);
         let mut v = Vec::with_capacity(bit_pack.len() / 2);
         lzzzz::lz4f::compress_to_vec(&bit_pack, &mut v, &COMPRESSION_PREFERENCES).unwrap();
-        Packed {
+        BitPack {
             inner: v.into_boxed_slice(),
-            expected_buf_size: prev.len(),
         }
     }
 
+    /// Produces a "ReadiedPack", which can be sent through a channel to be unpacked later
+    pub fn ready(&self, expected_buf_size: usize) -> ReadiedPack {
+        ReadiedPack {
+            inner: self.inner.clone(),
+            expected_buf_size,
+        }
+    }
+}
+
+pub struct ReadiedPack {
+    inner: Box<[u8]>,
+    /// This field will ensure we won't ever try to unpack the images on a buffer of the wrong size,
+    /// which ultimately is what allows us to use unsafe in the unpack_bytes function
+    expected_buf_size: usize,
+}
+
+impl ReadiedPack {
     pub fn unpack(&self, buf: &mut [u8]) {
         if buf.len() == self.expected_buf_size {
             let mut v = Vec::with_capacity(self.inner.len() * 3);
@@ -150,7 +162,7 @@ impl Packed {
 
 #[cfg(test)]
 mod tests {
-    use super::Packed;
+    use super::BitPack;
     use rand::prelude::random;
 
     #[test]
@@ -158,10 +170,11 @@ mod tests {
     fn should_compress_and_decompress_to_same_info_small() {
         let frame1 = [1, 2, 3, 4, 5, 6, 7, 8];
         let frame2 = [1, 2, 3, 4, 8, 7, 6, 5];
-        let compressed = Packed::pack(&frame1, &frame2);
+        let compressed = BitPack::pack(&frame1, &frame2);
 
         let mut buf = frame1;
-        compressed.unpack(&mut buf);
+        let readied = compressed.ready(8);
+        readied.unpack(&mut buf);
         for i in 0..2 {
             for j in 0..3 {
                 assert_eq!(
@@ -188,14 +201,15 @@ mod tests {
             }
 
             let mut compressed = Vec::with_capacity(20);
-            compressed.push(Packed::pack(original.last().unwrap(), &original[0]));
+            compressed.push(BitPack::pack(original.last().unwrap(), &original[0]));
             for i in 1..20 {
-                compressed.push(Packed::pack(&original[i - 1], &original[i]));
+                compressed.push(BitPack::pack(&original[i - 1], &original[i]));
             }
 
             let mut buf = original.last().unwrap().clone();
             for i in 0..20 {
-                compressed[i].unpack(&mut buf);
+                let readied = compressed[i].ready(4000);
+                readied.unpack(&mut buf);
                 let mut j = 0;
                 while j < 4000 {
                     for k in 0..3 {
@@ -223,14 +237,15 @@ mod tests {
             }
 
             let mut compressed = Vec::with_capacity(20);
-            compressed.push(Packed::pack(original.last().unwrap(), &original[0]));
+            compressed.push(BitPack::pack(original.last().unwrap(), &original[0]));
             for i in 1..20 {
-                compressed.push(Packed::pack(&original[i - 1], &original[i]));
+                compressed.push(BitPack::pack(&original[i - 1], &original[i]));
             }
 
             let mut buf = original.last().unwrap().clone();
             for i in 0..20 {
-                compressed[i].unpack(&mut buf);
+                let readied = compressed[i].ready(4000);
+                readied.unpack(&mut buf);
                 let mut j = 0;
                 while j < 4000 {
                     for k in 0..3 {
