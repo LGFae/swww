@@ -1,3 +1,5 @@
+use itertools::Itertools;
+
 use image::{
     self, codecs::gif::GifDecoder, imageops::FilterType, AnimationDecoder, DynamicImage,
     ImageFormat,
@@ -74,30 +76,41 @@ impl Transition {
         stop_recv: &mpsc::Receiver<Vec<String>>,
     ) -> bool {
         let mut now = Instant::now();
-        let mut done = true;
-        let mut transition_img: Vec<u8> = Vec::with_capacity(new_img.len());
+        let mut transition: Vec<u8> = vec![255; new_img.len()];
+        let mut done;
         loop {
-            for (old, new) in self.old_img.chunks_exact(4).zip(new_img.chunks_exact(4)) {
-                for (old_color, new_color) in old.iter().zip(new.iter()).take(3) {
-                    let distance = if old_color > new_color {
-                        old_color - new_color
+            done = true;
+            let trans_chunks = bytemuck::cast_slice_mut::<u8, [u8; 4]>(&mut transition);
+            let old_chunks = bytemuck::cast_slice::<u8, [u8; 4]>(&self.old_img);
+            let new_chunks = bytemuck::cast_slice::<u8, [u8; 4]>(new_img);
+
+            let outer_for = trans_chunks
+                .iter_mut()
+                .zip_eq(old_chunks.iter().zip_eq(new_chunks));
+            for (trans_pix, (old_pix, new_pix)) in outer_for {
+                let inner_for = trans_pix
+                    .iter_mut()
+                    .zip_eq(old_pix.iter().zip_eq(new_pix.iter()))
+                    .take(3);
+                for (trans_col, (old_col, new_col)) in inner_for {
+                    let distance = if old_col > new_col {
+                        old_col - new_col
                     } else {
-                        new_color - old_color
+                        new_col - old_col
                     };
                     if distance < self.step {
-                        transition_img.push(*new_color);
-                    } else if old_color > new_color {
+                        *trans_col = *new_col;
+                    } else if old_col > new_col {
                         done = false;
-                        transition_img.push(old_color - self.step);
+                        *trans_col = *old_col - self.step;
                     } else {
                         done = false;
-                        transition_img.push(old_color + self.step);
+                        *trans_col = *old_col + self.step;
                     }
                 }
-                transition_img.push(255);
             }
 
-            let compressed_img = ReadiedPack::new(&self.old_img, &transition_img);
+            let compressed_img = ReadiedPack::new(&self.old_img, &transition);
             let timeout = self.fps.saturating_sub(now.elapsed());
             if send_frame(compressed_img, outputs, timeout, sender, stop_recv) {
                 debug!("Transition was interrupted!");
@@ -107,9 +120,7 @@ impl Transition {
                 debug!("Transition has finished.");
                 return true;
             }
-            self.old_img.clear();
-            self.old_img.append(&mut transition_img);
-            done = true;
+            self.old_img.clone_from_slice(&transition);
             now = Instant::now();
         }
     }
