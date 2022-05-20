@@ -15,7 +15,7 @@ use std::{
 
 use crate::Answer;
 pub mod comp_decomp;
-use comp_decomp::Packed;
+use comp_decomp::{BitPack, ReadiedPack};
 
 ///Note: since this entire struct will be going to a new thread, it has to own all of its values.
 ///This means even though, in the case of multiple outputs with different dimensions, they would
@@ -70,7 +70,7 @@ impl Transition {
         mut self,
         new_img: &[u8],
         outputs: &mut Vec<String>,
-        sender: &SyncSender<(Vec<String>, Packed)>,
+        sender: &SyncSender<(Vec<String>, ReadiedPack)>,
         stop_recv: &mpsc::Receiver<Vec<String>>,
     ) -> bool {
         let mut now = Instant::now();
@@ -97,7 +97,7 @@ impl Transition {
                 transition_img.push(255);
             }
 
-            let compressed_img = Packed::pack(&self.old_img, &transition_img);
+            let compressed_img = ReadiedPack::new(&self.old_img, &transition_img);
             let timeout = self.fps.saturating_sub(now.elapsed());
             if send_frame(compressed_img, outputs, timeout, sender, stop_recv) {
                 debug!("Transition was interrupted!");
@@ -122,7 +122,7 @@ struct GifProcessor {
 }
 
 impl GifProcessor {
-    fn process(self, first_frame: Box<[u8]>, fr_sender: mpsc::Sender<(Packed, Duration)>) {
+    fn process(self, first_frame: Box<[u8]>, fr_sender: mpsc::Sender<(BitPack, Duration)>) {
         let gif_reader = image::io::Reader::open(self.gif).unwrap();
         let mut frames = GifDecoder::new(gif_reader.into_inner())
             .expect("Couldn't decode gif, though this should be impossible...")
@@ -138,7 +138,7 @@ impl GifProcessor {
             let img = img_resize(frame.into_buffer(), self.dimensions, self.filter);
 
             if fr_sender
-                .send((Packed::pack(&canvas, &img), duration))
+                .send((BitPack::pack(&canvas, &img), duration))
                 .is_err()
             {
                 return;
@@ -146,17 +146,17 @@ impl GifProcessor {
             canvas = img;
         }
         //Add the first frame we got earlier:
-        let _ = fr_sender.send((Packed::pack(&canvas, &first_frame), dur_first_frame));
+        let _ = fr_sender.send((BitPack::pack(&canvas, &first_frame), dur_first_frame));
     }
 }
 
 pub struct Processor {
-    frame_sender: SyncSender<(Vec<String>, Packed)>,
+    frame_sender: SyncSender<(Vec<String>, ReadiedPack)>,
     anim_stoppers: Vec<mpsc::SyncSender<Vec<String>>>,
 }
 
 impl Processor {
-    pub fn new(frame_sender: SyncSender<(Vec<String>, Packed)>) -> Self {
+    pub fn new(frame_sender: SyncSender<(Vec<String>, ReadiedPack)>) -> Self {
         Self {
             anim_stoppers: Vec::new(),
             frame_sender,
@@ -216,21 +216,23 @@ fn animation(
     gif: GifProcessor,
     new_img: Box<[u8]>,
     mut outputs: Vec<String>,
-    sender: SyncSender<(Vec<String>, Packed)>,
-    stop_recv: mpsc::Receiver<Vec<String>>,
+    sender: SyncSender<(Vec<String>, ReadiedPack)>,
+    stopper: mpsc::Receiver<Vec<String>>,
 ) {
+    let img_len = new_img.len();
     let mut cached_frames = Vec::new();
     let mut now = Instant::now();
     {
         let (fr_send, fr_recv) = mpsc::channel();
         let handle = thread::spawn(move || gif.process(new_img, fr_send));
-        while let Ok((frame, dur)) = fr_recv.recv() {
+        while let Ok((fr, dur)) = fr_recv.recv() {
+            let frame = fr.ready(img_len);
             let timeout = dur.saturating_sub(now.elapsed());
-            if send_frame(frame.clone(), &mut outputs, timeout, &sender, &stop_recv) {
+            if send_frame(frame, &mut outputs, timeout, &sender, &stopper) {
                 let _ = handle.join();
                 return;
             };
-            cached_frames.push((frame, dur));
+            cached_frames.push((fr, dur));
             now = Instant::now();
         }
         let _ = handle.join();
@@ -238,9 +240,10 @@ fn animation(
     let cached_frames = cached_frames.into_boxed_slice();
     if cached_frames.len() > 1 {
         loop {
-            for (frame, dur) in cached_frames.iter() {
+            for (fr, dur) in cached_frames.iter() {
+                let frame = fr.ready(img_len);
                 let timeout = dur.saturating_sub(now.elapsed());
-                if send_frame(frame.to_owned(), &mut outputs, timeout, &sender, &stop_recv) {
+                if send_frame(frame, &mut outputs, timeout, &sender, &stopper) {
                     return;
                 };
                 now = Instant::now();
@@ -274,10 +277,10 @@ fn img_resize(img: image::RgbaImage, dimensions: (u32, u32), filter: FilterType)
 
 ///Returns whether the calling function should exit or not
 fn send_frame(
-    frame: Packed,
+    frame: ReadiedPack,
     outputs: &mut Vec<String>,
     timeout: Duration,
-    sender: &SyncSender<(Vec<String>, Packed)>,
+    sender: &SyncSender<(Vec<String>, ReadiedPack)>,
     stop_recv: &mpsc::Receiver<Vec<String>>,
 ) -> bool {
     match stop_recv.recv_timeout(timeout) {
