@@ -33,51 +33,38 @@ fn pack_bytes(prev: &[u8], cur: &[u8]) -> Box<[u8]> {
     let cur_chunks = bytemuck::cast_slice::<u8, [u8; 4]>(cur);
     let mut iter = prev_chunks.iter().zip_eq(cur_chunks);
 
-    let mut next_byte;
+    let mut equals: usize;
+    let mut diffs: usize;
     let mut to_add = Vec::with_capacity(333); // 100 pixels
     while let Some((mut prev, mut cur)) = iter.next() {
-        next_byte = 0;
+        equals = 0;
         while prev == cur {
-            next_byte += 1;
-            if next_byte == u8::MAX {
-                v.push(next_byte);
-                next_byte = 0;
-            }
+            equals += 1;
             match iter.next() {
-                None => {
-                    v.push(next_byte);
-                    v.push(0);
-                    return v.into_boxed_slice();
-                }
+                None => return v.into_boxed_slice(),
                 Some((p, c)) => {
                     prev = p;
                     cur = c;
                 }
             }
         }
-        v.push(next_byte);
 
-        next_byte = 0;
+        diffs = 0;
         while prev != cur {
             to_add.extend_from_slice(&cur[0..3]);
-            next_byte += 1;
-            if next_byte == u8::MAX {
-                v.push(next_byte);
-                next_byte = 0;
-            }
+            diffs += 1;
             match iter.next() {
-                None => {
-                    v.push(next_byte);
-                    v.extend(to_add);
-                    return v.into_boxed_slice();
-                }
+                None => break,
                 Some((p, c)) => {
                     prev = p;
                     cur = c;
                 }
             }
         }
-        v.push(next_byte);
+        let i = v.len() + equals / 255;
+        v.resize(1 + v.len() + equals / 255 + diffs / 255, 255);
+        v[i] = (equals % 255) as u8;
+        v.push((diffs % 255) as u8);
         v.append(&mut to_add);
     }
     v.into_boxed_slice()
