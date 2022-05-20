@@ -116,12 +116,12 @@ impl Transition {
                 debug!("Transition was interrupted!");
                 return false;
             };
+            now = Instant::now();
             if done {
                 debug!("Transition has finished.");
                 return true;
             }
             self.old_img.clone_from_slice(&transition);
-            now = Instant::now();
         }
     }
 }
@@ -243,8 +243,8 @@ fn animation(
                 let _ = handle.join();
                 return;
             };
-            cached_frames.push((fr, dur));
             now = Instant::now();
+            cached_frames.push((fr, dur));
         }
         let _ = handle.join();
     }
