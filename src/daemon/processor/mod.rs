@@ -26,7 +26,7 @@ use comp_decomp::{BitPack, ReadiedPack};
 pub struct ProcessorRequest {
     pub outputs: Vec<String>,
     pub dimensions: (u32, u32),
-    pub old_img: Vec<u8>,
+    pub old_img: Box<[u8]>,
     pub path: PathBuf,
     pub filter: FilterType,
     pub step: u8,
@@ -61,7 +61,7 @@ impl ProcessorRequest {
 }
 
 struct Transition {
-    old_img: Vec<u8>,
+    old_img: Box<[u8]>,
     step: u8,
     fps: Duration,
 }
