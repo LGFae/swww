@@ -1,5 +1,3 @@
-Need to add lz4 to the dependencies list
-
 There might be a condition where we send an extra frame after stopping an
 animation with the clear command. I haven't seen this yet though.
 

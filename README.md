@@ -7,6 +7,7 @@
    * wlr-layer-shell
    * xdg-output
    * xdg-shell
+ - lz4 (for compressing frames when animating)
 
 ## Build
 
@@ -25,8 +26,16 @@ autocompletion scripts for bash, zsh, fish and elvish are offered in the
 ## Features
 
  - Display animated gifs on your desktop
- - Display any image in a format that is decodable by the
- [image](https://github.com/image-rs/image#supported-image-formats) crate
+ - Display any image in the formats:
+   * jpeg
+   * png
+   * gif
+   * pnm
+   * tga
+   * tiff
+   * webp
+   * bmp
+   * farbfeld
  - Clear the screen with an arbitrary rrggbb color
  - Smooth transition effect when you switch images
  - Do all of that without having to shutdown and reinitialize the daemon
