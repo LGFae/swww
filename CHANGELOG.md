@@ -1,5 +1,7 @@
 ### Unreleased
 
+* Limited image formats to: `gif`, `jpeg`, `jpeg_rayon`, `png`, `pnm`, `tga`,
+  `tiff`, `webp`, `bmp`, `farbfeld`
 * Bumbed rust edition to 2021
 * Our custom compression is now even faster
 * I did a rewrite of the way the code that handled animations was structed.
