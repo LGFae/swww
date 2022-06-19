@@ -17,13 +17,13 @@ debug = 1
 strip = false
 
 [dependencies]
-smithay-client-toolkit = { version = "0.15", default-features = false, features = ["calloop"] }
+smithay-client-toolkit = { version = "0.16", default-features = false, features = ["calloop"] }
 image = { version = "0.24", default-features = false, features = [ "gif", "jpeg", "jpeg_rayon",
                                        "png", "pnm", "tga", "tiff", "webp", "bmp", "farbfeld"]}
 log = { version = "0.4", features = ["max_level_debug", "release_max_level_info"] }
 simplelog = "0.12"
 fork = "0.1"
-clap = { version = "=3.1.18", features = ["derive", "wrap_help", "env"] }
+clap = { version = "=3.2.5", features = ["derive", "wrap_help", "env"] }
 hex = "0.4"
 lzzzz = "1.0"
 serde = { version = "1.0", features = [ "derive" ] }
@@ -37,8 +37,8 @@ assert_cmd = "2.0"
 rand = "0.8"
 
 [build-dependencies]
-clap = { version = "=3.1.18", features = ["derive", "env"] }
-clap_complete = "=3.1.4"
+clap = { version = "=3.2.5", features = ["derive", "env"] }
+clap_complete = "=3.2.1"
 hex = "0.4"
 serde =  { version = "1.0", features = [ "derive" ] }
 
