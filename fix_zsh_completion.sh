@@ -9,7 +9,7 @@
 #
 
 # These are simply the formats supported by the image crate
-SUPPORTED_FILES="*.png|*.jpg|*.jpeg|*.gif|*.bmp|*.tif|*.tiff|*.ico|*.webp|*.avif|*.pnm|*.pbm|*.pgm|*.ppm|*.dds|*.tga|*.exr|*.ff|*.farbfeld"
+SUPPORTED_FILES="*.png|*.jpg|*.jpeg|*.gif|*.bmp|*.tif|*.tiff|*.ico|*.webp|*.pnm|*.pbm|*.pgm|*.ppm|*.tga|*.ff|*.farbfeld"
 
 # in order we fix:
 # 	img <path>
