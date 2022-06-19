@@ -240,6 +240,7 @@ fn animation(
             let frame = fr.ready(img_len);
             let timeout = dur.saturating_sub(now.elapsed());
             if send_frame(frame, &mut outputs, timeout, &sender, &stopper) {
+                drop(fr_recv);
                 let _ = handle.join();
                 return;
             };
@@ -249,6 +250,7 @@ fn animation(
         let _ = handle.join();
     }
     let cached_frames = cached_frames.into_boxed_slice();
+
     if cached_frames.len() > 1 {
         loop {
             for (fr, dur) in cached_frames.iter() {
