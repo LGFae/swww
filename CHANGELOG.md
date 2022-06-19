@@ -9,6 +9,11 @@
   we spawn an extra thread to make a pipeline. That said, since this also 
   greatly simplified the code itself, I considered it an overall positive
   change.
+* Fixed a bug where the animation wouldn't stop until it had processed all the
+  frames, even when it was told to.
+* Setting a custom names and stack sizes to our threads. The custom name will
+  help in debugging in the future, and the custom stack sizes lets us push the
+  memory usage even lower.
 
 #### 0.2.0
 Using unsafe to speed up decompression.
