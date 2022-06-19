@@ -19,6 +19,9 @@ use crate::Answer;
 pub mod comp_decomp;
 use comp_decomp::{BitPack, ReadiedPack};
 
+///The default thread stack size of 2MiB is way too overkill for our purposes
+const TSTACK_SIZE: usize = 1 << 18; //256KiB
+
 ///Note: since this entire struct will be going to a new thread, it has to own all of its values.
 ///This means even though, in the case of multiple outputs with different dimensions, they would
 ///all have the same path, filter, step and fps, we still need to store all those values multiple
@@ -203,14 +206,20 @@ impl Processor {
         let sender = self.frame_sender.clone();
         let (stopper, stop_recv) = mpsc::sync_channel(1);
         self.anim_stoppers.push(stopper);
-        thread::spawn(move || {
-            let (mut out, transition, gif) = request.split();
-            if transition.default(&new_img, &mut out, &sender, &stop_recv) {
-                if let Some(gif) = gif {
-                    animation(gif, new_img, out, sender, stop_recv);
+        if let Err(e) = thread::Builder::new()
+            .name("animator".to_string()) //Name our threads  for better log messages
+            .stack_size(TSTACK_SIZE) //the default of 2MB is way too overkill for this
+            .spawn(move || {
+                let (mut out, transition, gif) = request.split();
+                if transition.default(&new_img, &mut out, &sender, &stop_recv) {
+                    if let Some(gif) = gif {
+                        animation(gif, new_img, out, sender, stop_recv);
+                    }
                 }
-            }
-        });
+            })
+        {
+            log::error!("failed to spawn 'animator' thread: {}", e);
+        };
     }
 }
 
@@ -235,7 +244,18 @@ fn animation(
     let mut now = Instant::now();
     {
         let (fr_send, fr_recv) = mpsc::channel();
-        let handle = thread::spawn(move || gif.process(new_img, fr_send));
+        let handle = match thread::Builder::new()
+            .name("gif_processor".to_string()) //Name our threads  for better log messages
+            .stack_size(TSTACK_SIZE) //the default of 2MB is way too overkill for this
+            .spawn(move || gif.process(new_img, fr_send))
+        {
+            Ok(h) => h,
+            Err(e) => {
+                log::error!("failed to spawn 'gif_processor' thread: {}", e);
+                return;
+            }
+        };
+
         while let Ok((fr, dur)) = fr_recv.recv() {
             let frame = fr.ready(img_len);
             let timeout = dur.saturating_sub(now.elapsed());
