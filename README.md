@@ -11,6 +11,10 @@
 
 ## Build
 
+<a href="https://repology.org/project/river/versions">
+    <img src="https://repology.org/badge/vertical-allrepos/swww.svg" alt="Packaging status" align="right">
+</a>
+
 ### Dependencies:
 
   - Up to date stable rustc compiler and cargo
@@ -157,3 +161,6 @@ project. Making this program would not have been possible without it. In fact,
 the first versions of swww were quite literaly copy pasted from the [layer shell
 example in the client-toolkit
 ](https://github.com/Smithay/client-toolkit/blob/master/examples/layer_shell.rs).
+
+A big thank-you also to [HakierGrzonzo](https://github.com/HakierGrzonzo), for
+setting up the AUR package.
