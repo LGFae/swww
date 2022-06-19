@@ -20,9 +20,8 @@ use lzzzz::lz4f;
 
 lazy_static::lazy_static! {
     static ref COMPRESSION_PREFERENCES: lz4f::Preferences = lz4f::PreferencesBuilder::new()
-            .favor_dec_speed(lz4f::FavorDecSpeed::Enabled)
             .block_size(lz4f::BlockSize::Max256KB)
-            .compression_level(8)
+            .compression_level(9)
             .build();
 }
 
