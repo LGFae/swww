@@ -176,7 +176,6 @@ impl Processor {
 
     pub fn process(&mut self, requests: Vec<ProcessorRequest>) -> Answer {
         for request in requests {
-            self.stop_animations(&request.outputs);
             let img = match image::open(&request.path) {
                 Ok(i) => i.into_rgba8(),
                 Err(e) => {
@@ -186,6 +185,7 @@ impl Processor {
                     ))
                 }
             };
+            self.stop_animations(&request.outputs);
 
             let new_img = img_resize(img, request.dimensions, request.filter);
             self.transition(request, new_img);
