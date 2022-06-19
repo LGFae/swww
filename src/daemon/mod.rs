@@ -43,7 +43,7 @@ enum RenderEvent {
     Closed,
 }
 
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(PartialEq, Clone, Serialize, Deserialize)]
 enum BgImg {
     Color([u8; 3]),
     Img(PathBuf),
@@ -62,7 +62,7 @@ impl fmt::Display for BgImg {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct BgInfo {
     name: String,
     dim: (u32, u32),
