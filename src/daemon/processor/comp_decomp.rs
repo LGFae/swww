@@ -15,7 +15,7 @@
 //! * Start from the top until we are done with the image
 //!
 
-use itertools::Itertools;
+use super::utils;
 use lzzzz::lz4f;
 
 lazy_static::lazy_static! {
@@ -28,15 +28,10 @@ lazy_static::lazy_static! {
 fn pack_bytes(prev: &[u8], cur: &[u8]) -> Box<[u8]> {
     let mut v = Vec::with_capacity((prev.len() * 5) / 8);
 
-    let prev_chunks = bytemuck::cast_slice::<u8, [u8; 4]>(prev);
-    let cur_chunks = bytemuck::cast_slice::<u8, [u8; 4]>(cur);
-    let mut iter = prev_chunks.iter().zip_eq(cur_chunks);
-
-    let mut equals: usize;
-    let mut diffs: usize;
+    let mut iter = utils::zip_eq(utils::pixels(prev), utils::pixels(cur));
     let mut to_add = Vec::with_capacity(333); // 100 pixels
     while let Some((mut prev, mut cur)) = iter.next() {
-        equals = 0;
+        let mut equals = 0;
         while prev == cur {
             equals += 1;
             match iter.next() {
@@ -48,7 +43,7 @@ fn pack_bytes(prev: &[u8], cur: &[u8]) -> Box<[u8]> {
             }
         }
 
-        diffs = 0;
+        let mut diffs = 0;
         while prev != cur {
             to_add.extend_from_slice(&cur[0..3]);
             diffs += 1;
@@ -69,8 +64,54 @@ fn pack_bytes(prev: &[u8], cur: &[u8]) -> Box<[u8]> {
     v.into_boxed_slice()
 }
 
+fn pack_bytes_with<F>(cur: &mut [u8], goal: &[u8], mut f: F) -> Box<[u8]>
+where
+    F: FnMut(&mut u8, &u8, usize),
+{
+    let mut v = Vec::with_capacity((goal.len() * 5) / 8);
+
+    let mut iter = utils::zip_eq(utils::pixels_mut(cur), utils::pixels(goal)).enumerate();
+    let mut to_add = Vec::with_capacity(333); // 100 pixels
+    while let Some((mut i, (mut cur, mut goal))) = iter.next() {
+        let mut equals = 0;
+        while cur == goal {
+            equals += 1;
+            match iter.next() {
+                None => return v.into_boxed_slice(),
+                Some((_, (c, g))) => {
+                    cur = c;
+                    goal = g;
+                }
+            }
+        }
+
+        let mut diffs = 0;
+        while cur != goal {
+            for (c, g) in utils::zip_eq(cur.iter_mut(), goal) {
+                f(c, g, i);
+            }
+            to_add.extend_from_slice(&cur[0..3]);
+            diffs += 1;
+            match iter.next() {
+                None => break,
+                Some((j, (c, g))) => {
+                    i = j;
+                    cur = c;
+                    goal = g;
+                }
+            }
+        }
+        let j = v.len() + equals / 255;
+        v.resize(1 + v.len() + equals / 255 + diffs / 255, 255);
+        v[j] = (equals % 255) as u8;
+        v.push((diffs % 255) as u8);
+        v.append(&mut to_add);
+    }
+    v.into_boxed_slice()
+}
+
 fn unpack_bytes(buf: &mut [u8], diff: &[u8]) {
-    let buf_chunks = bytemuck::cast_slice_mut::<u8, [u8; 4]>(buf);
+    let buf_chunks = utils::pixels_mut(buf);
     let mut diff_idx = 0;
     let mut pix_idx = 0;
     let mut to_cpy = 0;
@@ -143,12 +184,19 @@ pub struct ReadiedPack {
 impl ReadiedPack {
     /// This should only be used in the transitions. For caching the animation frames, use the
     /// Bitpack struct
-    pub fn new(prev: &[u8], cur: &[u8]) -> Self {
-        let bit_pack = pack_bytes(prev, cur);
+    pub fn new<F>(cur: &mut [u8], goal: &[u8], f: F) -> Self
+    where
+        F: FnMut(&mut u8, &u8, usize),
+    {
+        let bit_pack = pack_bytes_with(cur, goal, f);
         ReadiedPack {
             inner: bit_pack,
             expected_buf_size: cur.len(),
         }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
     }
 
     pub fn unpack(&self, buf: &mut [u8]) {
