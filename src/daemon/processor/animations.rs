@@ -72,8 +72,8 @@ impl GifProcessor {
         }
     }
     pub fn process(self, first_frame: Box<[u8]>, fr_sender: mpsc::Sender<(BitPack, Duration)>) {
-        let gif_reader = image::io::Reader::open(self.gif).unwrap();
-        let mut frames = GifDecoder::new(gif_reader.into_inner())
+        let gif_reader = image::io::Reader::open(self.gif).unwrap().into_inner();
+        let mut frames = GifDecoder::new(gif_reader)
             .expect("Couldn't decode gif, though this should be impossible...")
             .into_frames();
         //The first frame should always exist
@@ -86,10 +86,8 @@ impl GifProcessor {
             let duration = Duration::from_millis((dur_num / dur_div).into());
             let img = img_resize(frame.into_buffer(), self.dimensions, self.filter);
 
-            if fr_sender
-                .send((BitPack::pack(&canvas, &img), duration))
-                .is_err()
-            {
+            let pack = BitPack::pack(&canvas, &img);
+            if fr_sender.send((pack, duration)).is_err() {
                 return;
             };
             canvas = img;
