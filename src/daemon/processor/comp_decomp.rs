@@ -184,6 +184,14 @@ pub struct ReadiedPack {
 impl ReadiedPack {
     /// This should only be used in the transitions. For caching the animation frames, use the
     /// Bitpack struct
+    ///
+    /// The `f` runs at every different pixel found, iterating through the three colors BGR. Its
+    /// parameters are:
+    ///
+    /// * First -> old img byte, that has to change to the new one according to the transition logic
+    /// * Second -> new img byte. This stays constant
+    /// * Third -> the pixel's position in the image. This can be used to make more complex
+    ///   transition logic
     pub fn new<F>(cur: &mut [u8], goal: &[u8], f: F) -> Self
     where
         F: FnMut(&mut u8, &u8, usize),
