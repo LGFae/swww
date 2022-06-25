@@ -17,14 +17,20 @@ use super::{
 
 pub struct Transition {
     old_img: Box<[u8]>,
+    dimensions: (u32, u32),
     step: u8,
     fps: Duration,
 }
 
 /// All transitions return whether or not they completed
 impl Transition {
-    pub fn new(old_img: Box<[u8]>, step: u8, fps: Duration) -> Self {
-        Transition { old_img, step, fps }
+    pub fn new(old_img: Box<[u8]>, dimensions: (u32, u32), step: u8, fps: Duration) -> Self {
+        Transition {
+            old_img,
+            dimensions,
+            step,
+            fps,
+        }
     }
     pub fn default(
         &mut self,
@@ -57,6 +63,45 @@ impl Transition {
                 return false;
             };
             now = Instant::now();
+        }
+    }
+
+    pub fn left(
+        &mut self,
+        new_img: &[u8],
+        outputs: &mut Vec<String>,
+        sender: &SyncSender<(Vec<String>, ReadiedPack)>,
+        stop_recv: &mpsc::Receiver<Vec<String>>,
+    ) -> bool {
+        let width = self.dimensions.0;
+        let mut current_column = 0;
+        let mut now = Instant::now();
+        loop {
+            let transition_img =
+                ReadiedPack::new(&mut self.old_img, new_img, |old_col, new_col, i| {
+                    if i % (width as usize) <= current_column {
+                        let step =
+                            self.step + ((current_column - (i % (width as usize))) / 10) as u8;
+                        if old_col.abs_diff(*new_col) < step {
+                            *old_col = *new_col;
+                        } else if *old_col > *new_col {
+                            *old_col -= step;
+                        } else {
+                            *old_col += step;
+                        }
+                    }
+                });
+            if transition_img.is_empty() {
+                debug!("Transition has finished.");
+                return true;
+            };
+            let timeout = self.fps.saturating_sub(now.elapsed());
+            if send_frame(transition_img, outputs, timeout, sender, stop_recv) {
+                debug!("Transition was interrupted!");
+                return false;
+            };
+            now = Instant::now();
+            current_column += 10;
         }
     }
 }
@@ -131,7 +176,7 @@ mod tests {
     }
 
     fn test_transition(old_img: Box<[u8]>) -> Transition {
-        Transition::new(old_img, 1, Duration::from_nanos(1))
+        Transition::new(old_img, (100, 10), 1, Duration::from_nanos(1))
     }
 
     fn dummy_outputs() -> Vec<String> {
@@ -144,7 +189,18 @@ mod tests {
         let mut t = test_transition(old_img);
         let ((fr_send, _fr_recv), (_stop_send, stop_recv)) = make_senders_and_receivers();
 
-        t.default(&new_img, &mut dummy_outputs(), &fr_send, &stop_recv);
+        assert!(t.default(&new_img, &mut dummy_outputs(), &fr_send, &stop_recv));
+
+        assert_eq!(t.old_img, new_img);
+    }
+
+    #[test]
+    fn left_transition_should_end_with_equal_vectors() {
+        let (old_img, new_img) = make_test_boxes();
+        let mut t = test_transition(old_img);
+        let ((fr_send, _fr_recv), (_stop_send, stop_recv)) = make_senders_and_receivers();
+
+        assert!(t.left(&new_img, &mut dummy_outputs(), &fr_send, &stop_recv));
 
         assert_eq!(t.old_img, new_img);
     }

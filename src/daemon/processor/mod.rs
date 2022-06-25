@@ -38,7 +38,7 @@ pub struct ProcessorRequest {
 
 impl ProcessorRequest {
     fn split(self) -> (Vec<String>, Transition, Option<GifProcessor>) {
-        let transition = Transition::new(self.old_img, self.step, self.fps);
+        let transition = Transition::new(self.old_img, self.dimensions, self.step, self.fps);
         let img = image::io::Reader::open(&self.path);
         let animation = {
             if let Ok(img) = img {
@@ -106,7 +106,7 @@ impl Processor {
             .stack_size(TSTACK_SIZE) //the default of 2MB is way too overkill for this
             .spawn(move || {
                 let (mut out, mut transition, gif) = request.split();
-                if transition.default(&new_img, &mut out, &sender, &stop_recv) {
+                if transition.left(&new_img, &mut out, &sender, &stop_recv) {
                     drop(transition);
                     if let Some(gif) = gif {
                         animation(gif, new_img, out, sender, stop_recv);
