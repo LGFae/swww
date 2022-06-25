@@ -14,7 +14,6 @@ use crate::Answer;
 
 mod animations;
 pub mod comp_decomp;
-pub mod utils;
 
 use animations::{GifProcessor, Transition};
 use comp_decomp::ReadiedPack;

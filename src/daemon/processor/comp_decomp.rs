@@ -15,7 +15,6 @@
 //! * Start from the top until we are done with the image
 //!
 
-use super::utils;
 use lzzzz::lz4f;
 
 lazy_static::lazy_static! {
@@ -25,13 +24,17 @@ lazy_static::lazy_static! {
             .build();
 }
 
+/// This calculates the difference between the current(cur) frame and the next(goal).
+/// The closure you pass is run at every difference. It dictates the update logic of the current
+/// frame. With that, you can control whether all different pixels changed are updated, or only the
+/// ones at a certain position. It is meant to be used primarily when writting transitions
 fn pack_bytes<F>(cur: &mut [u8], goal: &[u8], mut f: F) -> Box<[u8]>
 where
     F: FnMut(&mut u8, &u8, usize),
 {
     let mut v = Vec::with_capacity((goal.len() * 5) / 8);
 
-    let mut iter = utils::zip_eq(utils::pixels_mut(cur), utils::pixels(goal)).enumerate();
+    let mut iter = zip_eq(pixels_mut(cur), pixels(goal)).enumerate();
     let mut to_add = Vec::with_capacity(333); // 100 pixels
     while let Some((mut i, (mut cur, mut goal))) = iter.next() {
         let mut equals = 0;
@@ -48,7 +51,7 @@ where
 
         let mut diffs = 0;
         while cur != goal {
-            for (c, g) in utils::zip_eq(cur.as_mut_slice(), goal) {
+            for (c, g) in zip_eq(cur.as_mut_slice(), goal) {
                 f(c, g, i);
             }
             to_add.extend_from_slice(&cur[0..3]);
@@ -72,7 +75,7 @@ where
 }
 
 fn unpack_bytes(buf: &mut [u8], diff: &[u8]) {
-    let buf_chunks = utils::pixels_mut(buf);
+    let buf_chunks = pixels_mut(buf);
     let mut diff_idx = 0;
     let mut pix_idx = 0;
     let mut to_cpy = 0;
@@ -113,7 +116,8 @@ pub struct BitPack {
 
 impl BitPack {
     /// Compresses a frame of animation by getting the difference between the previous and the
-    /// current frame
+    /// current frame.
+    /// IMPORTANT: this will change `prev` into `cur`, that's why it needs to be 'mut'
     pub fn pack(prev: &mut [u8], cur: &[u8]) -> Self {
         let bit_pack = pack_bytes(prev, cur, |old, new, _| *old = *new);
         let mut v = Vec::with_capacity(bit_pack.len() / 2);
@@ -173,6 +177,56 @@ impl ReadiedPack {
             unpack_bytes(buf, &self.inner);
         }
     }
+}
+
+// Utility functions. Largely copied from the Itertools and Bytemuck crates
+
+/// An iterator which iterates two other iterators simultaneously
+/// Copy pasted from the Iterator crate, and adapted for our purposes
+#[must_use = "iterator adaptors are lazy and do nothing unless consumed"]
+struct ZipEq<'a, I> {
+    a: std::slice::IterMut<'a, I>,
+    b: std::slice::Iter<'a, I>,
+}
+
+fn zip_eq<'a, I>(i: &'a mut [I], j: &'a [I]) -> ZipEq<'a, I> {
+    if i.len() != j.len() {
+        unreachable!("Iterators of zip_eq have different sizes!!");
+    }
+    ZipEq {
+        a: i.iter_mut(),
+        b: j.iter(),
+    }
+}
+
+impl<'a, I> Iterator for ZipEq<'a, I> {
+    type Item = (&'a mut I, &'a I);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match (self.a.next(), self.b.next()) {
+            (None, None) => None,
+            (Some(a), Some(b)) => Some((a, b)),
+            _ => unsafe { std::hint::unreachable_unchecked() },
+        }
+    }
+}
+
+// The functions bellow were copy pasted and adapted from the bytemuck crate:
+
+#[inline]
+fn pixels(img: &[u8]) -> &[[u8; 4]] {
+    if img.len() % 4 != 0 {
+        unreachable!("Calling pixels with a wrongly formated image");
+    }
+    unsafe { core::slice::from_raw_parts(img.as_ptr() as *const [u8; 4], img.len() / 4) }
+}
+
+#[inline]
+fn pixels_mut(img: &mut [u8]) -> &mut [[u8; 4]] {
+    if img.len() % 4 != 0 {
+        unreachable!("Calling pixels_mut with a wrongly formated image");
+    }
+    unsafe { core::slice::from_raw_parts_mut(img.as_ptr() as *mut [u8; 4], img.len() / 4) }
 }
 
 #[cfg(test)]
