@@ -15,7 +15,6 @@
 //! * Start from the top until we are done with the image
 //!
 
-use itertools::Itertools;
 use lzzzz::lz4f;
 
 lazy_static::lazy_static! {
@@ -25,44 +24,50 @@ lazy_static::lazy_static! {
             .build();
 }
 
-fn pack_bytes(prev: &[u8], cur: &[u8]) -> Box<[u8]> {
-    let mut v = Vec::with_capacity((prev.len() * 5) / 8);
+/// This calculates the difference between the current(cur) frame and the next(goal).
+/// The closure you pass is run at every difference. It dictates the update logic of the current
+/// frame. With that, you can control whether all different pixels changed are updated, or only the
+/// ones at a certain position. It is meant to be used primarily when writting transitions
+fn pack_bytes<F>(cur: &mut [u8], goal: &[u8], mut f: F) -> Box<[u8]>
+where
+    F: FnMut(&mut u8, &u8, usize),
+{
+    let mut v = Vec::with_capacity((goal.len() * 5) / 8);
 
-    let prev_chunks = bytemuck::cast_slice::<u8, [u8; 4]>(prev);
-    let cur_chunks = bytemuck::cast_slice::<u8, [u8; 4]>(cur);
-    let mut iter = prev_chunks.iter().zip_eq(cur_chunks);
-
-    let mut equals: usize;
-    let mut diffs: usize;
+    let mut iter = zip_eq(pixels_mut(cur), pixels(goal)).enumerate();
     let mut to_add = Vec::with_capacity(333); // 100 pixels
-    while let Some((mut prev, mut cur)) = iter.next() {
-        equals = 0;
-        while prev == cur {
+    while let Some((mut i, (mut cur, mut goal))) = iter.next() {
+        let mut equals = 0;
+        while cur == goal {
             equals += 1;
             match iter.next() {
                 None => return v.into_boxed_slice(),
-                Some((p, c)) => {
-                    prev = p;
+                Some((_, (c, g))) => {
                     cur = c;
+                    goal = g;
                 }
             }
         }
 
-        diffs = 0;
-        while prev != cur {
+        let mut diffs = 0;
+        while cur != goal {
+            for (c, g) in zip_eq(cur.as_mut_slice(), goal) {
+                f(c, g, i);
+            }
             to_add.extend_from_slice(&cur[0..3]);
             diffs += 1;
             match iter.next() {
                 None => break,
-                Some((p, c)) => {
-                    prev = p;
+                Some((j, (c, g))) => {
+                    i = j;
                     cur = c;
+                    goal = g;
                 }
             }
         }
-        let i = v.len() + equals / 255;
+        let j = v.len() + equals / 255;
         v.resize(1 + v.len() + equals / 255 + diffs / 255, 255);
-        v[i] = (equals % 255) as u8;
+        v[j] = (equals % 255) as u8;
         v.push((diffs % 255) as u8);
         v.append(&mut to_add);
     }
@@ -70,7 +75,7 @@ fn pack_bytes(prev: &[u8], cur: &[u8]) -> Box<[u8]> {
 }
 
 fn unpack_bytes(buf: &mut [u8], diff: &[u8]) {
-    let buf_chunks = bytemuck::cast_slice_mut::<u8, [u8; 4]>(buf);
+    let buf_chunks = pixels_mut(buf);
     let mut diff_idx = 0;
     let mut pix_idx = 0;
     let mut to_cpy = 0;
@@ -111,9 +116,10 @@ pub struct BitPack {
 
 impl BitPack {
     /// Compresses a frame of animation by getting the difference between the previous and the
-    /// current frame
-    pub fn pack(prev: &[u8], cur: &[u8]) -> Self {
-        let bit_pack = pack_bytes(prev, cur);
+    /// current frame.
+    /// IMPORTANT: this will change `prev` into `cur`, that's why it needs to be 'mut'
+    pub fn pack(prev: &mut [u8], cur: &[u8]) -> Self {
+        let bit_pack = pack_bytes(prev, cur, |old, new, _| *old = *new);
         let mut v = Vec::with_capacity(bit_pack.len() / 2);
         lzzzz::lz4f::compress_to_vec(&bit_pack, &mut v, &COMPRESSION_PREFERENCES).unwrap();
         BitPack {
@@ -143,12 +149,27 @@ pub struct ReadiedPack {
 impl ReadiedPack {
     /// This should only be used in the transitions. For caching the animation frames, use the
     /// Bitpack struct
-    pub fn new(prev: &[u8], cur: &[u8]) -> Self {
-        let bit_pack = pack_bytes(prev, cur);
+    ///
+    /// The `f` runs at every different pixel found, iterating through the three colors BGR. Its
+    /// parameters are:
+    ///
+    /// * First -> old img byte, that has to change to the new one according to the transition logic
+    /// * Second -> new img byte. This stays constant
+    /// * Third -> the pixel's position in the image. This can be used to make more complex
+    ///   transition logic
+    pub fn new<F>(cur: &mut [u8], goal: &[u8], f: F) -> Self
+    where
+        F: FnMut(&mut u8, &u8, usize),
+    {
+        let bit_pack = pack_bytes(cur, goal, f);
         ReadiedPack {
             inner: bit_pack,
             expected_buf_size: cur.len(),
         }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
     }
 
     pub fn unpack(&self, buf: &mut [u8]) {
@@ -156,6 +177,56 @@ impl ReadiedPack {
             unpack_bytes(buf, &self.inner);
         }
     }
+}
+
+// Utility functions. Largely copied from the Itertools and Bytemuck crates
+
+/// An iterator which iterates two other iterators simultaneously
+/// Copy pasted from the Iterator crate, and adapted for our purposes
+#[must_use = "iterator adaptors are lazy and do nothing unless consumed"]
+struct ZipEq<'a, I> {
+    a: std::slice::IterMut<'a, I>,
+    b: std::slice::Iter<'a, I>,
+}
+
+fn zip_eq<'a, I>(i: &'a mut [I], j: &'a [I]) -> ZipEq<'a, I> {
+    if i.len() != j.len() {
+        unreachable!("Iterators of zip_eq have different sizes!!");
+    }
+    ZipEq {
+        a: i.iter_mut(),
+        b: j.iter(),
+    }
+}
+
+impl<'a, I> Iterator for ZipEq<'a, I> {
+    type Item = (&'a mut I, &'a I);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match (self.a.next(), self.b.next()) {
+            (None, None) => None,
+            (Some(a), Some(b)) => Some((a, b)),
+            _ => unsafe { std::hint::unreachable_unchecked() },
+        }
+    }
+}
+
+// The functions bellow were copy pasted and adapted from the bytemuck crate:
+
+#[inline]
+fn pixels(img: &[u8]) -> &[[u8; 4]] {
+    if img.len() % 4 != 0 {
+        unreachable!("Calling pixels with a wrongly formated image");
+    }
+    unsafe { core::slice::from_raw_parts(img.as_ptr() as *const [u8; 4], img.len() / 4) }
+}
+
+#[inline]
+fn pixels_mut(img: &mut [u8]) -> &mut [[u8; 4]] {
+    if img.len() % 4 != 0 {
+        unreachable!("Calling pixels_mut with a wrongly formated image");
+    }
+    unsafe { core::slice::from_raw_parts_mut(img.as_ptr() as *mut [u8; 4], img.len() / 4) }
 }
 
 #[cfg(test)]
@@ -168,7 +239,7 @@ mod tests {
     fn should_compress_and_decompress_to_same_info_small() {
         let frame1 = [1, 2, 3, 4, 5, 6, 7, 8];
         let frame2 = [1, 2, 3, 4, 8, 7, 6, 5];
-        let compressed = BitPack::pack(&frame1, &frame2);
+        let compressed = BitPack::pack(&mut frame1.clone(), &frame2);
 
         let mut buf = frame1;
         let readied = compressed.ready(8);
@@ -199,9 +270,12 @@ mod tests {
             }
 
             let mut compressed = Vec::with_capacity(20);
-            compressed.push(BitPack::pack(original.last().unwrap(), &original[0]));
+            compressed.push(BitPack::pack(
+                &mut original.last().unwrap().clone(),
+                &original[0],
+            ));
             for i in 1..20 {
-                compressed.push(BitPack::pack(&original[i - 1], &original[i]));
+                compressed.push(BitPack::pack(&mut original[i - 1].clone(), &original[i]));
             }
 
             let mut buf = original.last().unwrap().clone();
@@ -235,9 +309,12 @@ mod tests {
             }
 
             let mut compressed = Vec::with_capacity(20);
-            compressed.push(BitPack::pack(original.last().unwrap(), &original[0]));
+            compressed.push(BitPack::pack(
+                &mut original.last().unwrap().clone(),
+                &original[0],
+            ));
             for i in 1..20 {
-                compressed.push(BitPack::pack(&original[i - 1], &original[i]));
+                compressed.push(BitPack::pack(&mut original[i - 1].clone(), &original[i]));
             }
 
             let mut buf = original.last().unwrap().clone();

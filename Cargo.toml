@@ -28,8 +28,6 @@ hex = "0.4"
 lzzzz = "1.0"
 serde = { version = "1.0", features = [ "derive" ] }
 bincode = "1.3"
-bytemuck = "1.9"
-itertools = {version = "0.10", default-features = false}
 lazy_static = "1.4"
 
 [dev-dependencies]

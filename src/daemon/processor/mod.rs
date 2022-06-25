@@ -1,9 +1,4 @@
-use itertools::Itertools;
-
-use image::{
-    self, codecs::gif::GifDecoder, imageops::FilterType, AnimationDecoder, DynamicImage,
-    ImageFormat,
-};
+use image::{self, imageops::FilterType, DynamicImage, ImageFormat};
 use log::debug;
 
 use smithay_client_toolkit::reexports::calloop::channel::SyncSender;
@@ -16,8 +11,12 @@ use std::{
 };
 
 use crate::Answer;
+
+mod animations;
 pub mod comp_decomp;
-use comp_decomp::{BitPack, ReadiedPack};
+
+use animations::{GifProcessor, Transition};
+use comp_decomp::ReadiedPack;
 
 ///The default thread stack size of 2MiB is way too overkill for our purposes
 const TSTACK_SIZE: usize = 1 << 18; //256KiB
@@ -38,20 +37,12 @@ pub struct ProcessorRequest {
 
 impl ProcessorRequest {
     fn split(self) -> (Vec<String>, Transition, Option<GifProcessor>) {
-        let transition = Transition {
-            old_img: self.old_img,
-            step: self.step,
-            fps: self.fps,
-        };
+        let transition = Transition::new(self.old_img, self.step, self.fps);
         let img = image::io::Reader::open(&self.path);
         let animation = {
             if let Ok(img) = img {
                 if img.format() == Some(ImageFormat::Gif) {
-                    Some(GifProcessor {
-                        gif: self.path,
-                        dimensions: self.dimensions,
-                        filter: self.filter,
-                    })
+                    Some(GifProcessor::new(self.path, self.dimensions, self.filter))
                 } else {
                     None
                 }
@@ -60,107 +51,6 @@ impl ProcessorRequest {
             }
         };
         (self.outputs, transition, animation)
-    }
-}
-
-struct Transition {
-    old_img: Box<[u8]>,
-    step: u8,
-    fps: Duration,
-}
-
-/// All transitions return whether or not they completed
-impl Transition {
-    fn default(
-        mut self,
-        new_img: &[u8],
-        outputs: &mut Vec<String>,
-        sender: &SyncSender<(Vec<String>, ReadiedPack)>,
-        stop_recv: &mpsc::Receiver<Vec<String>>,
-    ) -> bool {
-        let mut now = Instant::now();
-        let mut transition: Vec<u8> = vec![255; new_img.len()];
-        let mut done;
-        loop {
-            done = true;
-            let trans_chunks = bytemuck::cast_slice_mut::<u8, [u8; 4]>(&mut transition);
-            let old_chunks = bytemuck::cast_slice::<u8, [u8; 4]>(&self.old_img);
-            let new_chunks = bytemuck::cast_slice::<u8, [u8; 4]>(new_img);
-
-            let outer_for = trans_chunks
-                .iter_mut()
-                .zip_eq(old_chunks.iter().zip_eq(new_chunks));
-            for (trans_pix, (old_pix, new_pix)) in outer_for {
-                let inner_for = trans_pix
-                    .iter_mut()
-                    .zip_eq(old_pix.iter().zip_eq(new_pix.iter()))
-                    .take(3);
-                for (trans_col, (old_col, new_col)) in inner_for {
-                    let distance = if old_col > new_col {
-                        old_col - new_col
-                    } else {
-                        new_col - old_col
-                    };
-                    if distance < self.step {
-                        *trans_col = *new_col;
-                    } else if old_col > new_col {
-                        done = false;
-                        *trans_col = *old_col - self.step;
-                    } else {
-                        done = false;
-                        *trans_col = *old_col + self.step;
-                    }
-                }
-            }
-
-            let compressed_img = ReadiedPack::new(&self.old_img, &transition);
-            let timeout = self.fps.saturating_sub(now.elapsed());
-            if send_frame(compressed_img, outputs, timeout, sender, stop_recv) {
-                debug!("Transition was interrupted!");
-                return false;
-            };
-            now = Instant::now();
-            if done {
-                debug!("Transition has finished.");
-                return true;
-            }
-            self.old_img.clone_from_slice(&transition);
-        }
-    }
-}
-
-struct GifProcessor {
-    gif: PathBuf,
-    dimensions: (u32, u32),
-    filter: FilterType,
-}
-
-impl GifProcessor {
-    fn process(self, first_frame: Box<[u8]>, fr_sender: mpsc::Sender<(BitPack, Duration)>) {
-        let gif_reader = image::io::Reader::open(self.gif).unwrap();
-        let mut frames = GifDecoder::new(gif_reader.into_inner())
-            .expect("Couldn't decode gif, though this should be impossible...")
-            .into_frames();
-        //The first frame should always exist
-        let dur_first_frame = frames.next().unwrap().unwrap().delay().numer_denom_ms();
-        let dur_first_frame = Duration::from_millis((dur_first_frame.0 / dur_first_frame.1).into());
-
-        let mut canvas = first_frame.clone();
-        while let Some(Ok(frame)) = frames.next() {
-            let (dur_num, dur_div) = frame.delay().numer_denom_ms();
-            let duration = Duration::from_millis((dur_num / dur_div).into());
-            let img = img_resize(frame.into_buffer(), self.dimensions, self.filter);
-
-            if fr_sender
-                .send((BitPack::pack(&canvas, &img), duration))
-                .is_err()
-            {
-                return;
-            };
-            canvas = img;
-        }
-        //Add the first frame we got earlier:
-        let _ = fr_sender.send((BitPack::pack(&canvas, &first_frame), dur_first_frame));
     }
 }
 
@@ -210,8 +100,9 @@ impl Processor {
             .name("animator".to_string()) //Name our threads  for better log messages
             .stack_size(TSTACK_SIZE) //the default of 2MB is way too overkill for this
             .spawn(move || {
-                let (mut out, transition, gif) = request.split();
+                let (mut out, mut transition, gif) = request.split();
                 if transition.default(&new_img, &mut out, &sender, &stop_recv) {
+                    drop(transition);
                     if let Some(gif) = gif {
                         animation(gif, new_img, out, sender, stop_recv);
                     }
