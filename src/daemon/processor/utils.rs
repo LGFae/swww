@@ -1,34 +1,29 @@
 /// An iterator which iterates two other iterators simultaneously
 /// Copy pasted from the Iterator crate, and adapted for our purposes
 #[must_use = "iterator adaptors are lazy and do nothing unless consumed"]
-pub struct ZipEq<I, J> {
-    a: I,
-    b: J,
+pub struct ZipEq<'a, I> {
+    a: std::slice::IterMut<'a, I>,
+    b: std::slice::Iter<'a, I>,
 }
 
-pub fn zip_eq<I, J>(i: I, j: J) -> ZipEq<I::IntoIter, J::IntoIter>
-where
-    I: IntoIterator,
-    J: IntoIterator,
-{
+pub fn zip_eq<'a, I>(i: &'a mut [I], j: &'a [I]) -> ZipEq<'a, I> {
+    if i.len() != j.len() {
+        unreachable!("Iterators of zip_eq have different sizes!!");
+    }
     ZipEq {
-        a: i.into_iter(),
-        b: j.into_iter(),
+        a: i.iter_mut(),
+        b: j.iter(),
     }
 }
 
-impl<I, J> Iterator for ZipEq<I, J>
-where
-    I: Iterator,
-    J: Iterator,
-{
-    type Item = (I::Item, J::Item);
+impl<'a, I> Iterator for ZipEq<'a, I> {
+    type Item = (&'a mut I, &'a I);
 
     fn next(&mut self) -> Option<Self::Item> {
         match (self.a.next(), self.b.next()) {
             (None, None) => None,
             (Some(a), Some(b)) => Some((a, b)),
-            _ => unreachable!("Iterators of zip_eq have different sizes!!"),
+            _ => unsafe { std::hint::unreachable_unchecked() },
         }
     }
 }

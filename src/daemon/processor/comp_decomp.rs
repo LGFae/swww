@@ -25,46 +25,7 @@ lazy_static::lazy_static! {
             .build();
 }
 
-fn pack_bytes(prev: &[u8], cur: &[u8]) -> Box<[u8]> {
-    let mut v = Vec::with_capacity((prev.len() * 5) / 8);
-
-    let mut iter = utils::zip_eq(utils::pixels(prev), utils::pixels(cur));
-    let mut to_add = Vec::with_capacity(333); // 100 pixels
-    while let Some((mut prev, mut cur)) = iter.next() {
-        let mut equals = 0;
-        while prev == cur {
-            equals += 1;
-            match iter.next() {
-                None => return v.into_boxed_slice(),
-                Some((p, c)) => {
-                    prev = p;
-                    cur = c;
-                }
-            }
-        }
-
-        let mut diffs = 0;
-        while prev != cur {
-            to_add.extend_from_slice(&cur[0..3]);
-            diffs += 1;
-            match iter.next() {
-                None => break,
-                Some((p, c)) => {
-                    prev = p;
-                    cur = c;
-                }
-            }
-        }
-        let i = v.len() + equals / 255;
-        v.resize(1 + v.len() + equals / 255 + diffs / 255, 255);
-        v[i] = (equals % 255) as u8;
-        v.push((diffs % 255) as u8);
-        v.append(&mut to_add);
-    }
-    v.into_boxed_slice()
-}
-
-fn pack_bytes_with<F>(cur: &mut [u8], goal: &[u8], mut f: F) -> Box<[u8]>
+fn pack_bytes<F>(cur: &mut [u8], goal: &[u8], mut f: F) -> Box<[u8]>
 where
     F: FnMut(&mut u8, &u8, usize),
 {
@@ -87,7 +48,7 @@ where
 
         let mut diffs = 0;
         while cur != goal {
-            for (c, g) in utils::zip_eq(cur.iter_mut(), goal) {
+            for (c, g) in utils::zip_eq(cur.as_mut_slice(), goal) {
                 f(c, g, i);
             }
             to_add.extend_from_slice(&cur[0..3]);
@@ -153,8 +114,8 @@ pub struct BitPack {
 impl BitPack {
     /// Compresses a frame of animation by getting the difference between the previous and the
     /// current frame
-    pub fn pack(prev: &[u8], cur: &[u8]) -> Self {
-        let bit_pack = pack_bytes(prev, cur);
+    pub fn pack(prev: &mut [u8], cur: &[u8]) -> Self {
+        let bit_pack = pack_bytes(prev, cur, |old, new, _| *old = *new);
         let mut v = Vec::with_capacity(bit_pack.len() / 2);
         lzzzz::lz4f::compress_to_vec(&bit_pack, &mut v, &COMPRESSION_PREFERENCES).unwrap();
         BitPack {
@@ -196,7 +157,7 @@ impl ReadiedPack {
     where
         F: FnMut(&mut u8, &u8, usize),
     {
-        let bit_pack = pack_bytes_with(cur, goal, f);
+        let bit_pack = pack_bytes(cur, goal, f);
         ReadiedPack {
             inner: bit_pack,
             expected_buf_size: cur.len(),
@@ -224,7 +185,7 @@ mod tests {
     fn should_compress_and_decompress_to_same_info_small() {
         let frame1 = [1, 2, 3, 4, 5, 6, 7, 8];
         let frame2 = [1, 2, 3, 4, 8, 7, 6, 5];
-        let compressed = BitPack::pack(&frame1, &frame2);
+        let compressed = BitPack::pack(&mut frame1.clone(), &frame2);
 
         let mut buf = frame1;
         let readied = compressed.ready(8);
@@ -255,9 +216,12 @@ mod tests {
             }
 
             let mut compressed = Vec::with_capacity(20);
-            compressed.push(BitPack::pack(original.last().unwrap(), &original[0]));
+            compressed.push(BitPack::pack(
+                &mut original.last().unwrap().clone(),
+                &original[0],
+            ));
             for i in 1..20 {
-                compressed.push(BitPack::pack(&original[i - 1], &original[i]));
+                compressed.push(BitPack::pack(&mut original[i - 1].clone(), &original[i]));
             }
 
             let mut buf = original.last().unwrap().clone();
@@ -291,9 +255,12 @@ mod tests {
             }
 
             let mut compressed = Vec::with_capacity(20);
-            compressed.push(BitPack::pack(original.last().unwrap(), &original[0]));
+            compressed.push(BitPack::pack(
+                &mut original.last().unwrap().clone(),
+                &original[0],
+            ));
             for i in 1..20 {
-                compressed.push(BitPack::pack(&original[i - 1], &original[i]));
+                compressed.push(BitPack::pack(&mut original[i - 1].clone(), &original[i]));
             }
 
             let mut buf = original.last().unwrap().clone();

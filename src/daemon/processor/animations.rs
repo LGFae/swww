@@ -86,14 +86,13 @@ impl GifProcessor {
             let duration = Duration::from_millis((dur_num / dur_div).into());
             let img = img_resize(frame.into_buffer(), self.dimensions, self.filter);
 
-            let pack = BitPack::pack(&canvas, &img);
+            let pack = BitPack::pack(&mut canvas, &img);
             if fr_sender.send((pack, duration)).is_err() {
                 return;
             };
-            canvas = img;
         }
         //Add the first frame we got earlier:
-        let _ = fr_sender.send((BitPack::pack(&canvas, &first_frame), dur_first_frame));
+        let _ = fr_sender.send((BitPack::pack(&mut canvas, &first_frame), dur_first_frame));
     }
 }
 
