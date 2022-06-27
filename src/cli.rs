@@ -1,10 +1,41 @@
 //Note: this file only has basic declarations and some definitions in order to be possible to
 //import it in the build script, to automate shell completion
-use hex::{self, FromHex};
+use clap::Parser;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-use clap::Parser;
+fn from_hex(hex: &str) -> Result<[u8; 3], String> {
+    let chars = hex
+        .chars()
+        .filter(|&c| c.is_ascii_alphanumeric())
+        .map(|c| c.to_ascii_uppercase() as u8);
+
+    if chars.clone().count() != 6 {
+        return Err(format!(
+            "expected 6 characters, found {}",
+            chars.clone().count()
+        ));
+    }
+
+    let mut color = [0, 0, 0];
+
+    for (i, c) in chars.enumerate() {
+        match c {
+            b'A'..=b'F' => color[i / 2] += c - b'A' + 10,
+            b'0'..=b'9' => color[i / 2] += c - b'0',
+            _ => {
+                return Err(format!(
+                    "expected [0-9], [a-f], or [A-F], found '{}'",
+                    char::from(c)
+                ))
+            }
+        }
+        if i % 2 == 0 {
+            color[i / 2] *= 16;
+        }
+    }
+    Ok(color)
+}
 
 #[derive(Serialize, Deserialize)]
 pub enum Filter {
@@ -61,7 +92,7 @@ pub enum Swww {
         ///Start the daemon with this color
         ///
         ///Mutually exclusive with the --img option.
-        #[clap(long, short, parse(try_from_str = <[u8; 3]>::from_hex),group = "init request")]
+        #[clap(long, short, parse(try_from_str = from_hex),group = "init request")]
         color: Option<[u8; 3]>,
 
         ///Start the daemon with this image
@@ -86,7 +117,7 @@ pub struct Clear {
     /// Color to fill the screen with.
     ///
     /// Must be given in rrggbb format (note there is no prepended '#').
-    #[clap(parse(try_from_str = <[u8; 3]>::from_hex), default_value = "000000")]
+    #[clap(parse(try_from_str = from_hex), default_value = "000000")]
     pub color: [u8; 3],
 
     /// Comma separated list of outputs to display the image at.
