@@ -185,18 +185,17 @@ fn img_resize(img: image::RgbaImage, dimensions: (u32, u32), filter: FilterType)
         DynamicImage::ImageRgba8(img)
             .resize_to_fill(width, height, filter)
             .into_rgba8()
-            .into_raw()
     } else {
-        img.into_raw()
+        img
     };
 
     // The ARGB is 'little endian', so here we must  put the order
     // of bytes 'in reverse', so it needs to be BGRA.
-    for pixel in resized_img.chunks_exact_mut(4) {
-        pixel.swap(0, 2);
+    for pixel in resized_img.pixels_mut() {
+        pixel.0.swap(0, 2);
     }
 
-    resized_img.into_boxed_slice()
+    resized_img.into_raw().into_boxed_slice()
 }
 
 ///Returns whether the calling function should exit or not
