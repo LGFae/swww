@@ -174,3 +174,27 @@ pub struct Img {
     #[clap(long, env = "SWWW_TRANSITION_FPS", default_value = "30")]
     pub transition_fps: u8,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn should_reject_wrong_colors() {
+        assert!(from_hex("0012231").is_err(), "function is accepting strings with more than 6 chars");       
+        assert!(from_hex("00122").is_err(), "function is accepting strings with less than 6 chars");       
+        assert!(from_hex("00r223").is_err(), "function is accepting strings with chars that aren't hex");       
+    }
+
+    #[test]
+    fn should_convert_colors_from_hex() {
+        let color = from_hex("101010").unwrap();
+        assert_eq!(color, [16,16,16]);
+
+        let color = from_hex("ffffff").unwrap();
+        assert_eq!(color, [255, 255, 255]);
+
+        let color = from_hex("000000").unwrap();
+        assert_eq!(color, [0,0,0]);
+    }
+}
