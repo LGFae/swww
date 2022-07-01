@@ -1,3 +1,12 @@
+We need to clean up some of the code. In particular, the way we handle the
+communication stuff. The socket code looks ugly as hell and is wonky and weird.
+It also gives weird error messages on failures.
+
+Stop for like a full weekend and really get to the bottom of where the hell the
+memory is going. By my calculations we should be using way, way less memory in
+general, but it still insists on going up to nearly 200Mib after opening many
+images in a row.
+
 There might be a condition where we send an extra frame after stopping an
 animation with the clear command. I haven't seen this yet though.
 

@@ -1,4 +1,4 @@
-### Unreleased
+### 0.3.0
 
 * Limited image formats to: `gif`, `jpeg`, `jpeg_rayon`, `png`, `pnm`, `tga`,
   `tiff`, `webp`, `bmp`, `farbfeld`
@@ -14,6 +14,10 @@
 * Setting a custom names and stack sizes to our threads. The custom name will
   help in debugging in the future, and the custom stack sizes lets us push the
   memory usage even lower.
+* Did all the preparatory work for us to start writing new transition effects.
+  Ideally they should come in the next version, which should hopefully also be
+  our first release (since then I will consider swww to be pretty much feature
+  complete).
 
 #### 0.2.0
 Using unsafe to speed up decompression.
