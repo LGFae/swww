@@ -40,9 +40,9 @@ fn from_hex(hex: &str) -> Result<[u8; 3], String> {
 #[derive(Serialize, Deserialize)]
 pub enum Filter {
     Nearest,
-    Triangle,
+    Bilinear,
     CatmullRom,
-    Gaussian,
+    Mitchell,
     Lanczos3,
 }
 
@@ -52,9 +52,9 @@ impl std::str::FromStr for Filter {
     fn from_str(s: &str) -> Result<Self, String> {
         match s {
             "Nearest" => Ok(Self::Nearest),
-            "Triangle" => Ok(Self::Triangle),
+            "Bilinear" => Ok(Self::Bilinear),
             "CatmullRom" => Ok(Self::CatmullRom),
-            "Gaussian" => Ok(Self::Gaussian),
+            "Mitchell" => Ok(Self::Mitchell),
             "Lanczos3" => Ok(Self::Lanczos3),
             _ => Err(format!("unrecognized filter: {}", s)),
         }
@@ -134,7 +134,7 @@ pub struct Img {
     ///
     ///Available options are:
     ///
-    ///Nearest | Triangle | CatmullRom | Gaussian | Lanczos3
+    ///Nearest | Bilinear | CatmullRom | Mitchell | Lanczos3
     ///
     ///These are offered by the image crate (https://crates.io/crates/image). 'Nearest' is
     ///what I recommend for pixel art stuff, and ONLY for pixel art stuff. It is also the

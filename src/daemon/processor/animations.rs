@@ -6,7 +6,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use image::{codecs::gif::GifDecoder, imageops::FilterType, AnimationDecoder};
+use image::{codecs::gif::GifDecoder, AnimationDecoder};
+use fast_image_resize::FilterType;
 use log::debug;
 
 use super::{

@@ -1,4 +1,5 @@
-use image::{self, codecs::gif::GifDecoder, imageops::FilterType, ImageFormat};
+use fast_image_resize::FilterType;
+use image::{self, codecs::gif::GifDecoder, ImageFormat};
 use log::debug;
 
 use smithay_client_toolkit::reexports::calloop::channel::SyncSender;
@@ -180,7 +181,7 @@ fn animation(
     }
 }
 
-fn img_resize(img: image::RgbaImage, dimensions: (u32, u32), _filter: FilterType) -> Box<[u8]> {
+fn img_resize(img: image::RgbaImage, dimensions: (u32, u32), filter: FilterType) -> Box<[u8]> {
     let (width, height) = dimensions;
     debug!("Output dimensions: {:?}", (width, height));
     debug!("Image dimensions:  {:?}", img.dimensions());
@@ -204,9 +205,8 @@ fn img_resize(img: image::RgbaImage, dimensions: (u32, u32), _filter: FilterType
         );
         let mut dst_view = dst.view_mut();
 
-        let mut resizer = fast_image_resize::Resizer::new(
-            fast_image_resize::ResizeAlg::Convolution(fast_image_resize::FilterType::Lanczos3),
-        );
+        let mut resizer =
+            fast_image_resize::Resizer::new(fast_image_resize::ResizeAlg::Convolution(filter));
         resizer.resize(&src.view(), &mut dst_view).unwrap();
 
         alpha_mul_div.divide_alpha_inplace(&mut dst_view).unwrap();

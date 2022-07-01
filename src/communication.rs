@@ -71,13 +71,13 @@ impl Swww {
 
 impl Filter {
     ///Simply gets the equivalent filter from imageops
-    pub fn get_image_filter(&self) -> image::imageops::FilterType {
+    pub fn get_image_filter(&self) -> fast_image_resize::FilterType {
         match self {
-            Self::Nearest => image::imageops::FilterType::Nearest,
-            Self::Triangle => image::imageops::FilterType::Triangle,
-            Self::CatmullRom => image::imageops::FilterType::CatmullRom,
-            Self::Gaussian => image::imageops::FilterType::Gaussian,
-            Self::Lanczos3 => image::imageops::FilterType::Lanczos3,
+            Self::Nearest => fast_image_resize::FilterType::Box,
+            Self::Bilinear => fast_image_resize::FilterType::Bilinear,
+            Self::CatmullRom => fast_image_resize::FilterType::CatmullRom,
+            Self::Mitchell => fast_image_resize::FilterType::Mitchell,
+            Self::Lanczos3 => fast_image_resize::FilterType::Lanczos3,
         }
     }
 }
