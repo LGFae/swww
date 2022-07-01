@@ -55,12 +55,6 @@ impl Swww {
                 img.transition_fps = 1;
             }
         }
-        if let Swww::Init { img: Some(img), .. } = self {
-            *img = match img.canonicalize() {
-                Ok(p) => p,
-                Err(e) => return Err(format!("Coulnd't get absolute path: {}", e)),
-            };
-        }
         match bincode::serialize_into(stream, self) {
             Ok(()) => Ok(()),
             Err(e) => Err(format!("Failed to serialize request: {}", e)),

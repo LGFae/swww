@@ -456,23 +456,7 @@ fn recv_socket_msg(
             Answer::Ok
         }
         Ok(Swww::Img(img)) => send_processor_request(proc, &mut bgs, img),
-        Ok(Swww::Init { img, color, .. }) => {
-            if let Some(img) = img {
-                let request = Img {
-                    path: img,
-                    outputs: "".to_string(),
-                    filter: crate::cli::Filter::Lanczos3,
-                    transition_step: 255,
-                    transition_fps: 255, // We are sending it ASAP
-                };
-                send_processor_request(proc, &mut bgs, request)
-            } else {
-                if let Some(color) = color {
-                    bgs.iter_mut().for_each(|bg| bg.clear(color));
-                }
-                Answer::Ok
-            }
-        }
+        Ok(Swww::Init { .. }) => Answer::Ok,
         Ok(Swww::Query) => Answer::Info(bgs.iter().map(|bg| bg.info.clone()).collect()),
         Err(e) => Answer::Err(e),
     };

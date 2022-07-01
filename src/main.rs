@@ -15,23 +15,12 @@ fn main() -> Result<(), String> {
     let mut swww = Swww::parse();
     if let Swww::Init {
         no_daemon,
-        img,
-        color,
     } = &swww
     {
         if get_socket(1, 0).is_err() {
             spawn_daemon(*no_daemon)?;
             if *no_daemon {
                 return Ok(());
-            }
-            if img.is_some() || color.is_some() {
-                eprintln!(
-                    "WARNING: options -i and -c for swww init are deprecated!Use
-    swww init && swww img <path/to/img>
-or
-    swww init && swww clear <color>
-instead."
-                );
             }
         } else {
             return Err("There seems to already be another instance running...".to_string());

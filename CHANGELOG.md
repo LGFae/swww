@@ -1,3 +1,7 @@
+### Unreleased
+
+* deleted previously deprecated `init -i` and `init -c` options
+
 ### 0.3.0
 
 * Limited image formats to: `gif`, `jpeg`, `jpeg_rayon`, `png`, `pnm`, `tga`,

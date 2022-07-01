@@ -88,18 +88,6 @@ pub enum Swww {
         ///builds we only log info, warnings and errors, so you won't be seeing much (ideally).
         #[clap(long)]
         no_daemon: bool,
-
-        ///Start the daemon with this color
-        ///
-        ///Mutually exclusive with the --img option.
-        #[clap(long, short, parse(try_from_str = from_hex),group = "init request")]
-        color: Option<[u8; 3]>,
-
-        ///Start the daemon with this image
-        ///
-        ///Mutually exclusive with the --color option
-        #[clap(long, short, parse(from_os_str), group = "init request")]
-        img: Option<PathBuf>,
     },
 
     ///Kills the daemon
@@ -181,20 +169,29 @@ mod tests {
 
     #[test]
     fn should_reject_wrong_colors() {
-        assert!(from_hex("0012231").is_err(), "function is accepting strings with more than 6 chars");       
-        assert!(from_hex("00122").is_err(), "function is accepting strings with less than 6 chars");       
-        assert!(from_hex("00r223").is_err(), "function is accepting strings with chars that aren't hex");       
+        assert!(
+            from_hex("0012231").is_err(),
+            "function is accepting strings with more than 6 chars"
+        );
+        assert!(
+            from_hex("00122").is_err(),
+            "function is accepting strings with less than 6 chars"
+        );
+        assert!(
+            from_hex("00r223").is_err(),
+            "function is accepting strings with chars that aren't hex"
+        );
     }
 
     #[test]
     fn should_convert_colors_from_hex() {
         let color = from_hex("101010").unwrap();
-        assert_eq!(color, [16,16,16]);
+        assert_eq!(color, [16, 16, 16]);
 
         let color = from_hex("ffffff").unwrap();
         assert_eq!(color, [255, 255, 255]);
 
         let color = from_hex("000000").unwrap();
-        assert_eq!(color, [0,0,0]);
+        assert_eq!(color, [0, 0, 0]);
     }
 }
