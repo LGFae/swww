@@ -6,7 +6,7 @@
   filters no longer exist. Furthermore, the filters `Bilinear` and `Mitchell`
   were added.
 
-* deleted previously deprecated `init -i` and `init -c` options
+  * deleted previously deprecated `init -i` and `init -c` options
 
 ### 0.3.0
 
