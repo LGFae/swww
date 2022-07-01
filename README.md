@@ -11,7 +11,7 @@
 
 ## Build
 
-<a href="https://repology.org/project/river/versions">
+<a href="https://repology.org/project/swww/versions">
     <img src="https://repology.org/badge/vertical-allrepos/swww.svg" alt="Packaging status" align="right">
 </a>
 
