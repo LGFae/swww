@@ -1,6 +1,7 @@
 use smithay_client_toolkit::reexports::calloop::channel::SyncSender;
 use std::{
-    path::PathBuf,
+    fs::File,
+    io::BufReader,
     sync::mpsc,
     time::{Duration, Instant},
 };
@@ -58,13 +59,17 @@ impl Transition {
 }
 
 pub struct GifProcessor {
-    gif: PathBuf,
+    gif: GifDecoder<BufReader<File>>,
     dimensions: (u32, u32),
     filter: FilterType,
 }
 
 impl GifProcessor {
-    pub fn new(gif: PathBuf, dimensions: (u32, u32), filter: FilterType) -> Self {
+    pub fn new(
+        gif: GifDecoder<BufReader<File>>,
+        dimensions: (u32, u32),
+        filter: FilterType,
+    ) -> Self {
         GifProcessor {
             gif,
             dimensions,
@@ -72,10 +77,8 @@ impl GifProcessor {
         }
     }
     pub fn process(self, first_frame: Box<[u8]>, fr_sender: mpsc::Sender<(BitPack, Duration)>) {
-        let gif_reader = image::io::Reader::open(self.gif).unwrap().into_inner();
-        let mut frames = GifDecoder::new(gif_reader)
-            .expect("Couldn't decode gif, though this should be impossible...")
-            .into_frames();
+        let mut frames = self.gif.into_frames();
+
         //The first frame should always exist
         let dur_first_frame = frames.next().unwrap().unwrap().delay().numer_denom_ms();
         let dur_first_frame = Duration::from_millis((dur_first_frame.0 / dur_first_frame.1).into());

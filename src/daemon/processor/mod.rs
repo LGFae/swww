@@ -1,4 +1,4 @@
-use image::{self, imageops::FilterType, DynamicImage, ImageFormat};
+use image::{self, codecs::gif::GifDecoder, imageops::FilterType, DynamicImage, ImageFormat};
 use log::debug;
 
 use smithay_client_toolkit::reexports::calloop::channel::SyncSender;
@@ -42,7 +42,11 @@ impl ProcessorRequest {
         let animation = {
             if let Ok(img) = img {
                 if img.format() == Some(ImageFormat::Gif) {
-                    Some(GifProcessor::new(self.path, self.dimensions, self.filter))
+                    Some(GifProcessor::new(
+                        GifDecoder::new(img.into_inner()).unwrap(),
+                        self.dimensions,
+                        self.filter,
+                    ))
                 } else {
                     None
                 }
