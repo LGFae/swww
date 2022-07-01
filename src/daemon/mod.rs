@@ -507,7 +507,7 @@ fn make_processor_requests(bgs: &mut RefMut<Vec<Bg>>, img: &Img) -> Vec<Processo
                     ProcessorRequest {
                         outputs: vec![bg.info.name.clone()],
                         dimensions: bg.info.dim,
-                        old_img: bg.get_current_img().to_vec().into_boxed_slice(),
+                        old_img: Box::from(bg.get_current_img()),
                         path: img.path.clone(),
                         filter: img.filter.get_image_filter(),
                         step: img.transition_step,
