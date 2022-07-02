@@ -6,8 +6,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use image::{codecs::gif::GifDecoder, AnimationDecoder};
 use fast_image_resize::FilterType;
+use image::{codecs::gif::GifDecoder, AnimationDecoder};
 use log::debug;
 
 use super::{
@@ -78,16 +78,18 @@ impl Transition {
         let mut now = Instant::now();
         loop {
             let transition_img =
-                ReadiedPack::new(&mut self.old_img, new_img, |old_col, new_col, i| {
+                ReadiedPack::new(&mut self.old_img, new_img, |old_pix, new_pix, i| {
                     if i % (width as usize) <= current_column {
                         let step =
                             self.step + ((current_column - (i % (width as usize))) / 10) as u8;
-                        if old_col.abs_diff(*new_col) < step {
-                            *old_col = *new_col;
-                        } else if *old_col > *new_col {
-                            *old_col -= step;
-                        } else {
-                            *old_col += step;
+                        for (old_col, new_col) in old_pix.iter_mut().zip(new_pix) {
+                            if old_col.abs_diff(*new_col) < step {
+                                *old_col = *new_col;
+                            } else if *old_col > *new_col {
+                                *old_col -= step;
+                            } else {
+                                *old_col += step;
+                            }
                         }
                     }
                 });
