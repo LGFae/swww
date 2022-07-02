@@ -30,7 +30,7 @@ lazy_static::lazy_static! {
 /// ones at a certain position. It is meant to be used primarily when writting transitions
 fn pack_bytes<F>(cur: &mut [u8], goal: &[u8], mut f: F) -> Box<[u8]>
 where
-    F: FnMut(&mut u8, &u8, usize),
+    F: FnMut(&mut [u8; 4], &[u8; 4], usize),
 {
     let mut v = Vec::with_capacity((goal.len() * 5) / 8);
 
@@ -51,9 +51,7 @@ where
 
         let mut diffs = 0;
         while cur != goal {
-            for (c, g) in zip_eq(cur.as_mut_slice(), goal) {
-                f(c, g, i);
-            }
+            f(cur, goal, i);
             to_add.extend_from_slice(&cur[0..3]);
             diffs += 1;
             match iter.next() {
@@ -98,8 +96,7 @@ fn unpack_bytes(buf: &mut [u8], diff: &[u8]) {
             unsafe {
                 buf_chunks
                     .get_unchecked_mut(pix_idx)
-                    .get_unchecked_mut(0..3)
-                    .clone_from_slice(diff.get_unchecked(diff_idx..diff_idx + 3));
+                    .clone_from_slice(diff.get_unchecked(diff_idx..diff_idx + 4));
             }
             diff_idx += 3;
             pix_idx += 1;
@@ -159,7 +156,7 @@ impl ReadiedPack {
     ///   transition logic
     pub fn new<F>(cur: &mut [u8], goal: &[u8], f: F) -> Self
     where
-        F: FnMut(&mut u8, &u8, usize),
+        F: FnMut(&mut [u8; 4], &[u8; 4], usize),
     {
         let bit_pack = pack_bytes(cur, goal, f);
         ReadiedPack {

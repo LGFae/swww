@@ -35,13 +35,15 @@ impl Transition {
         let mut now = Instant::now();
         loop {
             let transition_img =
-                ReadiedPack::new(&mut self.old_img, new_img, |old_col, new_col, _| {
-                    if old_col.abs_diff(*new_col) < self.step {
-                        *old_col = *new_col;
-                    } else if *old_col > *new_col {
-                        *old_col -= self.step;
-                    } else {
-                        *old_col += self.step;
+                ReadiedPack::new(&mut self.old_img, new_img, |old_pix, new_pix, _| {
+                    for (old_col, new_col) in old_pix.iter_mut().zip(new_pix) {
+                        if old_col.abs_diff(*new_col) < self.step {
+                            *old_col = *new_col;
+                        } else if *old_col > *new_col {
+                            *old_col -= self.step;
+                        } else {
+                            *old_col += self.step;
+                        }
                     }
                 });
             if transition_img.is_empty() {
