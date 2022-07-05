@@ -111,7 +111,7 @@ fn sending_img_to_monitor_that_does_not_exist() {
 }
 
 fn sending_imgs_with_filter() {
-    for filter in ["Nearest", "Triangle", "CatmullRom", "Gaussian", "Lanczos3"] {
+    for filter in ["Nearest", "Bilinear", "CatmullRom", "Mitchell", "Lanczos3"] {
         cmd()
             .arg("img")
             .arg(TEST_IMGS[0])

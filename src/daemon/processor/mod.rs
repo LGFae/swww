@@ -1,4 +1,5 @@
-use image::{self, codecs::gif::GifDecoder, imageops::FilterType, DynamicImage, ImageFormat};
+use fast_image_resize::FilterType;
+use image::{self, codecs::gif::GifDecoder, ImageFormat};
 use log::debug;
 
 use smithay_client_toolkit::reexports::calloop::channel::SyncSender;
@@ -186,9 +187,30 @@ fn img_resize(img: image::RgbaImage, dimensions: (u32, u32), filter: FilterType)
     debug!("Image dimensions:  {:?}", img.dimensions());
     let mut resized_img = if img.dimensions() != (width, height) {
         debug!("Image dimensions are different from output's. Resizing...");
-        DynamicImage::ImageRgba8(img)
-            .resize_to_fill(width, height, filter)
-            .into_rgba8()
+        let mut src = fast_image_resize::Image::from_vec_u8(
+            std::num::NonZeroU32::new(img.dimensions().0).unwrap(),
+            std::num::NonZeroU32::new(img.dimensions().1).unwrap(),
+            img.into_raw(),
+            fast_image_resize::PixelType::U8x4,
+        )
+        .unwrap();
+        let alpha_mul_div = fast_image_resize::MulDiv::default();
+        alpha_mul_div
+            .multiply_alpha_inplace(&mut src.view_mut())
+            .unwrap();
+        let mut dst = fast_image_resize::Image::new(
+            std::num::NonZeroU32::new(width).unwrap(),
+            std::num::NonZeroU32::new(height).unwrap(),
+            fast_image_resize::PixelType::U8x4,
+        );
+        let mut dst_view = dst.view_mut();
+
+        let mut resizer =
+            fast_image_resize::Resizer::new(fast_image_resize::ResizeAlg::Convolution(filter));
+        resizer.resize(&src.view(), &mut dst_view).unwrap();
+
+        alpha_mul_div.divide_alpha_inplace(&mut dst_view).unwrap();
+        image::RgbaImage::from_vec(width, height, dst.into_vec()).unwrap()
     } else {
         img
     };

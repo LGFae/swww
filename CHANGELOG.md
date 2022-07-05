@@ -1,6 +1,12 @@
 ### Unreleased
 
-* deleted previously deprecated `init -i` and `init -c` options
+  * BREAKING CHANGE: we are using fast_image_resize to resize our images now.
+  This makes resizing much faster (enough to smoothly play animations before
+  caching is done), but it makes it so that the `Gaussian` and `Triangle`
+  filters no longer exist. Furthermore, the filters `Bilinear` and `Mitchell`
+  were added.
+
+  * deleted previously deprecated `init -i` and `init -c` options
 
 ### 0.3.0
 
