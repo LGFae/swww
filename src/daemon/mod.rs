@@ -26,7 +26,6 @@ use std::{
     os::unix::net::{UnixListener, UnixStream},
     path::{Path, PathBuf},
     rc::Rc,
-    time::Duration,
 };
 
 use crate::cli::{Clear, Img, Swww};
@@ -493,27 +492,20 @@ fn handle_recv_img(bgs: &mut RefMut<Vec<Bg>>, msg: &(Vec<String>, ReadiedPack)) 
 ///Returns one request per output with same dimensions and current image
 fn make_processor_requests(bgs: &mut RefMut<Vec<Bg>>, img: &Img) -> Vec<ProcessorRequest> {
     let outputs = get_real_outputs(bgs, &img.outputs);
-    let mut groups: Vec<(ProcessorRequest, BgImg)> = Vec::with_capacity(outputs.len());
+    let mut groups: Vec<(ProcessorRequest, &BgImg)> = Vec::with_capacity(outputs.len());
     bgs.iter_mut()
         .filter(|bg| outputs.contains(&bg.info.name))
         .for_each(|bg| {
             if let Some(i) = groups
                 .iter()
-                .position(|g| bg.info.dim == g.0.dimensions && bg.info.img == g.1)
+                .position(|g| bg.info.dim == g.0.dim() && bg.info.img == *g.1)
             {
-                groups[i].0.outputs.push(bg.info.name.clone());
+                groups[i].0.add_output(&bg.info.name);
             } else {
+                let old_img = Box::from(bg.get_current_img());
                 groups.push((
-                    ProcessorRequest {
-                        outputs: vec![bg.info.name.clone()],
-                        dimensions: bg.info.dim,
-                        old_img: Box::from(bg.get_current_img()),
-                        path: img.path.clone(),
-                        filter: img.filter.get_image_filter(),
-                        step: img.transition_step,
-                        fps: Duration::from_nanos(1_000_000_000 / img.transition_fps as u64),
-                    },
-                    bg.info.img.clone(),
+                    ProcessorRequest::new(&bg.info, old_img, img),
+                    &bg.info.img,
                 ));
             }
         });

@@ -47,16 +47,50 @@ pub enum Filter {
 }
 
 impl std::str::FromStr for Filter {
-    type Err = String;
+    type Err = &'static str;
 
-    fn from_str(s: &str) -> Result<Self, String> {
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "Nearest" => Ok(Self::Nearest),
             "Bilinear" => Ok(Self::Bilinear),
             "CatmullRom" => Ok(Self::CatmullRom),
             "Mitchell" => Ok(Self::Mitchell),
             "Lanczos3" => Ok(Self::Lanczos3),
-            _ => Err(format!("unrecognized filter: {}", s)),
+            _ => Err("unrecognized filter. Valid filters are:\
+                     Nearest | Bilinear | CatmullRom | Mitchell | Lanczos3\
+                     see swww img --help for more details"),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub enum TransitionType {
+    Simple,
+    Left,
+    Right,
+    Top,
+    Bottom,
+    Center,
+    Outer,
+    Random,
+}
+
+impl std::str::FromStr for TransitionType {
+    type Err = &'static str;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "simple" => Ok(Self::Simple),
+            "left" => Ok(Self::Left),
+            "right" => Ok(Self::Right),
+            "top" => Ok(Self::Top),
+            "bottom" => Ok(Self::Bottom),
+            "center" => Ok(Self::Center),
+            "outer" => Ok(Self::Outer),
+            "random" => Ok(Self::Random),
+            _ => Err("unrecognized transition type. Valid transitions are:\
+                     simple | lest | right | top | bottom | center | outer | random\
+                     see swww img --help for more details"),
         }
     }
 }
@@ -146,6 +180,20 @@ pub struct Img {
     ///https://docs.rs/image/latest/image/imageops/enum.FilterType.html.
     #[clap(short, long, default_value = "Lanczos3")]
     pub filter: Filter,
+
+    ///Sets the type of transition. Default is 'simple', that fades into the new image
+    ///
+    ///Possible transitions are:
+    ///
+    ///simple | left | right | top | bottom | center | outer | random
+    ///
+    ///The 'left', 'right', 'top' and 'bottom' options make the transition happen from that
+    ///position to its oposite in the screen.
+    ///'center' causes a transition from the center to the edges of the screen, while 'outer' is
+    ///the oposite of that.
+    ///Finally, 'random' will cause the transition to start from some random spot
+    #[clap(short, long, default_value = "simple")]
+    pub transition_type: TransitionType,
 
     ///How smoothly the transition when switching images plays out.
     ///

@@ -10,6 +10,8 @@ use fast_image_resize::FilterType;
 use image::{codecs::gif::GifDecoder, AnimationDecoder};
 use log::debug;
 
+use crate::cli::TransitionType;
+
 use super::{
     comp_decomp::{BitPack, ReadiedPack},
     img_resize, send_frame,
@@ -18,21 +20,48 @@ use super::{
 pub struct Transition {
     old_img: Box<[u8]>,
     dimensions: (u32, u32),
+    transition_type: TransitionType,
     step: u8,
     fps: Duration,
 }
 
 /// All transitions return whether or not they completed
 impl Transition {
-    pub fn new(old_img: Box<[u8]>, dimensions: (u32, u32), step: u8, fps: Duration) -> Self {
+    pub fn new(
+        old_img: Box<[u8]>,
+        dimensions: (u32, u32),
+        transition_type: TransitionType,
+        step: u8,
+        fps: Duration,
+    ) -> Self {
         Transition {
             old_img,
             dimensions,
+            transition_type,
             step,
             fps,
         }
     }
-    pub fn default(
+
+    pub fn execute(
+        &mut self,
+        new_img: &[u8],
+        outputs: &mut Vec<String>,
+        sender: &SyncSender<(Vec<String>, ReadiedPack)>,
+        stop_recv: &mpsc::Receiver<Vec<String>>,
+    ) -> bool {
+        match self.transition_type {
+            TransitionType::Simple => self.simple(new_img, outputs, sender, stop_recv),
+            TransitionType::Left => self.left(new_img, outputs, sender, stop_recv),
+            TransitionType::Right => self.left(new_img, outputs, sender, stop_recv),
+            TransitionType::Top => self.left(new_img, outputs, sender, stop_recv),
+            TransitionType::Bottom => self.left(new_img, outputs, sender, stop_recv),
+            TransitionType::Center => self.left(new_img, outputs, sender, stop_recv),
+            TransitionType::Outer => self.left(new_img, outputs, sender, stop_recv),
+            TransitionType::Random => self.left(new_img, outputs, sender, stop_recv),
+        }
+    }
+    fn simple(
         &mut self,
         new_img: &[u8],
         outputs: &mut Vec<String>,
@@ -66,7 +95,7 @@ impl Transition {
         }
     }
 
-    pub fn left(
+    fn left(
         &mut self,
         new_img: &[u8],
         outputs: &mut Vec<String>,
@@ -177,8 +206,14 @@ mod tests {
         (vec1.into_boxed_slice(), vec2.into_boxed_slice())
     }
 
-    fn test_transition(old_img: Box<[u8]>) -> Transition {
-        Transition::new(old_img, (100, 10), 1, Duration::from_nanos(1))
+    fn test_transition(old_img: Box<[u8]>, transition_type: TransitionType) -> Transition {
+        Transition::new(
+            old_img,
+            (100, 10),
+            transition_type,
+            1,
+            Duration::from_nanos(1),
+        )
     }
 
     fn dummy_outputs() -> Vec<String> {
@@ -186,24 +221,30 @@ mod tests {
     }
 
     #[test]
-    fn default_transition_should_end_with_equal_vectors() {
-        let (old_img, new_img) = make_test_boxes();
-        let mut t = test_transition(old_img);
+    fn transitions_should_end_with_equal_vectors() {
         let ((fr_send, _fr_recv), (_stop_send, stop_recv)) = make_senders_and_receivers();
 
-        assert!(t.default(&new_img, &mut dummy_outputs(), &fr_send, &stop_recv));
+        use TransitionType as TT;
+        let transitions = [
+            TT::Simple,
+            TT::Left,
+            TT::Right,
+            TT::Bottom,
+            TT::Top,
+            TT::Center,
+            TT::Outer,
+            TT::Random,
+        ];
+        for transition in transitions {
+            let (old_img, new_img) = make_test_boxes();
+            let mut t = test_transition(old_img, transition.clone());
 
-        assert_eq!(t.old_img, new_img);
-    }
-
-    #[test]
-    fn left_transition_should_end_with_equal_vectors() {
-        let (old_img, new_img) = make_test_boxes();
-        let mut t = test_transition(old_img);
-        let ((fr_send, _fr_recv), (_stop_send, stop_recv)) = make_senders_and_receivers();
-
-        assert!(t.left(&new_img, &mut dummy_outputs(), &fr_send, &stop_recv));
-
-        assert_eq!(t.old_img, new_img);
+            assert!(t.execute(&new_img, &mut dummy_outputs(), &fr_send, &stop_recv));
+            assert_eq!(
+                t.old_img, new_img,
+                "Transition {:?} did not end with correct new_img",
+                transition
+            );
+        }
     }
 }

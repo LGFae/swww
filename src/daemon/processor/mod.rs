@@ -11,13 +11,18 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::Answer;
+use crate::{
+    cli::{Img, TransitionType},
+    Answer,
+};
 
 mod animations;
 pub mod comp_decomp;
 
 use animations::{GifProcessor, Transition};
 use comp_decomp::ReadiedPack;
+
+use super::BgInfo;
 
 ///The default thread stack size of 2MiB is way too overkill for our purposes
 const TSTACK_SIZE: usize = 1 << 18; //256KiB
@@ -27,18 +32,46 @@ const TSTACK_SIZE: usize = 1 << 18; //256KiB
 ///all have the same path, filter, step and fps, we still need to store all those values multiple
 ///times, because we would simply have to clone them when moving them into the thread anyway
 pub struct ProcessorRequest {
-    pub outputs: Vec<String>,
-    pub dimensions: (u32, u32),
-    pub old_img: Box<[u8]>,
-    pub path: PathBuf,
-    pub filter: FilterType,
-    pub step: u8,
-    pub fps: Duration,
+    outputs: Vec<String>,
+    dimensions: (u32, u32),
+    old_img: Box<[u8]>,
+    path: PathBuf,
+    transition_type: TransitionType,
+    filter: FilterType,
+    step: u8,
+    fps: Duration,
 }
 
 impl ProcessorRequest {
+    pub fn new(info: &BgInfo, old_img: Box<[u8]>, img: &Img) -> Self {
+        Self {
+            outputs: vec![info.name.to_string()],
+            dimensions: info.dim,
+            old_img,
+            path: img.path.clone(),
+            transition_type: img.transition_type.clone(),
+            filter: img.filter.get_image_filter(),
+            step: img.transition_step,
+            fps: Duration::from_nanos(1_000_000_000 / img.transition_fps as u64),
+        }
+    }
+
+    pub fn add_output(&mut self, output: &str) {
+        self.outputs.push(output.to_string());
+    }
+
+    pub fn dim(&self) -> (u32, u32) {
+        self.dimensions
+    }
+
     fn split(self) -> (Vec<String>, Transition, Option<GifProcessor>) {
-        let transition = Transition::new(self.old_img, self.dimensions, self.step, self.fps);
+        let transition = Transition::new(
+            self.old_img,
+            self.dimensions,
+            self.transition_type,
+            self.step,
+            self.fps,
+        );
         let img = image::io::Reader::open(&self.path);
         let animation = {
             if let Ok(img) = img {
@@ -106,7 +139,7 @@ impl Processor {
             .stack_size(TSTACK_SIZE) //the default of 2MB is way too overkill for this
             .spawn(move || {
                 let (mut out, mut transition, gif) = request.split();
-                if transition.left(&new_img, &mut out, &sender, &stop_recv) {
+                if transition.execute(&new_img, &mut out, &sender, &stop_recv) {
                     drop(transition);
                     if let Some(gif) = gif {
                         animation(gif, new_img, out, sender, stop_recv);
