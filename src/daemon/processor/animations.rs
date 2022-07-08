@@ -17,6 +17,20 @@ use super::{
     img_resize, send_frame,
 };
 
+macro_rules! send_transition_frame {
+    ($img:ident, $outputs:ident, $now:ident, $fps:ident, $sender:ident, $stop_recv:ident) => {
+        if $img.is_empty() {
+            debug!("Transition has finished.");
+            return true;
+        }
+        let timeout = $fps.saturating_sub($now.elapsed());
+        if send_frame($img, $outputs, timeout, $sender, $stop_recv) {
+            debug!("Transition was interrupted!");
+            return false;
+        }
+    };
+}
+
 pub struct Transition {
     old_img: Box<[u8]>,
     dimensions: (u32, u32),
@@ -89,29 +103,14 @@ impl Transition {
         sender: &SyncSender<(Vec<String>, ReadiedPack)>,
         stop_recv: &mpsc::Receiver<Vec<String>>,
     ) -> bool {
+        let fps = self.fps;
         let mut now = Instant::now();
         loop {
             let transition_img =
                 ReadiedPack::new(&mut self.old_img, new_img, |old_pix, new_pix, _| {
-                    for (old_col, new_col) in old_pix.iter_mut().zip(new_pix) {
-                        if old_col.abs_diff(*new_col) < self.step {
-                            *old_col = *new_col;
-                        } else if *old_col > *new_col {
-                            *old_col -= self.step;
-                        } else {
-                            *old_col += self.step;
-                        }
-                    }
+                    change_cols(self.step, old_pix, new_pix);
                 });
-            if transition_img.is_empty() {
-                debug!("Transition has finished.");
-                return true;
-            };
-            let timeout = self.fps.saturating_sub(now.elapsed());
-            if send_frame(transition_img, outputs, timeout, sender, stop_recv) {
-                debug!("Transition was interrupted!");
-                return false;
-            };
+            send_transition_frame!(transition_img, outputs, now, fps, sender, stop_recv);
             now = Instant::now();
         }
     }
@@ -123,6 +122,7 @@ impl Transition {
         sender: &SyncSender<(Vec<String>, ReadiedPack)>,
         stop_recv: &mpsc::Receiver<Vec<String>>,
     ) -> bool {
+        let fps = self.fps;
         let width = self.dimensions.0 as usize;
         let mut current_column = 0;
         let mut now = Instant::now();
@@ -131,26 +131,10 @@ impl Transition {
                 ReadiedPack::new(&mut self.old_img, new_img, |old_pix, new_pix, i| {
                     if i % width <= current_column {
                         let step = self.step + ((current_column - (i % width)) / 10) as u8;
-                        for (old_col, new_col) in old_pix.iter_mut().zip(new_pix) {
-                            if old_col.abs_diff(*new_col) < step {
-                                *old_col = *new_col;
-                            } else if *old_col > *new_col {
-                                *old_col -= step;
-                            } else {
-                                *old_col += step;
-                            }
-                        }
+                        change_cols(step, old_pix, new_pix);
                     }
                 });
-            if transition_img.is_empty() {
-                debug!("Transition has finished.");
-                return true;
-            };
-            let timeout = self.fps.saturating_sub(now.elapsed());
-            if send_frame(transition_img, outputs, timeout, sender, stop_recv) {
-                debug!("Transition was interrupted!");
-                return false;
-            };
+            send_transition_frame!(transition_img, outputs, now, fps, sender, stop_recv);
             now = Instant::now();
             current_column += 10;
         }
@@ -163,6 +147,7 @@ impl Transition {
         sender: &SyncSender<(Vec<String>, ReadiedPack)>,
         stop_recv: &mpsc::Receiver<Vec<String>>,
     ) -> bool {
+        let fps = self.fps;
         let width = self.dimensions.0 as usize;
         let mut current_column = width;
         let mut now = Instant::now();
@@ -171,26 +156,10 @@ impl Transition {
                 ReadiedPack::new(&mut self.old_img, new_img, |old_pix, new_pix, i| {
                     if i % width >= current_column {
                         let step = self.step + (((i % width) - current_column) / 10) as u8;
-                        for (old_col, new_col) in old_pix.iter_mut().zip(new_pix) {
-                            if old_col.abs_diff(*new_col) < step {
-                                *old_col = *new_col;
-                            } else if *old_col > *new_col {
-                                *old_col -= step;
-                            } else {
-                                *old_col += step;
-                            }
-                        }
+                        change_cols(step, old_pix, new_pix);
                     }
                 });
-            if transition_img.is_empty() {
-                debug!("Transition has finished.");
-                return true;
-            };
-            let timeout = self.fps.saturating_sub(now.elapsed());
-            if send_frame(transition_img, outputs, timeout, sender, stop_recv) {
-                debug!("Transition was interrupted!");
-                return false;
-            };
+            send_transition_frame!(transition_img, outputs, now, fps, sender, stop_recv);
             now = Instant::now();
             if current_column >= 10 {
                 current_column -= 10;
@@ -207,6 +176,7 @@ impl Transition {
         sender: &SyncSender<(Vec<String>, ReadiedPack)>,
         stop_recv: &mpsc::Receiver<Vec<String>>,
     ) -> bool {
+        let fps = self.fps;
         let width = self.dimensions.0 as usize;
         let mut current_line = 0;
         let mut now = Instant::now();
@@ -215,26 +185,10 @@ impl Transition {
                 ReadiedPack::new(&mut self.old_img, new_img, |old_pix, new_pix, i| {
                     if i / width <= current_line {
                         let step = self.step + ((current_line - (i / width)) / 10) as u8;
-                        for (old_col, new_col) in old_pix.iter_mut().zip(new_pix) {
-                            if old_col.abs_diff(*new_col) < step {
-                                *old_col = *new_col;
-                            } else if *old_col > *new_col {
-                                *old_col -= step;
-                            } else {
-                                *old_col += step;
-                            }
-                        }
+                        change_cols(step, old_pix, new_pix);
                     }
                 });
-            if transition_img.is_empty() {
-                debug!("Transition has finished.");
-                return true;
-            };
-            let timeout = self.fps.saturating_sub(now.elapsed());
-            if send_frame(transition_img, outputs, timeout, sender, stop_recv) {
-                debug!("Transition was interrupted!");
-                return false;
-            };
+            send_transition_frame!(transition_img, outputs, now, fps, sender, stop_recv);
             now = Instant::now();
             current_line += 10;
         }
@@ -247,6 +201,7 @@ impl Transition {
         sender: &SyncSender<(Vec<String>, ReadiedPack)>,
         stop_recv: &mpsc::Receiver<Vec<String>>,
     ) -> bool {
+        let fps = self.fps;
         let width = self.dimensions.0 as usize;
         let mut current_line = self.dimensions.1 as usize;
         let mut now = Instant::now();
@@ -255,26 +210,10 @@ impl Transition {
                 ReadiedPack::new(&mut self.old_img, new_img, |old_pix, new_pix, i| {
                     if i / width >= current_line {
                         let step = self.step + (((i / width) - current_line) / 10) as u8;
-                        for (old_col, new_col) in old_pix.iter_mut().zip(new_pix) {
-                            if old_col.abs_diff(*new_col) < step {
-                                *old_col = *new_col;
-                            } else if *old_col > *new_col {
-                                *old_col -= step;
-                            } else {
-                                *old_col += step;
-                            }
-                        }
+                        change_cols(step, old_pix, new_pix);
                     }
                 });
-            if transition_img.is_empty() {
-                debug!("Transition has finished.");
-                return true;
-            };
-            let timeout = self.fps.saturating_sub(now.elapsed());
-            if send_frame(transition_img, outputs, timeout, sender, stop_recv) {
-                debug!("Transition was interrupted!");
-                return false;
-            };
+            send_transition_frame!(transition_img, outputs, now, fps, sender, stop_recv);
             now = Instant::now();
             if current_line >= 10 {
                 current_line -= 10;
@@ -291,6 +230,7 @@ impl Transition {
         sender: &SyncSender<(Vec<String>, ReadiedPack)>,
         stop_recv: &mpsc::Receiver<Vec<String>>,
     ) -> bool {
+        let fps = self.fps;
         let (width, height) = (self.dimensions.0 as usize, self.dimensions.1 as usize);
         let (center_x, center_y) = (width / 2, height / 2);
         let mut dist_center = 0;
@@ -307,26 +247,10 @@ impl Transition {
                         let step = self
                             .step
                             .saturating_add(((dist_center * dist_center) - pix_center_dist) as u8);
-                        for (old_col, new_col) in old_pix.iter_mut().zip(new_pix) {
-                            if old_col.abs_diff(*new_col) < step {
-                                *old_col = *new_col;
-                            } else if *old_col > *new_col {
-                                *old_col -= step;
-                            } else {
-                                *old_col += step;
-                            }
-                        }
+                        change_cols(step, old_pix, new_pix);
                     }
                 });
-            if transition_img.is_empty() {
-                debug!("Transition has finished.");
-                return true;
-            };
-            let timeout = self.fps.saturating_sub(now.elapsed());
-            if send_frame(transition_img, outputs, timeout, sender, stop_recv) {
-                debug!("Transition was interrupted!");
-                return false;
-            };
+            send_transition_frame!(transition_img, outputs, now, fps, sender, stop_recv);
             now = Instant::now();
             dist_center += 2
         }
@@ -339,6 +263,7 @@ impl Transition {
         sender: &SyncSender<(Vec<String>, ReadiedPack)>,
         stop_recv: &mpsc::Receiver<Vec<String>>,
     ) -> bool {
+        let fps = self.fps;
         let (width, height) = (self.dimensions.0 as usize, self.dimensions.1 as usize);
         let (center_x, center_y) = (width / 2, height / 2);
         let mut dist_center = ((center_x * center_x + center_y * center_y) as f64).sqrt() as usize;
@@ -354,32 +279,28 @@ impl Transition {
                     if pix_center_dist >= dist_center * dist_center {
                         let step =
                             self.step + (pix_center_dist - (dist_center * dist_center)) as u8;
-                        for (old_col, new_col) in old_pix.iter_mut().zip(new_pix) {
-                            if old_col.abs_diff(*new_col) < step {
-                                *old_col = *new_col;
-                            } else if *old_col > *new_col {
-                                *old_col -= step;
-                            } else {
-                                *old_col += step;
-                            }
-                        }
+                        change_cols(step, old_pix, new_pix);
                     }
                 });
-            if transition_img.is_empty() {
-                debug!("Transition has finished.");
-                return true;
-            };
-            let timeout = self.fps.saturating_sub(now.elapsed());
-            if send_frame(transition_img, outputs, timeout, sender, stop_recv) {
-                debug!("Transition was interrupted!");
-                return false;
-            };
+            send_transition_frame!(transition_img, outputs, now, fps, sender, stop_recv);
             now = Instant::now();
             if dist_center >= 1 {
                 dist_center -= 1
             } else {
                 dist_center = 0
             }
+        }
+    }
+}
+
+fn change_cols(step: u8, old: &mut [u8; 4], new: &[u8; 4]) {
+    for (old_col, new_col) in old.iter_mut().zip(new) {
+        if old_col.abs_diff(*new_col) < step {
+            *old_col = *new_col;
+        } else if *old_col > *new_col {
+            *old_col -= step;
+        } else {
+            *old_col += step;
         }
     }
 }
