@@ -44,7 +44,7 @@ impl Transition {
     }
 
     pub fn execute(
-        &mut self,
+        self,
         new_img: &[u8],
         outputs: &mut Vec<String>,
         sender: &SyncSender<(Vec<String>, ReadiedPack)>,
@@ -61,8 +61,9 @@ impl Transition {
             TransitionType::Random => self.left(new_img, outputs, sender, stop_recv),
         }
     }
+
     fn simple(
-        &mut self,
+        mut self,
         new_img: &[u8],
         outputs: &mut Vec<String>,
         sender: &SyncSender<(Vec<String>, ReadiedPack)>,
@@ -96,7 +97,7 @@ impl Transition {
     }
 
     fn left(
-        &mut self,
+        mut self,
         new_img: &[u8],
         outputs: &mut Vec<String>,
         sender: &SyncSender<(Vec<String>, ReadiedPack)>,
@@ -222,8 +223,6 @@ mod tests {
 
     #[test]
     fn transitions_should_end_with_equal_vectors() {
-        let ((fr_send, _fr_recv), (_stop_send, stop_recv)) = make_senders_and_receivers();
-
         use TransitionType as TT;
         let transitions = [
             TT::Simple,
@@ -236,15 +235,30 @@ mod tests {
             TT::Random,
         ];
         for transition in transitions {
+            let ((fr_send, fr_recv), (_stop_send, stop_recv)) = make_senders_and_receivers();
             let (old_img, new_img) = make_test_boxes();
-            let mut t = test_transition(old_img, transition.clone());
+            let mut transition_img = old_img.clone();
+            let t = test_transition(old_img, transition.clone());
+            let mut dummies = dummy_outputs();
 
-            assert!(t.execute(&new_img, &mut dummy_outputs(), &fr_send, &stop_recv));
-            assert_eq!(
-                t.old_img, new_img,
-                "Transition {:?} did not end with correct new_img",
-                transition
-            );
+            let handle = {
+                let new_img = new_img.clone();
+                std::thread::spawn(move || t.execute(&new_img, &mut dummies, &fr_send, &stop_recv))
+            };
+
+            while let Ok((_, i)) = fr_recv.recv() {
+                i.unpack(&mut transition_img);
+            }
+
+            assert!(handle.join().unwrap());
+            for (tpix, npix) in transition_img.chunks_exact(4).zip(new_img.chunks_exact(4)) {
+                assert_eq!(
+                    tpix[0..3],
+                    npix[0..3],
+                    "Transition {:?} did not end with correct new_img",
+                    transition
+                );
+            }
         }
     }
 }

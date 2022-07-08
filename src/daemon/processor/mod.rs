@@ -138,9 +138,8 @@ impl Processor {
             .name("animator".to_string()) //Name our threads  for better log messages
             .stack_size(TSTACK_SIZE) //the default of 2MB is way too overkill for this
             .spawn(move || {
-                let (mut out, mut transition, gif) = request.split();
+                let (mut out, transition, gif) = request.split();
                 if transition.execute(&new_img, &mut out, &sender, &stop_recv) {
-                    drop(transition);
                     if let Some(gif) = gif {
                         animation(gif, new_img, out, sender, stop_recv);
                     }
