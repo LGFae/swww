@@ -56,9 +56,29 @@ impl Transition {
             TransitionType::Right => self.right(new_img, outputs, sender, stop_recv),
             TransitionType::Top => self.top(new_img, outputs, sender, stop_recv),
             TransitionType::Bottom => self.bottom(new_img, outputs, sender, stop_recv),
-            TransitionType::Center => self.left(new_img, outputs, sender, stop_recv),
-            TransitionType::Outer => self.left(new_img, outputs, sender, stop_recv),
-            TransitionType::Random => self.left(new_img, outputs, sender, stop_recv),
+            TransitionType::Center => self.center(new_img, outputs, sender, stop_recv),
+            TransitionType::Outer => self.outer(new_img, outputs, sender, stop_recv),
+            TransitionType::Random => self.random(new_img, outputs, sender, stop_recv),
+        }
+    }
+
+    fn random(
+        self,
+        new_img: &[u8],
+        outputs: &mut Vec<String>,
+        sender: &SyncSender<(Vec<String>, ReadiedPack)>,
+        stop_recv: &mpsc::Receiver<Vec<String>>,
+    ) -> bool {
+        let r: u8 = rand::random();
+        match r % 7 {
+            0 => self.simple(new_img, outputs, sender, stop_recv),
+            1 => self.left(new_img, outputs, sender, stop_recv),
+            2 => self.right(new_img, outputs, sender, stop_recv),
+            3 => self.top(new_img, outputs, sender, stop_recv),
+            4 => self.bottom(new_img, outputs, sender, stop_recv),
+            5 => self.center(new_img, outputs, sender, stop_recv),
+            6 => self.outer(new_img, outputs, sender, stop_recv),
+            _ => unreachable!(),
         }
     }
 
@@ -263,6 +283,105 @@ impl Transition {
             }
         }
     }
+
+    fn center(
+        mut self,
+        new_img: &[u8],
+        outputs: &mut Vec<String>,
+        sender: &SyncSender<(Vec<String>, ReadiedPack)>,
+        stop_recv: &mpsc::Receiver<Vec<String>>,
+    ) -> bool {
+        let (width, height) = (self.dimensions.0 as usize, self.dimensions.1 as usize);
+        let (center_x, center_y) = (width / 2, height / 2);
+        let mut dist_center = 0;
+        let mut now = Instant::now();
+        loop {
+            let transition_img =
+                ReadiedPack::new(&mut self.old_img, new_img, |old_pix, new_pix, i| {
+                    let pix_x = i % width;
+                    let pix_y = height - i / width;
+                    let diff_x = pix_x.abs_diff(center_x);
+                    let diff_y = pix_y.abs_diff(center_y);
+                    let pix_center_dist = diff_x * diff_x + diff_y * diff_y;
+                    if pix_center_dist <= dist_center * dist_center {
+                        let step = self
+                            .step
+                            .saturating_add(((dist_center * dist_center) - pix_center_dist) as u8);
+                        for (old_col, new_col) in old_pix.iter_mut().zip(new_pix) {
+                            if old_col.abs_diff(*new_col) < step {
+                                *old_col = *new_col;
+                            } else if *old_col > *new_col {
+                                *old_col -= step;
+                            } else {
+                                *old_col += step;
+                            }
+                        }
+                    }
+                });
+            if transition_img.is_empty() {
+                debug!("Transition has finished.");
+                return true;
+            };
+            let timeout = self.fps.saturating_sub(now.elapsed());
+            if send_frame(transition_img, outputs, timeout, sender, stop_recv) {
+                debug!("Transition was interrupted!");
+                return false;
+            };
+            now = Instant::now();
+            dist_center += 2
+        }
+    }
+
+    fn outer(
+        mut self,
+        new_img: &[u8],
+        outputs: &mut Vec<String>,
+        sender: &SyncSender<(Vec<String>, ReadiedPack)>,
+        stop_recv: &mpsc::Receiver<Vec<String>>,
+    ) -> bool {
+        let (width, height) = (self.dimensions.0 as usize, self.dimensions.1 as usize);
+        let (center_x, center_y) = (width / 2, height / 2);
+        let mut dist_center = ((center_x * center_x + center_y * center_y) as f64).sqrt() as usize;
+        let mut now = Instant::now();
+        loop {
+            let transition_img =
+                ReadiedPack::new(&mut self.old_img, new_img, |old_pix, new_pix, i| {
+                    let pix_x = i % width;
+                    let pix_y = height - i / width;
+                    let diff_x = pix_x.abs_diff(center_x);
+                    let diff_y = pix_y.abs_diff(center_y);
+                    let pix_center_dist = diff_x * diff_x + diff_y * diff_y;
+                    if pix_center_dist >= dist_center * dist_center {
+                        let step =
+                            self.step + (pix_center_dist - (dist_center * dist_center)) as u8;
+                        for (old_col, new_col) in old_pix.iter_mut().zip(new_pix) {
+                            if old_col.abs_diff(*new_col) < step {
+                                *old_col = *new_col;
+                            } else if *old_col > *new_col {
+                                *old_col -= step;
+                            } else {
+                                *old_col += step;
+                            }
+                        }
+                    }
+                });
+            if transition_img.is_empty() {
+                debug!("Transition has finished.");
+                return true;
+            };
+            let timeout = self.fps.saturating_sub(now.elapsed());
+            if send_frame(transition_img, outputs, timeout, sender, stop_recv) {
+                debug!("Transition was interrupted!");
+                return false;
+            };
+            now = Instant::now();
+            if dist_center >= 1 {
+                dist_center -= 1
+            } else {
+                dist_center = 0
+            }
+        }
+    }
 }
 
 pub struct GifProcessor {
@@ -377,9 +496,7 @@ mod tests {
                 i.unpack(&mut transition_img);
             }
 
-            assert!(handle
-                .join()
-                .unwrap_or_else(|_| panic!("{:?}", transition)));
+            assert!(handle.join().unwrap_or_else(|_| panic!("{:?}", transition)));
             for (tpix, npix) in transition_img.chunks_exact(4).zip(new_img.chunks_exact(4)) {
                 assert_eq!(
                     tpix[0..3],
