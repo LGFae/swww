@@ -24,7 +24,7 @@ use std::{
     cell::{Cell, RefCell, RefMut},
     fmt, fs,
     os::unix::net::{UnixListener, UnixStream},
-    path::{Path, PathBuf},
+    path::PathBuf,
     rc::Rc,
 };
 
@@ -258,7 +258,7 @@ pub fn main() {
 
     //NOTE: we can't move display into the function because it causes a segfault
     main_loop(bgs, queue, &display, listener);
-    let socket_addr = get_socket_addr();
+    let socket_addr = crate::communication::get_socket_path();
     if let Err(e) = fs::remove_file(&socket_addr) {
         error!(
             "Failed to remove socket at {:?} after closing unexpectedly: {}",
@@ -326,24 +326,16 @@ fn create_backgrounds(
 }
 
 fn make_socket() -> UnixListener {
-    let socket_addr = get_socket_addr();
-    UnixListener::bind(socket_addr).expect("Couldn't bind socket")
-}
-
-fn get_socket_addr() -> PathBuf {
-    let runtime_dir = if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
-        dir
-    } else {
-        "/tmp/swww".to_string()
-    };
-
-    let runtime_dir = Path::new(&runtime_dir);
+    let socket_addr = crate::communication::get_socket_path();
+    let runtime_dir = socket_addr
+        .parent()
+        .expect("couldn't find a valid runtime directory");
 
     if !runtime_dir.exists() {
         fs::create_dir(runtime_dir).expect("Failed to create runtime dir...");
     }
 
-    runtime_dir.join("swww.socket")
+    UnixListener::bind(socket_addr).expect("Couldn't bind socket")
 }
 
 ///bgs and display can't be moved into here because it causes a segfault
@@ -503,10 +495,7 @@ fn make_processor_requests(bgs: &mut RefMut<Vec<Bg>>, img: &Img) -> Vec<Processo
                 groups[i].0.add_output(&bg.info.name);
             } else {
                 let old_img = Box::from(bg.get_current_img());
-                groups.push((
-                    ProcessorRequest::new(&bg.info, old_img, img),
-                    &bg.info.img,
-                ));
+                groups.push((ProcessorRequest::new(&bg.info, old_img, img), &bg.info.img));
             }
         });
     groups.into_iter().map(|g| g.0).collect()

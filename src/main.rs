@@ -1,9 +1,5 @@
 use clap::Parser;
-use std::{
-    os::unix::net::UnixStream,
-    path::{Path, PathBuf},
-    time::Duration,
-};
+use std::{os::unix::net::UnixStream, time::Duration};
 
 mod cli;
 mod communication;
@@ -13,11 +9,8 @@ use communication::Answer;
 
 fn main() -> Result<(), String> {
     let mut swww = Swww::parse();
-    if let Swww::Init {
-        no_daemon,
-    } = &swww
-    {
-        if get_socket(1, 0).is_err() {
+    if let Swww::Init { no_daemon } = &swww {
+        if connect_to_socket(1, 0).is_err() {
             spawn_daemon(*no_daemon)?;
             if *no_daemon {
                 return Ok(());
@@ -27,7 +20,7 @@ fn main() -> Result<(), String> {
         }
     }
 
-    let socket = get_socket(5, 100)?;
+    let socket = connect_to_socket(5, 100)?;
     swww.send(&socket)?;
     match Answer::receive(socket)? {
         Answer::Err(msg) => return Err(msg),
@@ -38,7 +31,7 @@ fn main() -> Result<(), String> {
                 let tries = 20;
                 #[cfg(not(debug_assertions))]
                 let tries = 10;
-                let socket_path = get_socket_path();
+                let socket_path = communication::get_socket_path();
                 for _ in 0..tries {
                     if !socket_path.exists() {
                         return Ok(());
@@ -77,10 +70,10 @@ fn spawn_daemon(no_daemon: bool) -> Result<(), String> {
 ///
 /// * `tries` -  how make times to attempt the connection
 /// * `interval` - how long to wait between attempts, in milliseconds
-fn get_socket(tries: u8, interval: u64) -> Result<UnixStream, String> {
+fn connect_to_socket(tries: u8, interval: u64) -> Result<UnixStream, String> {
     //Make sure we try at least once
     let tries = if tries == 0 { 1 } else { tries };
-    let path = get_socket_path();
+    let path = communication::get_socket_path();
     let mut error = String::new();
     for _ in 0..tries {
         match UnixStream::connect(&path) {
@@ -95,14 +88,4 @@ fn get_socket(tries: u8, interval: u64) -> Result<UnixStream, String> {
         std::thread::sleep(Duration::from_millis(interval));
     }
     Err("Failed to connect to socket: ".to_string() + &error)
-}
-
-fn get_socket_path() -> PathBuf {
-    let runtime_dir = if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
-        dir
-    } else {
-        "/tmp/swww".to_string()
-    };
-    let runtime_dir = Path::new(&runtime_dir);
-    runtime_dir.join("swww.socket")
 }

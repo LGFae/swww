@@ -5,7 +5,7 @@ use crate::{
     daemon:: BgInfo
 };
 use serde::{Deserialize, Serialize};
-use std::{os::unix::net::UnixStream, time::Duration};
+use std::{os::unix::net::UnixStream, time::Duration, path::{Path, PathBuf}};
 
 #[derive(Serialize, Deserialize)]
 pub enum Answer {
@@ -80,4 +80,14 @@ impl Filter {
             Self::Lanczos3 => fast_image_resize::FilterType::Lanczos3,
         }
     }
+}
+
+pub fn get_socket_path() -> PathBuf {
+    let runtime_dir = if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
+        dir
+    } else {
+        "/tmp/swww".to_string()
+    };
+    let runtime_dir = Path::new(&runtime_dir);
+    runtime_dir.join("swww.socket")
 }
