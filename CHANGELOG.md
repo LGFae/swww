@@ -1,5 +1,11 @@
 ### Unreleased
 
+  * implemented the new transition effects
+
+  * refactored socket code
+
+  * refactored event loop initialization code, handling errors properly now
+
   * BREAKING CHANGE: we are using fast_image_resize to resize our images now.
   This makes resizing much faster (enough to smoothly play animations before
   caching is done), but it makes it so that the `Gaussian` and `Triangle`

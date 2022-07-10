@@ -57,8 +57,7 @@ overkill for my purposes.
 
 Comparing to `oguri`, `swww` uses less cpu power to animate once it has cached
 all the frames in the animation. It should also be **significantly** more
-memory efficient (make sure to see the
-[Caveats/Limitations](#CaveatsLimitations) though).
+memory efficient.
 
 The second is that, to my knowledge, there is no wallpaper daemon for wayland
 that allows you to change the wallpaper at runtime. That is, is order to, for
@@ -82,10 +81,17 @@ swww img -o <outputs> <path/to/img>
 # Control how smoothly the transition will happen and/or it's frame rate
 # For the step, smaller values = more smooth. Default = 20
 # For the frame rate, default is 30.
-swww img --transition-step <1 to 255> --transition-fps <1 to 255>
+swww img <path/to/img> --transition-step <1 to 255> --transition-fps <1 to 255>
 
-# Note you may also control the above by setting up the SWWW_TRANSITION_FPS and
-# SWWW_TRANSITION_STEP environment variables.
+# There are also many different transition effects:
+swww img <path/to/img> --transition-type center
+
+# Note you may also control the above by setting up the SWWW_TRANSITION_FPS,
+# SWWW_TRANSITION_STEP, SWWW_TRANSITION_SPEED and SWWW_TRANSITION environment
+# variables.
+
+# To see all options, run
+swww img --help
 ```
 If you would like to know the valid values for *\<outputs\>*, you can query the
 daemon. This will also tell you what the current image being displayed is, as
@@ -104,23 +110,6 @@ For a more complete description, run *swww --help* or *swww \<subcommand\>
 
 Finally, to get a feel for what you can do with some shell scripting, check out
 the 'example_scripts' folder. It can help you get started.
-
-## Caveats/Limitations
-
-I had a glorious name when I started this project, but alas, I couldn't quite
-get there, here are some issues with it:
-
- - Despite trying my best to make this as resource efficient as possible,
- **memory usage seems to increase a little bit with every new image openned**.
- Strangenly, it also seems that openning the same image again will *not*
- increase usage further.  It shouldn't be a big issue unless you want to go
- through all images in a huge directory (say, 100+ images). Note that, after
- going through it once, memory usage should more or less stabilize. See
- https://github.com/Horus645/swww/issues/4 for some extra details.
- - If the daemon exits in an unexpected way (for example, if you send SIGKILL to
- force its shutdown), it will leave a `swww.socket` file behind in
- `$XDG_RUNTIME_DIR` (or `/tmp/swww` if it isn't set). If you want to
- reinitialize the daemon, you will have to remove that file first.
 
 ## About new features
 
