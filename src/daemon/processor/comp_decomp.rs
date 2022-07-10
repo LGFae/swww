@@ -42,7 +42,8 @@ where
             equals += 1;
             match iter.next() {
                 None => return v.into_boxed_slice(),
-                Some((_, (c, g))) => {
+                Some((j, (c, g))) => {
+                    i = j;
                     cur = c;
                     goal = g;
                 }
