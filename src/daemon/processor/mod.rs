@@ -37,6 +37,7 @@ pub struct ProcessorRequest {
     old_img: Box<[u8]>,
     path: PathBuf,
     transition_type: TransitionType,
+    speed: u8,
     filter: FilterType,
     step: u8,
     fps: Duration,
@@ -50,6 +51,7 @@ impl ProcessorRequest {
             old_img,
             path: img.path.clone(),
             transition_type: img.transition_type.clone(),
+            speed: img.transition_speed,
             filter: img.filter.get_image_filter(),
             step: img.transition_step,
             fps: Duration::from_nanos(1_000_000_000 / img.transition_fps as u64),
@@ -69,6 +71,7 @@ impl ProcessorRequest {
             self.old_img,
             self.dimensions,
             self.transition_type,
+            self.speed,
             self.step,
             self.fps,
         );
