@@ -7,8 +7,10 @@ use smithay_client_toolkit::{
     output::{with_output_info, OutputInfo},
     reexports::{
         calloop::{
-            self, channel,
+            self,
+            channel::{self, Channel},
             signals::{self, Signal},
+            LoopHandle, LoopSignal,
         },
         client::protocol::{wl_output, wl_shm, wl_surface},
         client::{Attached, Display, EventQueue, Main},
@@ -257,7 +259,12 @@ pub fn main() {
         env.listen_for_outputs(move |output, info, _| output_handler(output, info));
 
     //NOTE: we can't move display into the function because it causes a segfault
-    main_loop(bgs, queue, &display, listener);
+    if let Err(e) = main_loop(bgs, queue, &display, listener) {
+        error!("{}", e);
+    } else {
+        info!("Finished running event loop.");
+    }
+
     let socket_addr = crate::communication::get_socket_path();
     if let Err(e) = fs::remove_file(&socket_addr) {
         error!(
@@ -338,72 +345,93 @@ fn make_socket() -> UnixListener {
     UnixListener::bind(socket_addr).expect("Couldn't bind socket")
 }
 
+fn register_signals(handle: &LoopHandle<LoopSignal>) -> Result<(), String> {
+    match signals::Signals::new(&[Signal::SIGINT, Signal::SIGQUIT, Signal::SIGTERM]) {
+        Ok(signals) => {
+            if let Err(e) = handle.insert_source(signals, |_, _, loop_signal| loop_signal.stop()) {
+                Err(format!("failed to insert signals source: {}", e))
+            } else {
+                Ok(())
+            }
+        }
+        Err(e) => Err(format!("failed to register signals to stop program: {}", e)),
+    }
+}
+
+fn register_channel<'a>(
+    handle: &LoopHandle<'a, LoopSignal>,
+    bgs: &'a Rc<RefCell<Vec<Bg>>>,
+    fr_recv: Channel<(Vec<String>, ReadiedPack)>,
+) -> Result<(), String> {
+    if let Err(e) = handle.insert_source(fr_recv, |evt, _, loop_signal| match evt {
+        channel::Event::Msg(msg) => handle_recv_img(&mut bgs.borrow_mut(), &msg),
+        channel::Event::Closed => loop_signal.stop(),
+    }) {
+        return Err(format! {"failed to register channel: {}", e});
+    }
+    Ok(())
+}
+
+fn register_socket<'a>(
+    handle: &LoopHandle<'a, LoopSignal>,
+    bgs: &'a Rc<RefCell<Vec<Bg>>>,
+    display: &'a Display,
+    processor: &'a Rc<RefCell<Processor>>,
+    listener: UnixListener,
+) -> Result<(), String> {
+    listener.set_nonblocking(true).unwrap();
+    if let Err(e) = handle.insert_source(
+        calloop::generic::Generic::new(listener, calloop::Interest::READ, calloop::Mode::Level),
+        |_, listener, loop_signal| {
+            let mut processor = processor.borrow_mut();
+            match listener.accept() {
+                Ok((stream, _)) => {
+                    match recv_socket_msg(bgs.borrow_mut(), stream, loop_signal, &mut processor) {
+                        Err(e) => error!("Failed to receive socket message: {}", e),
+                        Ok(()) => {
+                            //We must flush here because if multiple requests are sent at once the loop
+                            //might never be idle, and so the callback in the run function bellow
+                            //wouldn't be called (afaik)
+                            if let Err(e) = display.flush() {
+                                error!("Couldn't flush display: {}", e);
+                            }
+                        }
+                    }
+                }
+                Err(e) => error!("Failed to accept connection: {}", e),
+            }
+            Ok(calloop::PostAction::Continue)
+        },
+    ) {
+        return Err(format! {"failed to register socket: {}", e});
+    }
+    Ok(())
+}
 ///bgs and display can't be moved into here because it causes a segfault
 fn main_loop(
     bgs: Rc<RefCell<Vec<Bg>>>,
     queue: EventQueue,
     display: &Display,
     listener: UnixListener,
-) {
+) -> Result<(), String> {
     //We use 1 because we can't send a new frame without being absolutely sure that all previous
     //have already been displayed. Using 0 causes the animation to stop.
     let (frame_sender, frame_receiver) = calloop::channel::sync_channel(1);
     let processor = Rc::new(RefCell::new(Processor::new(frame_sender)));
-    let mut event_loop = calloop::EventLoop::<calloop::LoopSignal>::try_new().unwrap();
+    let mut event_loop = match calloop::EventLoop::<calloop::LoopSignal>::try_new() {
+        Ok(el) => el,
+        Err(e) => return Err(e.to_string()),
+    };
     let event_handle = event_loop.handle();
 
-    //I don't think the signal handling failing here is enough for us to panic.
-    if let Ok(signals) = signals::Signals::new(&[Signal::SIGINT, Signal::SIGQUIT, Signal::SIGTERM])
-    {
-        event_handle
-            .insert_source(signals, |_, _, loop_signal| loop_signal.stop())
-            .unwrap();
-    } else {
-        error!("failed to register signals to stop program!");
+    register_signals(&event_handle)?;
+    register_channel(&event_handle, &bgs, frame_receiver)?;
+    register_socket(&event_handle, &bgs, display, &processor, listener)?;
+
+    if let Err(e) = WaylandSource::new(queue).quick_insert(event_handle) {
+        return Err(e.to_string());
     }
 
-    event_handle
-        .insert_source(frame_receiver, |evt, _, loop_signal| match evt {
-            channel::Event::Msg(msg) => handle_recv_img(&mut bgs.borrow_mut(), &msg),
-            channel::Event::Closed => loop_signal.stop(),
-        })
-        .unwrap();
-
-    listener.set_nonblocking(true).unwrap();
-    event_handle
-        .insert_source(
-            calloop::generic::Generic::new(listener, calloop::Interest::READ, calloop::Mode::Level),
-            |_, listener, loop_signal| {
-                let mut processor = processor.borrow_mut();
-                match listener.accept() {
-                    Ok((stream, _)) => {
-                        match recv_socket_msg(bgs.borrow_mut(), stream, loop_signal, &mut processor)
-                        {
-                            Err(e) => error!("Failed to receive socket message: {}", e),
-                            Ok(()) => {
-                                //We must flush here because if multiple requests are sent at once the loop
-                                //might never be idle, and so the callback in the run function bellow
-                                //wouldn't be called (afaik)
-                                if let Err(e) = display.flush() {
-                                    error!("Couldn't flush display: {}", e);
-                                }
-                            }
-                        }
-                    }
-                    Err(e) => error!("Failed to accept connection: {}", e),
-                }
-                Ok(calloop::PostAction::Continue)
-            },
-        )
-        .unwrap();
-
-    WaylandSource::new(queue)
-        .quick_insert(event_handle)
-        .unwrap();
-
-    //IMPORTANT: For here on out, any failures must NOT result in a panic. We need to exit cleanly.
-    //It is specially important to delete the socket file, since that will cause an attempt to
-    //launch a new instance of the daemon to fail
     info!("Initialization succeeded! Starting main loop...");
     let mut loop_signal = event_loop.get_signal();
     if let Err(e) = event_loop.run(None, &mut loop_signal, |_| {
@@ -428,9 +456,10 @@ fn main_loop(
             error!("Couldn't flush display: {}", e);
         }
     }) {
-        error!("Event loop closed unexpectedly: {}", e);
+        return Err(format!("Event loop closed unexpectedly: {}", e));
     }
-    info!("Finished running event loop.");
+
+    Ok(())
 }
 
 fn recv_socket_msg(
