@@ -1,6 +1,8 @@
 # A Solution to your Wayland Wallpaper Woes
 ### Efficient animated wallpaper daemon for wayland, controlled at runtime
 
+![swww demonstration](https://i.imgur.com/Q1b7152.gif)
+
 ## Dependencies
 
  - a compositor that implements:
@@ -111,6 +113,25 @@ For a more complete description, run *swww --help* or *swww \<subcommand\>
 Finally, to get a feel for what you can do with some shell scripting, check out
 the 'example_scripts' folder. It can help you get started.
 
+## Transitions
+
+#### Example left transition:
+
+![left transition demonstration](https://i.imgur.com/hQW00Wx.gif)
+
+The `right`, `top` and `bottom` transitions all work similarly.
+
+#### Example outer transition
+
+![outer transition demonstration](https://i.imgur.com/o4pSyxW.gif)
+
+The `center` transition is the oposite: it starts from the center towards the
+edges.
+
+There is also `simple`, which simply fades into the new image, any, which is
+like `center` but starts at a random point, and `random`, which selects a
+transition effect at ranom.
+
 ## About new features
 
 Broadly speaking, **NEW FEATURES WILL NOT BE ADDED, UNLESS THEY ARE EGREGIOUSLY
@@ -122,9 +143,6 @@ examples).
 
 If you really want some new feature within `swww` itself, I would recommend
 forking the repository.
-
-That said, I have plans for adding some different transition effects. If you
-happen to have ideas feel free to open an issue (or maybe even making a PR)!
 
 ## Alternatives
 
