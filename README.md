@@ -1,7 +1,8 @@
 # A Solution to your Wayland Wallpaper Woes
 ### Efficient animated wallpaper daemon for wayland, controlled at runtime
 
-![swww demonstration](https://i.imgur.com/Q1b7152.gif)
+![animated gif demonstration](https://i.imgur.com/Leuh6wm.gif)
+![image transition demonstration](https://i.imgur.com/fMBFruY.gif)
 
 ## Dependencies
 
@@ -115,11 +116,11 @@ the 'example_scripts' folder. It can help you get started.
 
 ## Transitions
 
-#### Example left transition:
+#### Example top transition:
 
-![left transition demonstration](https://i.imgur.com/hQW00Wx.gif)
+![top transition demonstration](https://i.imgur.com/ULm6XWI.gif)
 
-The `right`, `top` and `bottom` transitions all work similarly.
+The `let`, `right` and `bottom` transitions all work similarly.
 
 #### Example outer transition
 
