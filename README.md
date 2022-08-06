@@ -120,16 +120,16 @@ the 'example_scripts' folder. It can help you get started.
 
 ![top transition demonstration](https://i.imgur.com/ULm6XWI.gif)
 
-The `let`, `right` and `bottom` transitions all work similarly.
+The `left`, `right` and `bottom` transitions all work similarly.
 
 #### Example outer transition
 
 ![outer transition demonstration](https://i.imgur.com/o4pSyxW.gif)
 
-The `center` transition is the oposite: it starts from the center towards the
-edges.
+The `center` transition is the opposite: it starts from the center and goes 
+towards the edges.
 
-There is also `simple`, which simply fades into the new image, any, which is
+There is also `simple`, which simply fades into the new image, `any`, which is
 like `center` but starts at a random point, and `random`, which selects a
 transition effect at ranom.
 
