@@ -24,9 +24,9 @@ impl Answer {
 
     pub fn receive(stream: UnixStream) -> Result<Self, String> {
         #[cfg(debug_assertions)]
-        let timeout = Duration::from_secs(15); //Some operations take a while to respond in debug mode
+        let timeout = Duration::from_secs(60); //Some operations take a while to respond in debug mode
         #[cfg(not(debug_assertions))]
-        let timeout = Duration::from_secs(1);
+        let timeout = Duration::from_secs(10);
 
         if let Err(e) = stream.set_read_timeout(Some(timeout)) {
             return Err(format!("Failed to set read timeout: {}", e));
