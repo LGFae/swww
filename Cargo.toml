@@ -1,6 +1,6 @@
 [package]
 name = "swww"
-version = "0.3.0"
+version = "0.4.0"
 authors = ["Leonardo Gibrowski Faé <leonardo.fae44@gmail.com>"]
 edition = "2021"
 
@@ -23,9 +23,9 @@ image = { version = "=0.24.3", default-features = false, features = [ "gif", "jp
 log = { version = "=0.4.17", features = ["max_level_debug", "release_max_level_info"] }
 simplelog = "=0.12.0"
 fork = "=0.1.19"
-clap = { version = "=3.2.15", features = ["derive", "wrap_help", "env"] }
+clap = { version = "=3.2.16", features = ["derive", "wrap_help", "env"] }
 lzzzz = "=1.0.3"
-serde = { version = "=1.0.140", features = [ "derive" ] }
+serde = { version = "=1.0.142", features = [ "derive" ] }
 bincode = "=1.3.3"
 lazy_static = "=1.4.0"
 fast_image_resize = "=1.0.0"
@@ -35,9 +35,9 @@ rand = "=0.8.5"
 assert_cmd = "=2.0.4"
 
 [build-dependencies]
-clap = { version = "=3.2.15", features = ["derive", "env"] }
+clap = { version = "=3.2.16", features = ["derive", "env"] }
 clap_complete = "=3.2.3"
-serde =  { version = "=1.0.140", features = [ "derive" ] }
+serde =  { version = "=1.0.142", features = [ "derive" ] }
 
 [[test]]
 name = "integration_tests"

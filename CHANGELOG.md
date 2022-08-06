@@ -1,5 +1,6 @@
 ### Unreleased
 
+### 0.4.0
   * implemented the new transition effects
 
   * refactored socket code
