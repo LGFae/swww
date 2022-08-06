@@ -121,7 +121,11 @@ impl Processor {
             };
             self.stop_animations(&request.outputs);
 
-            let new_img = img_resize(img, request.dimensions, request.filter);
+            let new_img = match img_resize(img, request.dimensions, request.filter) {
+                Ok(i) => i,
+                Err(e) => return Answer::Err(e),
+            };
+
             self.transition(request, new_img);
         }
         debug!("Finished image processing!");
@@ -216,24 +220,36 @@ fn animation(
     }
 }
 
-fn img_resize(img: image::RgbaImage, dimensions: (u32, u32), filter: FilterType) -> Box<[u8]> {
+fn img_resize(
+    img: image::RgbaImage,
+    dimensions: (u32, u32),
+    filter: FilterType,
+) -> Result<Box<[u8]>, String> {
     let (width, height) = dimensions;
+    let (img_w, img_h) = img.dimensions();
     debug!("Output dimensions: {:?}", (width, height));
-    debug!("Image dimensions:  {:?}", img.dimensions());
-    let mut resized_img = if img.dimensions() != (width, height) {
+    debug!("Image dimensions:  {:?}", (img_w, img_h));
+    let mut resized_img = if (img_w, img_h) != (width, height) {
         debug!("Image dimensions are different from output's. Resizing...");
-        let mut src = fast_image_resize::Image::from_vec_u8(
-            std::num::NonZeroU32::new(img.dimensions().0).unwrap(),
-            std::num::NonZeroU32::new(img.dimensions().1).unwrap(),
+
+        let mut src = match fast_image_resize::Image::from_vec_u8(
+            // We unwrap bellow because we know the images's dimensions should never be 0
+            std::num::NonZeroU32::new(img_w).unwrap(),
+            std::num::NonZeroU32::new(img_h).unwrap(),
             img.into_raw(),
             fast_image_resize::PixelType::U8x4,
-        )
-        .unwrap();
+        ) {
+            Ok(i) => i,
+            Err(e) => return Err(e.to_string())
+        };
+        
         let alpha_mul_div = fast_image_resize::MulDiv::default();
-        alpha_mul_div
-            .multiply_alpha_inplace(&mut src.view_mut())
-            .unwrap();
+        if let Err(e) = alpha_mul_div.multiply_alpha_inplace(&mut src.view_mut()) {
+            return Err(e.to_string());
+        }
+
         let mut dst = fast_image_resize::Image::new(
+            // We unwrap bellow because we know the outputs's dimensions should never be 0
             std::num::NonZeroU32::new(width).unwrap(),
             std::num::NonZeroU32::new(height).unwrap(),
             fast_image_resize::PixelType::U8x4,
@@ -242,9 +258,15 @@ fn img_resize(img: image::RgbaImage, dimensions: (u32, u32), filter: FilterType)
 
         let mut resizer =
             fast_image_resize::Resizer::new(fast_image_resize::ResizeAlg::Convolution(filter));
-        resizer.resize(&src.view(), &mut dst_view).unwrap();
 
-        alpha_mul_div.divide_alpha_inplace(&mut dst_view).unwrap();
+        if let Err(e) = resizer.resize(&src.view(), &mut dst_view) {
+            return Err(e.to_string());
+        }
+
+        if let Err(e) = alpha_mul_div.divide_alpha_inplace(&mut dst_view) {
+            return Err(e.to_string());
+        }
+
         image::RgbaImage::from_vec(width, height, dst.into_vec()).unwrap()
     } else {
         img
@@ -256,7 +278,7 @@ fn img_resize(img: image::RgbaImage, dimensions: (u32, u32), filter: FilterType)
         pixel.0.swap(0, 2);
     }
 
-    resized_img.into_raw().into_boxed_slice()
+    Ok(resized_img.into_raw().into_boxed_slice())
 }
 
 ///Returns whether the calling function should exit or not

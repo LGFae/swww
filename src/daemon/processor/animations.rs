@@ -382,7 +382,10 @@ impl GifProcessor {
         while let Some(Ok(frame)) = frames.next() {
             let (dur_num, dur_div) = frame.delay().numer_denom_ms();
             let duration = Duration::from_millis((dur_num / dur_div).into());
-            let img = img_resize(frame.into_buffer(), self.dimensions, self.filter);
+
+            // Unwrapping is fine because only the thread will panic in the worst case
+            // scenario, not the main loop
+            let img = img_resize(frame.into_buffer(), self.dimensions, self.filter).unwrap();
 
             let pack = BitPack::pack(&mut canvas, &img);
             if fr_sender.send((pack, duration)).is_err() {
