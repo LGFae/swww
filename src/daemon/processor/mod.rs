@@ -1,10 +1,11 @@
-use fast_image_resize::FilterType;
+use fast_image_resize::{FilterType, PixelType, Resizer};
 use image::{self, codecs::gif::GifDecoder, ImageFormat};
 use log::debug;
 
 use smithay_client_toolkit::reexports::calloop::channel::SyncSender;
 
 use std::{
+    num::NonZeroU32,
     path::PathBuf,
     sync::mpsc,
     thread,
@@ -234,32 +235,31 @@ fn img_resize(
 
         let mut src = match fast_image_resize::Image::from_vec_u8(
             // We unwrap bellow because we know the images's dimensions should never be 0
-            std::num::NonZeroU32::new(img_w).unwrap(),
-            std::num::NonZeroU32::new(img_h).unwrap(),
+            NonZeroU32::new(img_w).unwrap(),
+            NonZeroU32::new(img_h).unwrap(),
             img.into_raw(),
-            fast_image_resize::PixelType::U8x4,
+            PixelType::U8x4,
         ) {
             Ok(i) => i,
-            Err(e) => return Err(e.to_string())
+            Err(e) => return Err(e.to_string()),
         };
-        
+
         let alpha_mul_div = fast_image_resize::MulDiv::default();
         if let Err(e) = alpha_mul_div.multiply_alpha_inplace(&mut src.view_mut()) {
             return Err(e.to_string());
         }
 
-        let mut dst = fast_image_resize::Image::new(
-            // We unwrap bellow because we know the outputs's dimensions should never be 0
-            std::num::NonZeroU32::new(width).unwrap(),
-            std::num::NonZeroU32::new(height).unwrap(),
-            fast_image_resize::PixelType::U8x4,
-        );
+        // We unwrap bellow because we know the outputs's dimensions should never be 0
+        let new_w = NonZeroU32::new(width).unwrap();
+        let new_h = NonZeroU32::new(height).unwrap();
+        let mut src_view = src.view();
+        src_view.set_crop_box_to_fit_dst_size(new_w, new_h, Some((0.5, 0.5)));
+
+        let mut dst = fast_image_resize::Image::new(new_w, new_h, PixelType::U8x4);
         let mut dst_view = dst.view_mut();
 
-        let mut resizer =
-            fast_image_resize::Resizer::new(fast_image_resize::ResizeAlg::Convolution(filter));
-
-        if let Err(e) = resizer.resize(&src.view(), &mut dst_view) {
+        let mut resizer = Resizer::new(fast_image_resize::ResizeAlg::Convolution(filter));
+        if let Err(e) = resizer.resize(&src_view, &mut dst_view) {
             return Err(e.to_string());
         }
 
