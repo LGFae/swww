@@ -8,10 +8,14 @@ if [ $# -lt 1 ]; then
 	exit 1
 fi
 
-# Update version in Cargo.toml:
+# Cargo.toml:
 sed "s/^version = .*/version = \"$1\"/" Cargo.toml > TMP \
 	&& mv TMP Cargo.toml
 
-# Update CHANGELOG:
-sed -e "s/^### Unreleased/### $1/" -e '1s/^/### Unreleased\n\n\n/' CHANGELOG.md > TMP \
+# CHANGELOG:
+sed -e "s/^### Unreleased/### $1/" \
+	-e '1s/^/### Unreleased\n\n\n/' CHANGELOG.md > TMP \
 	&& mv TMP CHANGELOG.md
+
+# Make sure it still builds (just to be 100% safe), and to update Cargo.lock
+cargo build
