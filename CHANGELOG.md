@@ -1,6 +1,12 @@
 ### Unreleased
 
+
+### 0.4.1
+
+  * Fixed regression where the image was stretched on resize (#16)
+
 ### 0.4.0
+
   * implemented the new transition effects
 
   * refactored socket code
@@ -36,7 +42,8 @@
   our first release (since then I will consider swww to be pretty much feature
   complete).
 
-#### 0.2.0
+### 0.2.0
+
 Using unsafe to speed up decompression.
 Also, `swww init -i` and `swww init -c` may now be considered deprecated.
 It was originally created to bypass `swww init && swww img <path/to/img>` not
@@ -49,6 +56,6 @@ compatibility and just in case a regression happens. Once I am confident
 enough, they will be eliminated (that will let me erase around 50 lines of
 code, I think).
 
-#### 0.1.0
+### 0.1.0
 
 Initial release.
