@@ -133,6 +133,17 @@ There is also `simple`, which simply fades into the new image, `any`, which is
 like `center` but starts at a random point, and `random`, which selects a
 transition effect at ranom.
 
+## Troubleshooting
+
+#### High cpu usage during caching of a gif's frames
+
+`swww` will use a non-insignificant amount of cpu power while caching the
+images. This will be specially noticeable if the images need to be resized
+before being displayed. So, if you have a very large `gif`, I would recommend
+resizing it **before** sending it to `swww`. That would make the caching phase
+much faster, and thus ultimately reduce power consumption. I can personally
+recommend [gifsicle](https://github.com/kohler/gifsicle) for this purpose.
+
 ## About new features
 
 Broadly speaking, **NEW FEATURES WILL NOT BE ADDED, UNLESS THEY ARE EGREGIOUSLY
