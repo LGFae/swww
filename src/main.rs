@@ -83,7 +83,14 @@ fn connect_to_socket(tries: u8, interval: u64) -> Result<UnixStream, String> {
                 }
                 return Ok(socket);
             }
-            Err(e) => error = e.to_string(),
+            Err(e) => {
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    return Err(
+                        "Socket file not found. Are you sure the daemon is running?".to_string()
+                    );
+                }
+                error = e.to_string();
+            }
         }
         std::thread::sleep(Duration::from_millis(interval));
     }
