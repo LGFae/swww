@@ -1,6 +1,6 @@
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
-use simplelog::{ColorChoice, LevelFilter, TermLogger, TerminalMode};
+use simplelog::{ColorChoice, LevelFilter, TermLogger, TerminalMode, ThreadLogMode};
 
 use smithay_client_toolkit::{
     environment::Environment,
@@ -196,10 +196,6 @@ impl Bg {
         let width = self.info.dim.0 as i32;
         let height = self.info.dim.1 as i32;
 
-        debug!(
-            "Current state of mempoll for output {}:{:?}",
-            self.info.name, self.pool
-        );
         let buffer = self
             .pool
             .buffer(0, width, height, stride, wl_shm::Format::Xrgb8888);
@@ -279,30 +275,18 @@ pub fn main() {
 }
 
 fn make_logger() {
-    #[cfg(debug_assertions)]
-    {
-        let config = simplelog::ConfigBuilder::new()
-            .set_thread_level(LevelFilter::Info) //let me see where the processing is happenning
-            .build();
-        TermLogger::init(
-            LevelFilter::Debug,
-            config,
-            TerminalMode::Stderr,
-            ColorChoice::AlwaysAnsi,
-        )
-        .expect("Failed to initialize logger. Cancelling...");
-    }
+    let config = simplelog::ConfigBuilder::new()
+        .set_thread_level(LevelFilter::Info) //let me see where the processing is happenning
+        .set_thread_mode(ThreadLogMode::Both)
+        .build();
 
-    #[cfg(not(debug_assertions))]
-    {
-        TermLogger::init(
-            LevelFilter::Info,
-            simplelog::Config::default(),
-            TerminalMode::Stderr,
-            ColorChoice::Auto,
-        )
-        .expect("Failed to initialize logger. Cancelling...");
-    }
+    TermLogger::init(
+        LevelFilter::Debug,
+        config,
+        TerminalMode::Stderr,
+        ColorChoice::AlwaysAnsi,
+    )
+    .expect("Failed to initialize logger. Cancelling...");
 }
 
 fn create_backgrounds(

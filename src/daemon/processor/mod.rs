@@ -175,6 +175,7 @@ fn animation(
     sender: SyncSender<(Vec<String>, ReadiedPack)>,
     stopper: mpsc::Receiver<Vec<String>>,
 ) {
+    debug!("Starting animation");
     let img_len = new_img.len();
     let mut cached_frames = Vec::new();
     let mut now = Instant::now();
@@ -293,6 +294,7 @@ fn send_frame(
         Ok(to_remove) => {
             outputs.retain(|o| !to_remove.contains(o));
             if outputs.is_empty() || to_remove.is_empty() {
+                debug!("STOPPING");
                 return true;
             }
         }

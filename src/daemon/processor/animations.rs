@@ -67,6 +67,7 @@ impl Transition {
         sender: &SyncSender<(Vec<String>, ReadiedPack)>,
         stop_recv: &mpsc::Receiver<Vec<String>>,
     ) -> bool {
+        debug!("Starting transition");
         match self.transition_type {
             TransitionType::Simple => self.simple(new_img, outputs, sender, stop_recv),
             TransitionType::Left => self.left(new_img, outputs, sender, stop_recv),
