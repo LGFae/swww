@@ -98,7 +98,7 @@ impl ProcessorRequest {
 
 pub struct Processor {
     frame_sender: SyncSender<(Vec<String>, ReadiedPack)>,
-    anim_stoppers: Vec<mpsc::SyncSender<Vec<String>>>,
+    anim_stoppers: Vec<mpsc::Sender<Vec<String>>>,
 }
 
 impl Processor {
@@ -140,7 +140,7 @@ impl Processor {
 
     fn transition(&mut self, request: ProcessorRequest, new_img: Box<[u8]>) {
         let sender = self.frame_sender.clone();
-        let (stopper, stop_recv) = mpsc::sync_channel(1);
+        let (stopper, stop_recv) = mpsc::channel();
         self.anim_stoppers.push(stopper);
         if let Err(e) = thread::Builder::new()
             .name("animator".to_string()) //Name our threads  for better log messages
