@@ -1,6 +1,11 @@
 ### Unreleased
 
 
+### 0.4.2
+
+  * Fixed #13.
+  * Improved error message when daemon isn't running (#18)
+
 ### 0.4.1
 
   * Fixed regression where the image was stretched on resize (#16)
