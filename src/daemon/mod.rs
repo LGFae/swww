@@ -28,7 +28,7 @@ use std::{
     os::unix::net::{UnixListener, UnixStream},
     path::PathBuf,
     rc::Rc,
-    sync::{Arc, Mutex},
+    sync::{Arc, RwLock},
 };
 
 use crate::cli::{Clear, Img, Swww};
@@ -84,7 +84,7 @@ impl fmt::Display for BgInfo {
 struct Bg {
     info: BgInfo,
     _listener: OutputListener,
-    physical_size: Arc<Mutex<i32>>,
+    scale_factor: Arc<RwLock<i32>>,
     surface: wl_surface::WlSurface,
     layer_surface: Main<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1>,
     next_render_event: Rc<Cell<Option<RenderEvent>>>,
@@ -135,17 +135,17 @@ impl Bg {
         // Commit so that the server will send a configure event
         surface.commit();
 
-        let scale_factor = Arc::new(Mutex::new(scale_factor));
+        let scale_factor = Arc::new(RwLock::new(scale_factor));
         let ps = Arc::clone(&scale_factor);
         let listener = add_output_listener(output, move |_, info, _| {
-            if let Ok(mut ps) = ps.lock() {
+            if let Ok(mut ps) = ps.write() {
                 *ps = info.scale_factor;
             }
         });
 
         Some(Self {
             surface,
-            physical_size: scale_factor,
+            scale_factor,
             layer_surface,
             next_render_event,
             pool,
@@ -165,10 +165,11 @@ impl Bg {
         match self.next_render_event.take() {
             Some(RenderEvent::Closed) => Some(true),
             Some(RenderEvent::Configure { width, height }) => {
-                let scale_factor = match self.physical_size.lock() {
+                let scale_factor = match self.scale_factor.read() {
                     Ok(i) => *i as u32,
                     Err(_) => 1_u32,
                 };
+                self.surface.set_buffer_scale(scale_factor as i32);
                 if self.info.dim != (width * scale_factor, height * scale_factor) {
                     self.info.dim = (width * scale_factor, height * scale_factor);
                     self.pool
@@ -213,6 +214,7 @@ impl Bg {
         let stride = 4 * self.info.dim.0 as i32;
         let width = self.info.dim.0 as i32;
         let height = self.info.dim.1 as i32;
+
 
         let buffer = self
             .pool
