@@ -4,7 +4,7 @@ use simplelog::{ColorChoice, LevelFilter, TermLogger, TerminalMode, ThreadLogMod
 
 use smithay_client_toolkit::{
     environment::Environment,
-    output::{with_output_info, OutputInfo},
+    output::{add_output_listener, with_output_info, OutputInfo, OutputListener},
     reexports::{
         calloop::{
             self,
@@ -28,6 +28,7 @@ use std::{
     os::unix::net::{UnixListener, UnixStream},
     path::PathBuf,
     rc::Rc,
+    sync::{Arc, Mutex},
 };
 
 use crate::cli::{Clear, Img, Swww};
@@ -82,6 +83,8 @@ impl fmt::Display for BgInfo {
 
 struct Bg {
     info: BgInfo,
+    _listener: OutputListener,
+    physical_size: Arc<Mutex<i32>>,
     surface: wl_surface::WlSurface,
     layer_surface: Main<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1>,
     next_render_event: Rc<Cell<Option<RenderEvent>>>,
@@ -92,6 +95,7 @@ impl Bg {
     fn new(
         output: &wl_output::WlOutput,
         output_name: String,
+        scale_factor: i32,
         surface: wl_surface::WlSurface,
         layer_shell: &Attached<zwlr_layer_shell_v1::ZwlrLayerShellV1>,
         pool: MemPool,
@@ -131,8 +135,17 @@ impl Bg {
         // Commit so that the server will send a configure event
         surface.commit();
 
+        let scale_factor = Arc::new(Mutex::new(scale_factor));
+        let ps = Arc::clone(&scale_factor);
+        let listener = add_output_listener(output, move |_, info, _| {
+            if let Ok(mut ps) = ps.lock() {
+                *ps = info.scale_factor;
+            }
+        });
+
         Some(Self {
             surface,
+            physical_size: scale_factor,
             layer_surface,
             next_render_event,
             pool,
@@ -141,6 +154,7 @@ impl Bg {
                 dim: (0, 0),
                 img: BgImg::Color([0, 0, 0]),
             },
+            _listener: listener,
         })
     }
 
@@ -151,10 +165,14 @@ impl Bg {
         match self.next_render_event.take() {
             Some(RenderEvent::Closed) => Some(true),
             Some(RenderEvent::Configure { width, height }) => {
-                if self.info.dim != (width, height) {
-                    self.info.dim = (width, height);
+                let scale_factor = match self.physical_size.lock() {
+                    Ok(i) => *i as u32,
+                    Err(_) => 1_u32,
+                };
+                if self.info.dim != (width * scale_factor, height * scale_factor) {
+                    self.info.dim = (width * scale_factor, height * scale_factor);
                     self.pool
-                        .resize(width as usize * height as usize * 4)
+                        .resize(self.info.dim.0 as usize * self.info.dim.1 as usize * 4)
                         .unwrap();
                     self.clear([0, 0, 0]);
                     debug!("Configured output: {}", self.info.name);
@@ -249,8 +267,6 @@ pub fn main() {
         }
     }
 
-    // Setup a listener for changes
-    // The listener will live for as long as we keep this handle alive
     let _listner_handle =
         env.listen_for_outputs(move |output, info, _| output_handler(output, info));
 
@@ -310,7 +326,14 @@ fn create_backgrounds(
             .expect("Failed to create a memory pool!");
 
         debug!("New background with output: {:?}", info);
-        if let Some(bg) = Bg::new(&output, info.name.clone(), surface, layer_shell, pool) {
+        if let Some(bg) = Bg::new(
+            &output,
+            info.name.clone(),
+            info.scale_factor,
+            surface,
+            layer_shell,
+            pool,
+        ) {
             (*bgs.borrow_mut()).push(bg);
         }
     }
