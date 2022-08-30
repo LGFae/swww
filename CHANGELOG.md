@@ -1,7 +1,11 @@
 ### Unreleased
 
+
+### 0.4.3
+
   * Check to see if daemon is REALLY running when we see tha socket already
   exists (#11)
+  * Fix dpi scaling (#22)
 
 ### 0.4.2
 
