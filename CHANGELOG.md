@@ -1,5 +1,7 @@
 ### Unreleased
 
+  * Check to see if daemon is REALLY running when we see tha socket already
+  exists (#11)
 
 ### 0.4.2
 
