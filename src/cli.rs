@@ -244,6 +244,9 @@ pub struct Img {
 
     #[clap(long, env = "SWW_TRANSITION_CORDS_Y", default_value = "0")]
     pub transition_cord_y: usize,
+
+    #[clap(long, env = "SWW_TRANSITION_SPEED_STEP",default_value = "0")]
+    pub transition_speed_step: usize,
 }
 
 #[cfg(test)]

@@ -66,7 +66,8 @@ impl Transition {
         outputs: &mut Vec<String>,
         sender: &SyncSender<(Vec<String>, ReadiedPack)>,
         stop_recv: &mpsc::Receiver<Vec<String>>,
-        cords: Option<(usize, usize)>,
+        cords: (usize, usize),
+        speed_step: usize
     ) -> bool {
         debug!("Starting transition");
         match self.transition_type {
@@ -75,19 +76,11 @@ impl Transition {
             TransitionType::Right => self.right(new_img, outputs, sender, stop_recv),
             TransitionType::Top => self.top(new_img, outputs, sender, stop_recv),
             TransitionType::Bottom => self.bottom(new_img, outputs, sender, stop_recv),
-            TransitionType::Center => self.center(new_img, outputs, sender, stop_recv),
-            TransitionType::Outer => self.outer(new_img, outputs, sender, stop_recv),
-            TransitionType::Any => self.any(new_img, outputs, sender, stop_recv),
-            TransitionType::Random => self.random(new_img, outputs, sender, stop_recv),
-            TransitionType::From => {
-                match cords{
-                    Some((x, y)) => self.from(new_img, outputs, sender, stop_recv, (x, y)),
-                    None => {
-                        debug!("No cords provided for transition");
-                        false
-                    }
-                }
-            }
+            TransitionType::Center => self.center(new_img, outputs, sender, stop_recv,speed_step),
+            TransitionType::Outer => self.outer(new_img, outputs, sender, stop_recv,speed_step),
+            TransitionType::Any => self.any(new_img, outputs, sender, stop_recv,speed_step),
+            TransitionType::Random => self.random(new_img, outputs, sender, stop_recv,speed_step),
+            TransitionType::From => self.from(new_img, outputs, sender, stop_recv, cords,speed_step),
         }
     }
 
@@ -97,6 +90,7 @@ impl Transition {
         outputs: &mut Vec<String>,
         sender: &SyncSender<(Vec<String>, ReadiedPack)>,
         stop_recv: &mpsc::Receiver<Vec<String>>,
+        speed_step: usize
     ) -> bool {
         let r: u8 = rand::random();
         match r % 8 {
@@ -105,9 +99,9 @@ impl Transition {
             2 => self.right(new_img, outputs, sender, stop_recv),
             3 => self.top(new_img, outputs, sender, stop_recv),
             4 => self.bottom(new_img, outputs, sender, stop_recv),
-            5 => self.center(new_img, outputs, sender, stop_recv),
-            6 => self.outer(new_img, outputs, sender, stop_recv),
-            7 => self.any(new_img, outputs, sender, stop_recv),
+            5 => self.center(new_img, outputs, sender, stop_recv,speed_step),
+            6 => self.outer(new_img, outputs, sender, stop_recv,speed_step),
+            7 => self.any(new_img, outputs, sender, stop_recv,speed_step),
             _ => unreachable!(),
         }
     }
@@ -249,9 +243,10 @@ impl Transition {
         outputs: &mut Vec<String>,
         sender: &SyncSender<(Vec<String>, ReadiedPack)>,
         stop_recv: &mpsc::Receiver<Vec<String>>,
+        speed_step: usize
     ) -> bool {
         let fps = self.fps;
-        let speed = self.speed as usize;
+        let mut speed = self.speed as usize;
         let (width, height) = (self.dimensions.0 as usize, self.dimensions.1 as usize);
         let (center_x, center_y) = (width / 2, height / 2);
         let mut dist_center = 0;
@@ -274,6 +269,7 @@ impl Transition {
             send_transition_frame!(transition_img, outputs, now, fps, sender, stop_recv);
             now = Instant::now();
             dist_center += speed;
+            speed += speed_step;
         }
     }
 
@@ -283,9 +279,10 @@ impl Transition {
         outputs: &mut Vec<String>,
         sender: &SyncSender<(Vec<String>, ReadiedPack)>,
         stop_recv: &mpsc::Receiver<Vec<String>>,
+        speed_step: usize
     ) -> bool {
         let fps = self.fps;
-        let speed = self.speed as usize;
+        let mut speed = self.speed as usize;
         let (width, height) = (self.dimensions.0 as usize, self.dimensions.1 as usize);
         let (center_x, center_y) = (width / 2, height / 2);
         let mut dist_center = ((center_x * center_x + center_y * center_y) as f64).sqrt() as usize;
@@ -307,7 +304,8 @@ impl Transition {
             send_transition_frame!(transition_img, outputs, now, fps, sender, stop_recv);
             now = Instant::now();
             if dist_center >= speed {
-                dist_center -= speed
+                dist_center -= speed;
+                speed += speed_step;
             } else {
                 dist_center = 0
             }
@@ -320,9 +318,10 @@ impl Transition {
         outputs: &mut Vec<String>,
         sender: &SyncSender<(Vec<String>, ReadiedPack)>,
         stop_recv: &mpsc::Receiver<Vec<String>>,
+        speed_step: usize,
     ) -> bool {
         let fps = self.fps;
-        let speed = self.speed as usize;
+        let mut speed = self.speed as usize;
         let (width, height) = (self.dimensions.0 as usize, self.dimensions.1 as usize);
         let (center_x, center_y) = (
             rand::random::<usize>() % width,
@@ -348,6 +347,7 @@ impl Transition {
             send_transition_frame!(transition_img, outputs, now, fps, sender, stop_recv);
             now = Instant::now();
             dist_center += speed;
+            speed += speed_step;
         }
     }
     fn from(
@@ -357,9 +357,10 @@ impl Transition {
         sender: &SyncSender<(Vec<String>, ReadiedPack)>,
         stop_recv: &mpsc::Receiver<Vec<String>>,
         cords: (usize, usize),
+        speed_step: usize
     ) -> bool {
         let fps = self.fps;
-        let speed = self.speed as usize;
+        let mut speed = self.speed as usize;
         let (width, height) = (self.dimensions.0 as usize, self.dimensions.1 as usize);
         let (center_x, center_y) = (
             cords.0.min(width - 1),
@@ -385,6 +386,7 @@ impl Transition {
             send_transition_frame!(transition_img, outputs, now, fps, sender, stop_recv);
             now = Instant::now();
             dist_center += speed;
+            speed += speed_step;
         }
     }
 }

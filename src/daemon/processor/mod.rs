@@ -42,7 +42,8 @@ pub struct ProcessorRequest {
     filter: FilterType,
     step: u8,
     fps: Duration,
-    cords: Option<(usize, usize)>,
+    cords: (usize, usize),
+    speed_step: usize,
 }
 
 impl ProcessorRequest {
@@ -57,7 +58,8 @@ impl ProcessorRequest {
             filter: img.filter.get_image_filter(),
             step: img.transition_step,
             fps: Duration::from_nanos(1_000_000_000 / img.transition_fps as u64),
-            cords: Some((img.transition_cord_x,img.transition_cord_y)),
+            cords: (img.transition_cord_x,img.transition_cord_y),
+            speed_step: img.transition_speed_step
         }
     }
 
@@ -69,7 +71,7 @@ impl ProcessorRequest {
         self.dimensions
     }
 
-    fn split(self) -> (Vec<String>, Transition, Option<GifProcessor>,Option<(usize,usize)>){
+    fn split(self) -> (Vec<String>, Transition, Option<GifProcessor>,(usize,usize),usize){
         let transition = Transition::new(
             self.old_img,
             self.dimensions,
@@ -94,7 +96,7 @@ impl ProcessorRequest {
                 None
             }
         };
-        (self.outputs, transition, animation,self.cords)
+        (self.outputs, transition, animation,self.cords,self.speed_step)
     }
 }
 
@@ -148,8 +150,8 @@ impl Processor {
             .name("animator".to_string()) //Name our threads  for better log messages
             .stack_size(TSTACK_SIZE) //the default of 2MB is way too overkill for this
             .spawn(move || {
-                let (mut out, transition, gif,cords) = request.split();
-                if transition.execute(&new_img, &mut out, &sender, &stop_recv, cords) {
+                let (mut out, transition, gif,cords,speed_step) = request.split();
+                if transition.execute(&new_img, &mut out, &sender, &stop_recv, cords,speed_step) {
                     if let Some(gif) = gif {
                         animation(gif, new_img, out, sender, stop_recv);
                     }
