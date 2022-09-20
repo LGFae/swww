@@ -66,6 +66,7 @@ impl Transition {
         outputs: &mut Vec<String>,
         sender: &SyncSender<(Vec<String>, ReadiedPack)>,
         stop_recv: &mpsc::Receiver<Vec<String>>,
+        cords: Option<(usize, usize)>,
     ) -> bool {
         debug!("Starting transition");
         match self.transition_type {
@@ -78,6 +79,15 @@ impl Transition {
             TransitionType::Outer => self.outer(new_img, outputs, sender, stop_recv),
             TransitionType::Any => self.any(new_img, outputs, sender, stop_recv),
             TransitionType::Random => self.random(new_img, outputs, sender, stop_recv),
+            TransitionType::From => {
+                match cords{
+                    Some((x, y)) => self.from(new_img, outputs, sender, stop_recv, (x, y)),
+                    None => {
+                        debug!("No cords provided for transition");
+                        false
+                    }
+                }
+            }
         }
     }
 
@@ -340,6 +350,43 @@ impl Transition {
             dist_center += speed;
         }
     }
+    fn from(
+        mut self,
+        new_img: &[u8],
+        outputs: &mut Vec<String>,
+        sender: &SyncSender<(Vec<String>, ReadiedPack)>,
+        stop_recv: &mpsc::Receiver<Vec<String>>,
+        cords: (usize, usize),
+    ) -> bool {
+        let fps = self.fps;
+        let speed = self.speed as usize;
+        let (width, height) = (self.dimensions.0 as usize, self.dimensions.1 as usize);
+        let (center_x, center_y) = (
+            cords.0.min(width - 1),
+            cords.1.min(height - 1),
+        );
+        let mut dist_center = 0;
+        let mut now = Instant::now();
+        loop {
+            let transition_img =
+                ReadiedPack::new(&mut self.old_img, new_img, |old_pix, new_pix, i| {
+                    let pix_x = i % width;
+                    let pix_y = height - i / width;
+                    let diff_x = pix_x.abs_diff(center_x);
+                    let diff_y = pix_y.abs_diff(center_y);
+                    let pix_center_dist = diff_x * diff_x + diff_y * diff_y;
+                    if pix_center_dist <= dist_center * dist_center {
+                        let step = self
+                            .step
+                            .saturating_add(((dist_center * dist_center) - pix_center_dist) as u8);
+                        change_cols(step, old_pix, new_pix);
+                    }
+                });
+            send_transition_frame!(transition_img, outputs, now, fps, sender, stop_recv);
+            now = Instant::now();
+            dist_center += speed;
+        }
+    }
 }
 
 fn change_cols(step: u8, old: &mut [u8; 4], new: &[u8; 4]) {
@@ -464,7 +511,7 @@ mod tests {
 
             let handle = {
                 let new_img = new_img.clone();
-                std::thread::spawn(move || t.execute(&new_img, &mut dummies, &fr_send, &stop_recv))
+                std::thread::spawn(move || t.execute(&new_img, &mut dummies, &fr_send, &stop_recv, None))
             };
 
             while let Ok((_, i)) = fr_recv.recv() {

@@ -74,6 +74,7 @@ pub enum TransitionType {
     Outer,
     Any,
     Random,
+    From,
 }
 
 impl std::str::FromStr for TransitionType {
@@ -90,8 +91,9 @@ impl std::str::FromStr for TransitionType {
             "outer" => Ok(Self::Outer),
             "any" => Ok(Self::Any),
             "random" => Ok(Self::Random),
+            "from" => Ok(Self::From),
             _ => Err("unrecognized transition type. Valid transitions are:\
-                     simple | lest | right | top | bottom | center | outer | random\
+                     [ simple | left | right | top | bottom | center | outer | random | from ]\
                      see swww img --help for more details"),
         }
     }
@@ -236,6 +238,12 @@ pub struct Img {
     ///approach the new image every frame.
     #[clap(long, env = "SWWW_TRANSITION_FPS", default_value = "30")]
     pub transition_fps: u8,
+
+    #[clap(long, env = "SWW_TRANSITION_CORDS_X", default_value = "0")]
+    pub transition_cord_x: usize,
+
+    #[clap(long, env = "SWW_TRANSITION_CORDS_Y", default_value = "0")]
+    pub transition_cord_y: usize,
 }
 
 #[cfg(test)]
