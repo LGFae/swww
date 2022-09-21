@@ -241,8 +241,7 @@ pub struct Img {
 
     ///X cordinate to use as center for the transition
     ///
-    ///this is only used with the `from` transition
-    ///
+    ///Note only wokrs with the `from` transition
     #[clap(long, env = "SWW_TRANSITION_CORDS_X", default_value = "0")]
     pub transition_cord_x: usize,
 
