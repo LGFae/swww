@@ -248,13 +248,13 @@ pub struct Img {
 
     ///Y cordinate to use as center for the transition
     ///
-    ///only works with the `from` transition
+    ///Note only works with the `from` transition
     #[clap(long, env = "SWW_TRANSITION_CORDS_Y", default_value = "0")]
     pub transition_cord_y: usize,
 
     ///value to increase the total speed by every frame
     ///
-    ///only works with center|any|outer|from|random transitions
+    ///Note only works with center|any|outer|from|random transitions
     #[clap(long, env = "SWW_TRANSITION_SPEED_STEP",default_value = "0")]
     pub transition_speed_step: usize,
 }
