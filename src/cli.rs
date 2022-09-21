@@ -239,12 +239,22 @@ pub struct Img {
     #[clap(long, env = "SWWW_TRANSITION_FPS", default_value = "30")]
     pub transition_fps: u8,
 
+    ///X cordinate to use as center for the transition
+    ///
+    ///this is only used with the `from` transition
+    ///
     #[clap(long, env = "SWW_TRANSITION_CORDS_X", default_value = "0")]
     pub transition_cord_x: usize,
 
+    ///Y cordinate to use as center for the transition
+    ///
+    ///only works with the `from` transition
     #[clap(long, env = "SWW_TRANSITION_CORDS_Y", default_value = "0")]
     pub transition_cord_y: usize,
 
+    ///value to increase the total speed by every frame
+    ///
+    ///only works with center|any|outer|from|random transitions
     #[clap(long, env = "SWW_TRANSITION_SPEED_STEP",default_value = "0")]
     pub transition_speed_step: usize,
 }
