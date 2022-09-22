@@ -259,7 +259,13 @@ pub fn main() {
     let env_handle = env.clone();
     let bgs_handle = Rc::clone(&bgs);
     let output_handler = move |output: wl_output::WlOutput, info: &OutputInfo| {
-        create_backgrounds(output, info, &env_handle, &bgs_handle, &layer_shell.clone())
+        create_backgrounds(
+            &output,
+            info,
+            &env_handle,
+            &bgs_handle,
+            &layer_shell.clone(),
+        );
     };
     // Process currently existing outputs
     for output in env.get_all_outputs() {
@@ -272,7 +278,7 @@ pub fn main() {
         env.listen_for_outputs(move |output, info, _| output_handler(output, info));
 
     //NOTE: we can't move display into the function because it causes a segfault
-    if let Err(e) = main_loop(bgs, queue, &display, listener) {
+    if let Err(e) = main_loop(&bgs, queue, &display, listener) {
         error!("{}", e);
     } else {
         info!("Finished running event loop.");
@@ -307,7 +313,7 @@ fn make_logger() {
 }
 
 fn create_backgrounds(
-    output: wl_output::WlOutput,
+    output: &wl_output::WlOutput,
     info: &OutputInfo,
     env: &Environment<wayland::Env>,
     bgs: &Rc<RefCell<Vec<Bg>>>,
@@ -328,7 +334,7 @@ fn create_backgrounds(
 
         debug!("New background with output: {:?}", info);
         let bg = Bg::new(
-            &output,
+            output,
             info.name.clone(),
             info.scale_factor,
             surface,
@@ -416,7 +422,7 @@ fn register_socket<'a>(
 }
 ///bgs and display can't be moved into here because it causes a segfault
 fn main_loop(
-    bgs: Rc<RefCell<Vec<Bg>>>,
+    bgs: &Rc<RefCell<Vec<Bg>>>,
     queue: EventQueue,
     display: &Display,
     listener: UnixListener,
@@ -432,8 +438,8 @@ fn main_loop(
     let event_handle = event_loop.handle();
 
     register_signals(&event_handle)?;
-    register_channel(&event_handle, &bgs, frame_receiver)?;
-    register_socket(&event_handle, &bgs, display, &processor, listener)?;
+    register_channel(&event_handle, bgs, frame_receiver)?;
+    register_socket(&event_handle, bgs, display, &processor, listener)?;
 
     if let Err(e) = WaylandSource::new(queue).quick_insert(event_handle) {
         return Err(e.to_string());
@@ -477,12 +483,12 @@ fn recv_socket_msg(
 ) -> Result<(), String> {
     let request = Swww::receive(&mut stream);
     let answer = match request {
-        Ok(Swww::Clear(clear)) => clear_outputs(&mut bgs, clear, proc),
+        Ok(Swww::Clear(clear)) => clear_outputs(&mut bgs, &clear, proc),
         Ok(Swww::Kill) => {
             loop_signal.stop();
             Answer::Ok
         }
-        Ok(Swww::Img(img)) => send_processor_request(proc, &mut bgs, img),
+        Ok(Swww::Img(img)) => send_processor_request(proc, &mut bgs, &img),
         Ok(Swww::Init { .. }) => Answer::Ok,
         Ok(Swww::Query) => Answer::Info(bgs.iter().map(|bg| bg.info.clone()).collect()),
         Err(e) => Answer::Err(e),
@@ -490,8 +496,8 @@ fn recv_socket_msg(
     answer.send(&stream)
 }
 
-fn send_processor_request(proc: &mut Processor, bgs: &mut RefMut<Vec<Bg>>, img: Img) -> Answer {
-    let requests = make_processor_requests(bgs, &img);
+fn send_processor_request(proc: &mut Processor, bgs: &mut RefMut<Vec<Bg>>, img: &Img) -> Answer {
+    let requests = make_processor_requests(bgs, img);
     if requests.is_empty() {
         error!("None of the outputs sent were valid.");
         Answer::Err("none of the outputs sent are valid.".to_string())
@@ -552,7 +558,7 @@ fn get_real_outputs(bgs: &RefMut<Vec<Bg>>, outputs: &str) -> Vec<String> {
     }
 }
 
-fn clear_outputs(bgs: &mut RefMut<Vec<Bg>>, clear: Clear, proc: &mut Processor) -> Answer {
+fn clear_outputs(bgs: &mut RefMut<Vec<Bg>>, clear: &Clear, proc: &mut Processor) -> Answer {
     let outputs = get_real_outputs(bgs, &clear.outputs);
     if outputs.is_empty() {
         Answer::Err("None of the specified outputs exist!".to_string())
