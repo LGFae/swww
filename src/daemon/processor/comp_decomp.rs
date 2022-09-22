@@ -129,7 +129,7 @@ impl BitPack {
         }
     }
 
-    /// Produces a "ReadiedPack", which can be sent through a channel to be unpacked later
+    /// Produces a `ReadiedPack`, which can be sent through a channel to be unpacked later
     pub fn ready(&self, expected_buf_size: usize) -> ReadiedPack {
         let mut v = Vec::with_capacity(self.inner.len() * 3);
         lz4f::decompress_to_vec(&self.inner, &mut v).unwrap();
