@@ -99,7 +99,7 @@ impl Bg {
         surface: wl_surface::WlSurface,
         layer_shell: &Attached<zwlr_layer_shell_v1::ZwlrLayerShellV1>,
         pool: MemPool,
-    ) -> Option<Self> {
+    ) -> Self {
         let layer_surface = layer_shell.get_layer_surface(
             &surface,
             Some(output),
@@ -143,7 +143,7 @@ impl Bg {
             }
         });
 
-        Some(Self {
+        Self {
             surface,
             scale_factor,
             layer_surface,
@@ -155,7 +155,7 @@ impl Bg {
                 img: BgImg::Color([0, 0, 0]),
             },
             _listener: listener,
-        })
+        }
     }
 
     /// Handles any events that have occurred since the last call, redrawing if needed.
@@ -214,7 +214,6 @@ impl Bg {
         let stride = 4 * self.info.dim.0 as i32;
         let width = self.info.dim.0 as i32;
         let height = self.info.dim.1 as i32;
-
 
         let buffer = self
             .pool
@@ -328,16 +327,15 @@ fn create_backgrounds(
             .expect("Failed to create a memory pool!");
 
         debug!("New background with output: {:?}", info);
-        if let Some(bg) = Bg::new(
+        let bg = Bg::new(
             &output,
             info.name.clone(),
             info.scale_factor,
             surface,
             layer_shell,
             pool,
-        ) {
-            (*bgs.borrow_mut()).push(bg);
-        }
+        );
+        bgs.borrow_mut().push(bg);
     }
 }
 
