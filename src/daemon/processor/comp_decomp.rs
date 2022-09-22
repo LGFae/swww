@@ -220,7 +220,7 @@ fn pixels(img: &[u8]) -> &[[u8; 4]] {
     if img.len() % 4 != 0 {
         unreachable!("Calling pixels with a wrongly formated image");
     }
-    unsafe { core::slice::from_raw_parts(img.as_ptr() as *const [u8; 4], img.len() / 4) }
+    unsafe { core::slice::from_raw_parts(img.as_ptr().cast::<[u8; 4]>(), img.len() / 4) }
 }
 
 #[inline]
