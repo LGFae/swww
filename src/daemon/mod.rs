@@ -553,7 +553,7 @@ fn get_real_outputs(bgs: &RefMut<Vec<Bg>>, outputs: &str) -> Vec<String> {
         outputs
             .split(',')
             .filter(|o| bgs.iter().any(|bg| o == &bg.info.name))
-            .map(|o| o.to_string())
+            .map(ToString::to_string)
             .collect()
     }
 }
