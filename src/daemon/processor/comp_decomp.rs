@@ -103,8 +103,7 @@ fn unpack_bytes(buf: &mut [u8], diff: &[u8]) {
             pix_idx += 1;
         }
         unsafe {
-            buf_chunks
-                .get_unchecked_mut(pix_idx)[0..3]
+            buf_chunks.get_unchecked_mut(pix_idx)[0..3]
                 .clone_from_slice(diff.get_unchecked(diff_idx..diff_idx + 3));
         }
         diff_idx += 3;

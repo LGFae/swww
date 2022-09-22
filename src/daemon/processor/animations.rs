@@ -297,9 +297,9 @@ impl Transition {
             send_transition_frame!(transition_img, outputs, now, fps, sender, stop_recv);
             now = Instant::now();
             if dist_center >= speed {
-                dist_center -= speed
+                dist_center -= speed;
             } else {
-                dist_center = 0
+                dist_center = 0;
             }
         }
     }
