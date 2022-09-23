@@ -42,7 +42,7 @@ pub struct ProcessorRequest {
     filter: FilterType,
     step: u8,
     fps: Duration,
-    cords: (usize, usize),
+    pos: (usize, usize),
     speed_step: usize,
 }
 
@@ -58,7 +58,7 @@ impl ProcessorRequest {
             filter: img.filter.get_image_filter(),
             step: img.transition_step,
             fps: Duration::from_nanos(1_000_000_000 / img.transition_fps as u64),
-            cords: (img.transition_cord_x,img.transition_cord_y),
+            pos: (img.transition_center_x,img.transition_center_y),
             speed_step: img.transition_speed_step
         }
     }
@@ -96,7 +96,7 @@ impl ProcessorRequest {
                 None
             }
         };
-        (self.outputs, transition, animation,self.cords,self.speed_step)
+        (self.outputs, transition, animation,self.pos,self.speed_step)
     }
 }
 
@@ -150,8 +150,8 @@ impl Processor {
             .name("animator".to_string()) //Name our threads  for better log messages
             .stack_size(TSTACK_SIZE) //the default of 2MB is way too overkill for this
             .spawn(move || {
-                let (mut out, transition, gif,cords,speed_step) = request.split();
-                if transition.execute(&new_img, &mut out, &sender, &stop_recv, cords,speed_step) {
+                let (mut out, transition, gif,pos,speed_step) = request.split();
+                if transition.execute(&new_img, &mut out, &sender, &stop_recv, pos,speed_step) {
                     if let Some(gif) = gif {
                         animation(gif, new_img, out, sender, stop_recv);
                     }

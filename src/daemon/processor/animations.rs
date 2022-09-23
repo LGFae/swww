@@ -66,7 +66,7 @@ impl Transition {
         outputs: &mut Vec<String>,
         sender: &SyncSender<(Vec<String>, ReadiedPack)>,
         stop_recv: &mpsc::Receiver<Vec<String>>,
-        cords: (usize, usize),
+        pos: (usize, usize),
         speed_step: usize
     ) -> bool {
         debug!("Starting transition");
@@ -80,7 +80,7 @@ impl Transition {
             TransitionType::Outer => self.outer(new_img, outputs, sender, stop_recv,speed_step),
             TransitionType::Any => self.any(new_img, outputs, sender, stop_recv,speed_step),
             TransitionType::Random => self.random(new_img, outputs, sender, stop_recv,speed_step),
-            TransitionType::From => self.from(new_img, outputs, sender, stop_recv, cords,speed_step),
+            TransitionType::From => self.from(new_img, outputs, sender, stop_recv, pos,speed_step),
         }
     }
 
@@ -356,15 +356,15 @@ impl Transition {
         outputs: &mut Vec<String>,
         sender: &SyncSender<(Vec<String>, ReadiedPack)>,
         stop_recv: &mpsc::Receiver<Vec<String>>,
-        cords: (usize, usize),
+        pos: (usize, usize),
         speed_step: usize
     ) -> bool {
         let fps = self.fps;
         let mut speed = self.speed as usize;
         let (width, height) = (self.dimensions.0 as usize, self.dimensions.1 as usize);
         let (center_x, center_y) = (
-            cords.0.min(width - 1),
-            cords.1.min(height - 1),
+            pos.0.min(width - 1),
+            pos.1.min(height - 1),
         );
         let mut dist_center = 0;
         let mut now = Instant::now();
@@ -513,7 +513,7 @@ mod tests {
 
             let handle = {
                 let new_img = new_img.clone();
-                std::thread::spawn(move || t.execute(&new_img, &mut dummies, &fr_send, &stop_recv, None))
+                std::thread::spawn(move || t.execute(&new_img, &mut dummies, &fr_send, &stop_recv, (0,0),0))
             };
 
             while let Ok((_, i)) = fr_recv.recv() {
