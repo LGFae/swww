@@ -44,7 +44,7 @@ impl Swww {
         if let Swww::Img(img) = self {
             img.path = match img.path.canonicalize() {
                 Ok(p) => p,
-                Err(e) => return Err(format!("Coulnd't get absolute path: {}", e)),
+                Err(e) => return Err(format!("Couldn't get absolute path: {}", e)),
             };
             if img.transition_step == 0 {
                 eprintln!("WARNING: a transition_step of 0 is invalid! Using 1 instead...");
