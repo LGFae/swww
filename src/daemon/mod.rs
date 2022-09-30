@@ -13,7 +13,7 @@ use smithay_client_toolkit::{
             LoopHandle, LoopSignal,
         },
         client::protocol::{wl_output, wl_shm, wl_surface},
-        client::{Attached, Display, EventQueue, Main},
+        client::{protocol::wl_compositor, Attached, Display, EventQueue, Main},
         protocols::wlr::unstable::layer_shell::v1::client::{
             zwlr_layer_shell_v1, zwlr_layer_surface_v1,
         },
@@ -331,6 +331,18 @@ fn create_backgrounds(
                 //do I need to do something here???
             })
             .expect("Failed to create a memory pool!");
+
+        // Wayland clients are expected to render the cursor on their input region. By setting the
+        // input region to an empty region, the compositor renders the default cursor. Without
+        // this, and empty desktop won't render a cursor.
+        let compositor = env.require_global::<wl_compositor::WlCompositor>();
+        let empty_region = compositor.create_region();
+        surface.set_input_region(Some(&empty_region));
+
+        // From `wl_surface::set_opaque_region`:
+        // > Setting the pending opaque region has copy semantics, and the
+        // > wl_region object can be destroyed immediately.
+        empty_region.destroy();
 
         debug!("New background with output: {:?}", info);
         let bg = Bg::new(
