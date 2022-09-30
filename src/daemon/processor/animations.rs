@@ -114,7 +114,7 @@ impl Transition {
         loop {
             let transition_img =
                 ReadiedPack::new(&mut self.old_img, new_img, |old_pix, new_pix, _| {
-                    change_cols(self.step, old_pix, new_pix);
+                    change_cols(self.step, old_pix, *new_pix);
                 });
             send_transition_frame!(transition_img, outputs, now, fps, sender, stop_recv);
             now = Instant::now();
@@ -291,7 +291,7 @@ impl Transition {
                     if pix_center_dist >= dist_center * dist_center {
                         let step =
                             self.step + (pix_center_dist - (dist_center * dist_center)) as u8;
-                        change_cols(step, old_pix, new_pix);
+                        change_cols(step, old_pix, *new_pix);
                     }
                 });
             send_transition_frame!(transition_img, outputs, now, fps, sender, stop_recv);
@@ -301,18 +301,18 @@ impl Transition {
                 time += 1.0/dist_start as f64 + (speed as f64)/1000.0;
                 dist_center = value as usize;
             } else {
-                dist_center = 0
+                dist_center = 0;
             }
         }
     }
 
 }
 
-fn change_cols(step: u8, old: &mut [u8; 4], new: &[u8; 4]) {
+fn change_cols(step: u8, old: &mut [u8; 4], new: [u8; 4]) {
     for (old_col, new_col) in old.iter_mut().zip(new) {
-        if old_col.abs_diff(*new_col) < step {
-            *old_col = *new_col;
-        } else if *old_col > *new_col {
+        if old_col.abs_diff(new_col) < step {
+            *old_col = new_col;
+        } else if *old_col > new_col {
             *old_col -= step;
         } else {
             *old_col += step;
@@ -338,14 +338,14 @@ impl GifProcessor {
             filter,
         }
     }
-    pub fn process(self, first_frame: Box<[u8]>, fr_sender: mpsc::Sender<(BitPack, Duration)>) {
+    pub fn process(self, first_frame: &[u8], fr_sender: &mpsc::Sender<(BitPack, Duration)>) {
         let mut frames = self.gif.into_frames();
 
         //The first frame should always exist
         let dur_first_frame = frames.next().unwrap().unwrap().delay().numer_denom_ms();
         let dur_first_frame = Duration::from_millis((dur_first_frame.0 / dur_first_frame.1).into());
 
-        let mut canvas = first_frame.clone();
+        let canvas = &mut first_frame.to_owned();
         while let Some(Ok(frame)) = frames.next() {
             let (dur_num, dur_div) = frame.delay().numer_denom_ms();
             let duration = Duration::from_millis((dur_num / dur_div).into());
@@ -354,13 +354,13 @@ impl GifProcessor {
             // scenario, not the main loop
             let img = img_resize(frame.into_buffer(), self.dimensions, self.filter).unwrap();
 
-            let pack = BitPack::pack(&mut canvas, &img);
+            let pack = BitPack::pack(canvas, &img);
             if fr_sender.send((pack, duration)).is_err() {
                 return;
             };
         }
         //Add the first frame we got earlier:
-        let _ = fr_sender.send((BitPack::pack(&mut canvas, &first_frame), dur_first_frame));
+        let _ = fr_sender.send((BitPack::pack(canvas, first_frame), dur_first_frame));
     }
 }
 

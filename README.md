@@ -9,7 +9,6 @@
  - a compositor that implements:
    * wlr-layer-shell
    * xdg-output
-   * xdg-shell
  - lz4 (for compressing frames when animating)
 
 ## Build

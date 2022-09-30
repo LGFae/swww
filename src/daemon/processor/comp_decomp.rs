@@ -103,8 +103,7 @@ fn unpack_bytes(buf: &mut [u8], diff: &[u8]) {
             pix_idx += 1;
         }
         unsafe {
-            buf_chunks
-                .get_unchecked_mut(pix_idx)[0..3]
+            buf_chunks.get_unchecked_mut(pix_idx)[0..3]
                 .clone_from_slice(diff.get_unchecked(diff_idx..diff_idx + 3));
         }
         diff_idx += 3;
@@ -130,7 +129,7 @@ impl BitPack {
         }
     }
 
-    /// Produces a "ReadiedPack", which can be sent through a channel to be unpacked later
+    /// Produces a `ReadiedPack`, which can be sent through a channel to be unpacked later
     pub fn ready(&self, expected_buf_size: usize) -> ReadiedPack {
         let mut v = Vec::with_capacity(self.inner.len() * 3);
         lz4f::decompress_to_vec(&self.inner, &mut v).unwrap();
@@ -221,7 +220,7 @@ fn pixels(img: &[u8]) -> &[[u8; 4]] {
     if img.len() % 4 != 0 {
         unreachable!("Calling pixels with a wrongly formated image");
     }
-    unsafe { core::slice::from_raw_parts(img.as_ptr() as *const [u8; 4], img.len() / 4) }
+    unsafe { core::slice::from_raw_parts(img.as_ptr().cast::<[u8; 4]>(), img.len() / 4) }
 }
 
 #[inline]

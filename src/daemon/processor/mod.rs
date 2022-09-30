@@ -221,7 +221,7 @@ impl Processor {
                 }
                 if transition.execute(&new_img, &mut out, &sender, &stop_recv, parsed_pos, parsed_bezier) {
                     if let Some(gif) = gif {
-                        animation(gif, new_img, out, sender, stop_recv);
+                        animation(gif, new_img, out, &sender, &stop_recv);
                     }
                 }
             })
@@ -244,8 +244,8 @@ fn animation(
     gif: GifProcessor,
     new_img: Box<[u8]>,
     mut outputs: Vec<String>,
-    sender: SyncSender<(Vec<String>, ReadiedPack)>,
-    stopper: mpsc::Receiver<Vec<String>>,
+    sender: &SyncSender<(Vec<String>, ReadiedPack)>,
+    stopper: &mpsc::Receiver<Vec<String>>,
 ) {
     debug!("Starting animation");
     let img_len = new_img.len();
@@ -256,7 +256,7 @@ fn animation(
         let handle = match thread::Builder::new()
             .name("gif_processor".to_string()) //Name our threads  for better log messages
             .stack_size(TSTACK_SIZE) //the default of 2MB is way too overkill for this
-            .spawn(move || gif.process(new_img, fr_send))
+            .spawn(move || gif.process(&new_img, &fr_send))
         {
             Ok(h) => h,
             Err(e) => {
@@ -268,7 +268,7 @@ fn animation(
         while let Ok((fr, dur)) = fr_recv.recv() {
             let frame = fr.ready(img_len);
             let timeout = dur.saturating_sub(now.elapsed());
-            if send_frame(frame, &mut outputs, timeout, &sender, &stopper) {
+            if send_frame(frame, &mut outputs, timeout, sender, stopper) {
                 drop(fr_recv);
                 let _ = handle.join();
                 return;
@@ -285,7 +285,7 @@ fn animation(
             for (fr, dur) in cached_frames.iter() {
                 let frame = fr.ready(img_len);
                 let timeout = dur.saturating_sub(now.elapsed());
-                if send_frame(frame, &mut outputs, timeout, &sender, &stopper) {
+                if send_frame(frame, &mut outputs, timeout, sender, stopper) {
                     return;
                 };
                 now = Instant::now();
