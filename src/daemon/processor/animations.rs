@@ -177,7 +177,7 @@ impl Transition {
                     let pix_y = height - i as f64 / width;
                     if is_low(pix_x,pix_y,offset,circle_radius){
                         let step = self.step + ((offset - (i as f64 / width)) / speed) as u8;
-                        change_cols(step, old_pix, new_pix);
+                        change_cols(step, old_pix, *new_pix);
                     }
                 });
             send_transition_frame!(transition_img, outputs, now, fps, sender, stop_recv);
@@ -235,7 +235,7 @@ impl Transition {
                     let step = self
                         .step
                         .saturating_add(((dist_center * dist_center) - pix_center_dist) as u8);
-                        change_cols(step, old_pix, new_pix);
+                        change_cols(step, old_pix, *new_pix);
                 }
             });
             send_transition_frame!(transition_img, outputs, now, fps, sender, stop_recv);
