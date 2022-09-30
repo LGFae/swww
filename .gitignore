@@ -1,3 +1,4 @@
 target/*
 completions/*
 test_images/*
+Cargo.lock

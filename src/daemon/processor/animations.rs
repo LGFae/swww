@@ -6,6 +6,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+use keyframe::{ease,mint::Vector2, num_traits::Pow};
+
 use fast_image_resize::FilterType;
 use image::{codecs::gif::GifDecoder, AnimationDecoder};
 use log::debug;
@@ -33,7 +35,7 @@ macro_rules! send_transition_frame {
 
 pub struct Transition {
     old_img: Box<[u8]>,
-    dimensions: (u32, u32),
+    pub dimensions: (u32, u32),
     transition_type: TransitionType,
     speed: u8,
     step: u8,
@@ -66,21 +68,16 @@ impl Transition {
         outputs: &mut Vec<String>,
         sender: &SyncSender<(Vec<String>, ReadiedPack)>,
         stop_recv: &mpsc::Receiver<Vec<String>>,
-        pos: (usize, usize),
-        speed_step: usize
+        pos: (f64, f64),
+        bezier: (f64,f64,f64,f64)
     ) -> bool {
         debug!("Starting transition");
         match self.transition_type {
-            TransitionType::Simple => self.simple(new_img, outputs, sender, stop_recv),
-            TransitionType::Left => self.left(new_img, outputs, sender, stop_recv),
-            TransitionType::Right => self.right(new_img, outputs, sender, stop_recv),
-            TransitionType::Top => self.top(new_img, outputs, sender, stop_recv),
-            TransitionType::Bottom => self.bottom(new_img, outputs, sender, stop_recv),
-            TransitionType::Center => self.center(new_img, outputs, sender, stop_recv,speed_step),
-            TransitionType::Outer => self.outer(new_img, outputs, sender, stop_recv,speed_step),
-            TransitionType::Any => self.any(new_img, outputs, sender, stop_recv,speed_step),
-            TransitionType::Random => self.random(new_img, outputs, sender, stop_recv,speed_step),
-            TransitionType::From => self.from(new_img, outputs, sender, stop_recv, pos,speed_step),
+            TransitionType::Fade => self.fade(new_img, outputs, sender, stop_recv),
+            TransitionType::Wipe => self.wipe(new_img, outputs, sender, stop_recv,pos.0,bezier),
+            TransitionType::Grow => {self.grow(new_img, outputs, sender, stop_recv,pos,bezier)},
+            TransitionType::Shrink => self.shrink(new_img, outputs, sender, stop_recv,pos,bezier),
+            TransitionType::Random => self.random(new_img, outputs, sender, stop_recv, bezier),
         }
     }
 
@@ -90,23 +87,22 @@ impl Transition {
         outputs: &mut Vec<String>,
         sender: &SyncSender<(Vec<String>, ReadiedPack)>,
         stop_recv: &mpsc::Receiver<Vec<String>>,
-        speed_step: usize
+        bezier: (f64,f64,f64,f64)
     ) -> bool {
         let r: u8 = rand::random();
+        let (width, height) = (self.dimensions.0 as usize, self.dimensions.1 as usize);
         match r % 8 {
-            0 => self.simple(new_img, outputs, sender, stop_recv),
-            1 => self.left(new_img, outputs, sender, stop_recv),
-            2 => self.right(new_img, outputs, sender, stop_recv),
-            3 => self.top(new_img, outputs, sender, stop_recv),
-            4 => self.bottom(new_img, outputs, sender, stop_recv),
-            5 => self.center(new_img, outputs, sender, stop_recv,speed_step),
-            6 => self.outer(new_img, outputs, sender, stop_recv,speed_step),
-            7 => self.any(new_img, outputs, sender, stop_recv,speed_step),
+            0 => self.fade(new_img, outputs, sender, stop_recv),
+            1 => self.wipe(new_img, outputs, sender, stop_recv,rand::random::<f64>() % 360.0,bezier),
+            5 => {self.grow(new_img, outputs, sender, stop_recv,((rand::random::<usize>() % width) as f64,(rand::random::<usize>() % height) as f64),bezier)},
+            6 => {self.grow(new_img, outputs, sender, stop_recv,(width as f64/2.0,height as f64/2.0),bezier)},
+            7 => self.shrink(new_img, outputs, sender, stop_recv,(width as f64/2.0,height as f64/2.0),bezier),
+            8 => self.shrink(new_img, outputs, sender, stop_recv,((rand::random::<usize>() % width) as f64,(rand::random::<usize>() % height) as f64),bezier),
             _ => unreachable!(),
         }
     }
 
-    fn simple(
+    fn fade(
         mut self,
         new_img: &[u8],
         outputs: &mut Vec<String>,
@@ -124,177 +120,174 @@ impl Transition {
             now = Instant::now();
         }
     }
-
-    fn left(
+ 
+    fn wipe(
         mut self,
         new_img: &[u8],
         outputs: &mut Vec<String>,
         sender: &SyncSender<(Vec<String>, ReadiedPack)>,
         stop_recv: &mpsc::Receiver<Vec<String>>,
+        angle:f64,
+        bezier:(f64,f64,f64,f64)
     ) -> bool {
         let fps = self.fps;
-        let speed = self.speed as usize;
-        let width = self.dimensions.0 as usize;
-        let mut current_column = 0;
+        let speed = self.speed as f64;
+        let width = self.dimensions.0 as f64;
+        let height = self.dimensions.1 as f64;
         let mut now = Instant::now();
-        loop {
-            let transition_img =
-                ReadiedPack::new(&mut self.old_img, new_img, |old_pix, new_pix, i| {
-                    if i % width <= current_column {
-                        let step = self.step + ((current_column - (i % width)) / speed) as u8;
-                        change_cols(step, old_pix, new_pix);
-                    }
-                });
-            send_transition_frame!(transition_img, outputs, now, fps, sender, stop_recv);
-            now = Instant::now();
-            current_column += speed;
-        }
-    }
+        let center = (width/2.0,height/2.0);
+        let screen_diag = ((width.pow(2)+height.pow(2)) as f64).sqrt();
 
-    fn right(
-        mut self,
-        new_img: &[u8],
-        outputs: &mut Vec<String>,
-        sender: &SyncSender<(Vec<String>, ReadiedPack)>,
-        stop_recv: &mpsc::Receiver<Vec<String>>,
-    ) -> bool {
-        let fps = self.fps;
-        let speed = self.speed as usize;
-        let width = self.dimensions.0 as usize;
-        let mut current_column = width;
-        let mut now = Instant::now();
-        loop {
-            let transition_img =
-                ReadiedPack::new(&mut self.old_img, new_img, |old_pix, new_pix, i| {
-                    if i % width >= current_column {
-                        let step = self.step + (((i % width) - current_column) / speed) as u8;
-                        change_cols(step, old_pix, new_pix);
-                    }
-                });
-            send_transition_frame!(transition_img, outputs, now, fps, sender, stop_recv);
-            now = Instant::now();
-            if current_column >= speed {
-                current_column -= speed;
+        let mut offset = 0.0;
+
+        let angle = angle.to_radians();
+        let circle_radius = screen_diag/2.0;
+
+        // line formula: (x-h)*a + (y-k)*b + C = r^2
+        // https://www.desmos.com/calculator/vpvzk12yar
+        //
+        //checks if a pixel is to the left or right of the line
+        let is_low = |pix_x:f64,pix_y:f64,offset:f64,radius: f64| {
+            let pix_x = pix_x as f64;  
+            let pix_y = pix_y as f64;
+            let a = (radius*angle.cos()) as f64;
+            let b = (radius*angle.sin()) as f64;
+            let offset = offset;
+            let x = pix_x-center.0 as f64;
+            let y = pix_y-center.1 as f64;
+            let res = x*a + y*b + offset;
+            if res >= radius.pow(2) {
+                true
             } else {
-                current_column = 0;
+                false
             }
+        };
+
+        let curve = keyframe::functions::BezierCurve::from(
+            Vector2::from([bezier.0,bezier.1]), Vector2::from([bezier.2,bezier.3])
+        );
+
+        let max_offset = circle_radius.pow(2)*2.0;
+        let mut time = 0.0;
+
+        loop {
+            let transition_img =
+                ReadiedPack::new(&mut self.old_img, new_img, |old_pix, new_pix, i| {
+                    let pix_x = i as f64 % width;
+                    let pix_y = height - i as f64 / width;
+                    if is_low(pix_x,pix_y,offset,circle_radius){
+                        let step = self.step + ((offset - (i as f64 / width)) / speed) as u8;
+                        change_cols(step, old_pix, new_pix);
+                    }
+                });
+            send_transition_frame!(transition_img, outputs, now, fps, sender, stop_recv);
+            let value = ease(curve,0.0,max_offset, time);
+            time += 1.0/max_offset + (speed as f64)/1000.0;
+            now = Instant::now();
+            offset = value;
+            
         }
     }
 
-    fn top(
+    fn grow(
         mut self,
         new_img: &[u8],
         outputs: &mut Vec<String>,
         sender: &SyncSender<(Vec<String>, ReadiedPack)>,
         stop_recv: &mpsc::Receiver<Vec<String>>,
+        pos: (f64, f64),
+        bezier:(f64,f64,f64,f64)
     ) -> bool {
         let fps = self.fps;
         let speed = self.speed as usize;
-        let width = self.dimensions.0 as usize;
-        let mut current_line = 0;
+        let (width, height) = (self.dimensions.0 as f64, self.dimensions.1 as f64);
+        let (center_x, center_y) = (
+            pos.0.min(width - 1.0),
+            pos.1.min(height - 1.0),
+        );
         let mut now = Instant::now();
-        loop {
+        let mut time = 0.0;
+        let dist_start = 0.0;
+        let mut dist_center = dist_start as usize;
+        let dist_end = {
+            let mut x = center_x;
+            let mut y = center_y;
+            if x < width/2.0 {
+                x = width - 1.0 - x;
+            }
+            if y < height/2.0{
+                y = height - 1.0 - y;
+            }
+            ((x.pow(2)+y.pow(2)) as f64).sqrt()
+        };
+        let curve = keyframe::functions::BezierCurve::from(
+            Vector2::from([bezier.0,bezier.1]), Vector2::from([bezier.2,bezier.3])
+        );
+        loop{
             let transition_img =
-                ReadiedPack::new(&mut self.old_img, new_img, |old_pix, new_pix, i| {
-                    if i / width <= current_line {
-                        let step = self.step + ((current_line - (i / width)) / speed) as u8;
+            ReadiedPack::new(&mut self.old_img, new_img, |old_pix, new_pix, i| {
+                let pix_x = i % width as usize;
+                let pix_y = height as usize - i / width as usize;
+                let diff_x = pix_x.abs_diff(center_x as usize);
+                let diff_y = pix_y.abs_diff(center_y as usize);
+                let pix_center_dist = diff_x.pow(2) + diff_y.pow(2);
+                if pix_center_dist <= dist_center * dist_center {
+                    let step = self
+                        .step
+                        .saturating_add(((dist_center * dist_center) - pix_center_dist) as u8);
                         change_cols(step, old_pix, new_pix);
-                    }
-                });
+                }
+            });
             send_transition_frame!(transition_img, outputs, now, fps, sender, stop_recv);
             now = Instant::now();
-            current_line += speed;
+            let value = ease(curve,dist_start, dist_end, time);
+            time += 1.0/dist_end as f64 + (speed as f64)/1000.0;
+            dist_center = value as usize;
         }
     }
 
-    fn bottom(
+    fn shrink(
         mut self,
         new_img: &[u8],
         outputs: &mut Vec<String>,
         sender: &SyncSender<(Vec<String>, ReadiedPack)>,
         stop_recv: &mpsc::Receiver<Vec<String>>,
+        pos:(f64,f64),
+        bezier: (f64,f64,f64,f64)
     ) -> bool {
         let fps = self.fps;
         let speed = self.speed as usize;
-        let width = self.dimensions.0 as usize;
-        let mut current_line = self.dimensions.1 as usize;
+        let (width, height) = (self.dimensions.0 as f64, self.dimensions.1 as f64);
+        let (center_x, center_y) = (
+            pos.0.min(width - 1.0),
+            pos.1.min(height - 1.0),
+        );
         let mut now = Instant::now();
-        loop {
-            let transition_img =
-                ReadiedPack::new(&mut self.old_img, new_img, |old_pix, new_pix, i| {
-                    if i / width >= current_line {
-                        let step = self.step + (((i / width) - current_line) / speed) as u8;
-                        change_cols(step, old_pix, new_pix);
-                    }
-                });
-            send_transition_frame!(transition_img, outputs, now, fps, sender, stop_recv);
-            now = Instant::now();
-            if current_line >= speed {
-                current_line -= speed;
-            } else {
-                current_line = 0;
+        let mut time = 0.0;
+        let dist_start = {
+            let mut x = center_x;
+            let mut y = center_y;
+            if x < width/2.0 {
+                x = width - 1.0 - x;
             }
-        }
-    }
-
-    fn center(
-        mut self,
-        new_img: &[u8],
-        outputs: &mut Vec<String>,
-        sender: &SyncSender<(Vec<String>, ReadiedPack)>,
-        stop_recv: &mpsc::Receiver<Vec<String>>,
-        speed_step: usize
-    ) -> bool {
-        let fps = self.fps;
-        let mut speed = self.speed as usize;
-        let (width, height) = (self.dimensions.0 as usize, self.dimensions.1 as usize);
-        let (center_x, center_y) = (width / 2, height / 2);
-        let mut dist_center = 0;
-        let mut now = Instant::now();
+            if y < height/2.0{
+                y = height - 1.0 - y;
+            }
+            ((x.pow(2)+y.pow(2)) as f64).sqrt()
+        };
+        let dist_end = 0.0;
+        let mut dist_center = dist_start as usize;
+        let curve = keyframe::functions::BezierCurve::from(
+            Vector2::from([bezier.0,bezier.1]), Vector2::from([bezier.2,bezier.3])
+        );
         loop {
             let transition_img =
                 ReadiedPack::new(&mut self.old_img, new_img, |old_pix, new_pix, i| {
-                    let pix_x = i % width;
-                    let pix_y = height - i / width;
-                    let diff_x = pix_x.abs_diff(center_x);
-                    let diff_y = pix_y.abs_diff(center_y);
-                    let pix_center_dist = diff_x * diff_x + diff_y * diff_y;
-                    if pix_center_dist <= dist_center * dist_center {
-                        let step = self
-                            .step
-                            .saturating_add(((dist_center * dist_center) - pix_center_dist) as u8);
-                        change_cols(step, old_pix, new_pix);
-                    }
-                });
-            send_transition_frame!(transition_img, outputs, now, fps, sender, stop_recv);
-            now = Instant::now();
-            dist_center += speed;
-            speed += speed_step;
-        }
-    }
-
-    fn outer(
-        mut self,
-        new_img: &[u8],
-        outputs: &mut Vec<String>,
-        sender: &SyncSender<(Vec<String>, ReadiedPack)>,
-        stop_recv: &mpsc::Receiver<Vec<String>>,
-        speed_step: usize
-    ) -> bool {
-        let fps = self.fps;
-        let mut speed = self.speed as usize;
-        let (width, height) = (self.dimensions.0 as usize, self.dimensions.1 as usize);
-        let (center_x, center_y) = (width / 2, height / 2);
-        let mut dist_center = ((center_x * center_x + center_y * center_y) as f64).sqrt() as usize;
-        let mut now = Instant::now();
-        loop {
-            let transition_img =
-                ReadiedPack::new(&mut self.old_img, new_img, |old_pix, new_pix, i| {
-                    let pix_x = i % width;
-                    let pix_y = height - i / width;
-                    let diff_x = pix_x.abs_diff(center_x);
-                    let diff_y = pix_y.abs_diff(center_y);
-                    let pix_center_dist = diff_x * diff_x + diff_y * diff_y;
+                    let pix_x = i % width as usize;
+                    let pix_y = height as usize - i / width as usize;
+                    let diff_x = pix_x.abs_diff(center_x as usize);
+                    let diff_y = pix_y.abs_diff(center_y as usize);
+                    let pix_center_dist = diff_x.pow(2)+ diff_y.pow(2);
                     if pix_center_dist >= dist_center * dist_center {
                         let step =
                             self.step + (pix_center_dist - (dist_center * dist_center)) as u8;
@@ -304,91 +297,15 @@ impl Transition {
             send_transition_frame!(transition_img, outputs, now, fps, sender, stop_recv);
             now = Instant::now();
             if dist_center >= speed {
-                dist_center -= speed;
-                speed += speed_step;
+                let value = ease(curve,dist_start, dist_end, time);
+                time += 1.0/dist_start as f64 + (speed as f64)/1000.0;
+                dist_center = value as usize;
             } else {
                 dist_center = 0
             }
         }
     }
 
-    fn any(
-        mut self,
-        new_img: &[u8],
-        outputs: &mut Vec<String>,
-        sender: &SyncSender<(Vec<String>, ReadiedPack)>,
-        stop_recv: &mpsc::Receiver<Vec<String>>,
-        speed_step: usize,
-    ) -> bool {
-        let fps = self.fps;
-        let mut speed = self.speed as usize;
-        let (width, height) = (self.dimensions.0 as usize, self.dimensions.1 as usize);
-        let (center_x, center_y) = (
-            rand::random::<usize>() % width,
-            rand::random::<usize>() % height,
-        );
-        let mut dist_center = 0;
-        let mut now = Instant::now();
-        loop {
-            let transition_img =
-                ReadiedPack::new(&mut self.old_img, new_img, |old_pix, new_pix, i| {
-                    let pix_x = i % width;
-                    let pix_y = height - i / width;
-                    let diff_x = pix_x.abs_diff(center_x);
-                    let diff_y = pix_y.abs_diff(center_y);
-                    let pix_center_dist = diff_x * diff_x + diff_y * diff_y;
-                    if pix_center_dist <= dist_center * dist_center {
-                        let step = self
-                            .step
-                            .saturating_add(((dist_center * dist_center) - pix_center_dist) as u8);
-                        change_cols(step, old_pix, new_pix);
-                    }
-                });
-            send_transition_frame!(transition_img, outputs, now, fps, sender, stop_recv);
-            now = Instant::now();
-            dist_center += speed;
-            speed += speed_step;
-        }
-    }
-    fn from(
-        mut self,
-        new_img: &[u8],
-        outputs: &mut Vec<String>,
-        sender: &SyncSender<(Vec<String>, ReadiedPack)>,
-        stop_recv: &mpsc::Receiver<Vec<String>>,
-        pos: (usize, usize),
-        speed_step: usize
-    ) -> bool {
-        let fps = self.fps;
-        let mut speed = self.speed as usize;
-        let (width, height) = (self.dimensions.0 as usize, self.dimensions.1 as usize);
-        let (center_x, center_y) = (
-            pos.0.min(width - 1),
-            pos.1.min(height - 1),
-        );
-        let mut dist_center = 0;
-        let mut now = Instant::now();
-        loop {
-            let transition_img =
-                ReadiedPack::new(&mut self.old_img, new_img, |old_pix, new_pix, i| {
-                    let pix_x = i % width;
-                    let pix_y = height - i / width;
-                    let diff_x = pix_x.abs_diff(center_x);
-                    let diff_y = pix_y.abs_diff(center_y);
-                    let pix_center_dist = diff_x * diff_x + diff_y * diff_y;
-                    if pix_center_dist <= dist_center * dist_center {
-                        let step = self
-                            .step
-                            .saturating_add(((dist_center * dist_center) - pix_center_dist) as u8);
-                        change_cols(step, old_pix, new_pix);
-                    }
-                });
-            send_transition_frame!(transition_img, outputs, now, fps, sender, stop_recv);
-            now = Instant::now();
-            dist_center += speed;
-            speed += speed_step;
-        }
-    }
 }
 
 fn change_cols(step: u8, old: &mut [u8; 4], new: &[u8; 4]) {
@@ -494,14 +411,10 @@ mod tests {
     fn transitions_should_end_with_equal_vectors() {
         use TransitionType as TT;
         let transitions = [
-            TT::Simple,
-            TT::Left,
-            TT::Right,
-            TT::Bottom,
-            TT::Top,
-            TT::Center,
-            TT::Outer,
-            TT::Any,
+            TT::Wipe,
+            TT::Fade,
+            TT::Grow,
+            TT::Shrink,
             TT::Random,
         ];
         for transition in transitions {
@@ -513,7 +426,7 @@ mod tests {
 
             let handle = {
                 let new_img = new_img.clone();
-                std::thread::spawn(move || t.execute(&new_img, &mut dummies, &fr_send, &stop_recv, (0,0),0))
+                std::thread::spawn(move || t.execute(&new_img, &mut dummies, &fr_send, &stop_recv, (0.0,0.0),(0.0,0.0,1.0,1.0)))
             };
 
             while let Ok((_, i)) = fr_recv.recv() {

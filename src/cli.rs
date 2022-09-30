@@ -65,16 +65,11 @@ impl std::str::FromStr for Filter {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum TransitionType {
-    Simple,
-    Left,
-    Right,
-    Top,
-    Bottom,
-    Center,
-    Outer,
-    Any,
+    Fade,
+    Wipe,
+    Grow,
+    Shrink,
     Random,
-    From,
 }
 
 impl std::str::FromStr for TransitionType {
@@ -82,18 +77,13 @@ impl std::str::FromStr for TransitionType {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "simple" => Ok(Self::Simple),
-            "left" => Ok(Self::Left),
-            "right" => Ok(Self::Right),
-            "top" => Ok(Self::Top),
-            "bottom" => Ok(Self::Bottom),
-            "center" => Ok(Self::Center),
-            "outer" => Ok(Self::Outer),
-            "any" => Ok(Self::Any),
+            "simple" => Ok(Self::Fade),
+            "wipe" => Ok(Self::Wipe),
+            "grow" => Ok(Self::Grow),
+            "shrink" => Ok(Self::Shrink),
             "random" => Ok(Self::Random),
-            "from" => Ok(Self::From),
             _ => Err("unrecognized transition type. Valid transitions are:\
-                     [ simple | left | right | top | bottom | center | outer | random | from ]\
+                     [ fade | wipe | grow | shrink | random ]\
                      see swww img --help for more details"),
         }
     }
@@ -189,17 +179,7 @@ pub struct Img {
     ///
     ///Possible transitions are:
     ///
-    ///simple | left | right | top | bottom | center | outer | any | random
-    ///
-    ///The 'left', 'right', 'top' and 'bottom' options make the transition happen from that
-    ///position to its oposite in the screen.
-    ///
-    ///'center' causes a transition from the center to the edges of the screen, while 'outer' is
-    ///the oposite of that.
-    ///
-    ///'any' is like 'center', but selects a random spot to start the transition from
-    ///
-    ///Finally, 'random' will select a transition effect at random
+    ///fade | wipe | grow | shrink | random
     #[clap(short, long, env = "SWWW_TRANSITION", default_value = "simple")]
     pub transition_type: TransitionType,
 
@@ -239,23 +219,31 @@ pub struct Img {
     #[clap(long, env = "SWWW_TRANSITION_FPS", default_value = "30")]
     pub transition_fps: u8,
 
-    ///X coordinate to use as center for the transition
+    ///x and y coordinates on the screen to start the transition from or the angle to wipe in while using the 'wipe' transition
+    /// 
+    ///values can be:
+    /// top | bottom | left | right | center | random | top-left | top-right | bottom-left | bottom-right
+    /// or the coordinates in the form of 'x,y'
+    /// 
+    ///eg: '0,0' for bottom left
+    ///    'top-right' for top right
+    ///    '500,500' for 500px from the left and 500px from the bottom
     ///
-    ///Note that it only works with the `from` transition
-    #[clap(long, env = "SWW_TRANSITION_CENTER_X", default_value = "0")]
-    pub transition_center_x: usize,
+    /// 
+    ///Note: while using the 'wipe' transition this flag is used for setting the angle to wipe in
+    ///      eg: 'top' will wipe from top 
+    ///          '45' will wipe at 45 degree angle
+    ///          '90deg' will wipe at 90 degree angle       
+    #[clap(long, env = "SWW_TRANSITION_POS", default_value = "0,0")]
+    pub transition_pos: String,
 
-    ///Y coordinate to use as center for the transition
+    ///bezier curve to use for the transition
     ///
-    ///Note that it only works with the `from` transition
-    #[clap(long, env = "SWW_TRANSITION_CENTER_Y", default_value = "0")]
-    pub transition_center_y: usize,
-
-    ///value to increase the total speed by every frame
-    ///
-    ///Note that it only works with center|any|outer|from|random transitions
-    #[clap(long, env = "SWW_TRANSITION_SPEED_STEP",default_value = "0")]
-    pub transition_speed_step: usize,
+    ///eg: 0.0,0.0,1.0,1.0 for linear animation
+    /// 
+    ///Note that it only works with ' grow | shrink ' transition
+    #[clap(long, env = "SWW_TRANSITION_BEZIER",default_value = ".54,0,.34,.99")]
+    pub transition_bezier: String,
 }
 
 #[cfg(test)]

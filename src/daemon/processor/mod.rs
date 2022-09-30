@@ -42,8 +42,8 @@ pub struct ProcessorRequest {
     filter: FilterType,
     step: u8,
     fps: Duration,
-    pos: (usize, usize),
-    speed_step: usize,
+    pos: String,
+    bezier: String,
 }
 
 impl ProcessorRequest {
@@ -58,8 +58,9 @@ impl ProcessorRequest {
             filter: img.filter.get_image_filter(),
             step: img.transition_step,
             fps: Duration::from_nanos(1_000_000_000 / img.transition_fps as u64),
-            pos: (img.transition_center_x,img.transition_center_y),
-            speed_step: img.transition_speed_step
+            pos: img.transition_pos.clone(),
+            // convert 1,1,1,1 to a tuple of 4 floats
+            bezier: img.transition_bezier.clone(),
         }
     }
 
@@ -71,7 +72,7 @@ impl ProcessorRequest {
         self.dimensions
     }
 
-    fn split(self) -> (Vec<String>, Transition, Option<GifProcessor>,(usize,usize),usize){
+    fn split(self) -> (Vec<String>, Transition, Option<GifProcessor>,String,String){
         let transition = Transition::new(
             self.old_img,
             self.dimensions,
@@ -96,7 +97,7 @@ impl ProcessorRequest {
                 None
             }
         };
-        (self.outputs, transition, animation,self.pos,self.speed_step)
+        (self.outputs, transition, animation,self.pos,self.bezier)
     }
 }
 
@@ -146,12 +147,79 @@ impl Processor {
         let sender = self.frame_sender.clone();
         let (stopper, stop_recv) = mpsc::channel();
         self.anim_stoppers.push(stopper);
+        let transition_type = request.transition_type.clone();
         if let Err(e) = thread::Builder::new()
             .name("animator".to_string()) //Name our threads  for better log messages
             .stack_size(TSTACK_SIZE) //the default of 2MB is way too overkill for this
             .spawn(move || {
-                let (mut out, transition, gif,pos,speed_step) = request.split();
-                if transition.execute(&new_img, &mut out, &sender, &stop_recv, pos,speed_step) {
+                let (mut out, transition, gif,pos,bezier) = request.split();
+                let (width,height) = (transition.dimensions.0 as f64, transition.dimensions.1 as f64);
+                let mut parsed_pos = (0.0,0.0);
+
+                // default ease-in-out
+                let mut parsed_bezier:(f64,f64,f64,f64) = (0.42,0.0,0.58,1.0);
+                match transition_type{
+                    TransitionType::Wipe => {
+                        let pos = pos.split(",").collect::<Vec<&str>>()[0].trim().replace("deg","");
+                        match pos.as_str(){
+                            "left" => parsed_pos = (0.0,0.0),
+                            "right" => parsed_pos = (180.0,0.0),
+                            "top" => parsed_pos = (90.0,0.0),
+                            "bottom" => parsed_pos = (-90.0,0.0),
+                            _ => {
+                                match pos.parse::<f64>(){
+                                    Ok(p) => parsed_pos = (p,0.0),
+                                    Err(e) => {
+                                        log::error!("failed to parse 'pos' flag using 0deg as fallback: {:?}", e);
+                                    }
+                                }
+                                
+                            }
+                        }
+                    },
+                    _ => {
+                        match pos.as_str() {
+                            "center" => parsed_pos = (width/2.0,height/2.0),
+                            "random" => parsed_pos = ((rand::random::<usize>() % width as usize) as f64,(rand::random::<usize>() % height as usize) as f64),
+                            "left" => {parsed_pos = (0.0,height/2.0)},
+                            "right" => parsed_pos = (width,height/2.0),
+                            "top" => parsed_pos = (width/2.0,height),
+                            "bottom" => parsed_pos = (width/2.0,0.0),
+                            "bottom-left" => parsed_pos = (0.0,0.0),
+                            "bottom-right" => parsed_pos = (width,0.0),
+                            "top-left" => parsed_pos = (0.0,height),
+                            "top-right" => parsed_pos = (width,height),
+                            _ => {
+                                let pos = pos.trim().split(",").collect::<Vec<&str>>();
+                                if pos.len() == 2 {
+                                    parsed_pos = (pos[0].parse::<f64>().unwrap(),pos[1].parse::<f64>().unwrap());
+                                } else{
+                                    log::error!("failed to parse 'pos' flag using '0,0' as fallback: {:?}",pos);
+                                }
+                            },
+                        }
+                    }
+                }
+                
+                match bezier.as_str() {
+                    "ease-in-out" => parsed_bezier = (0.42,0.0,0.58,1.0),
+                    "ease-in" => parsed_bezier = (0.42,0.0,1.0,1.0),
+                    "ease-out" => parsed_bezier = (0.0,0.0,0.58,1.0),
+                    "linear" => parsed_bezier = (0.0,0.0,1.0,1.0),
+                    _ => {
+                        for (i,val) in  bezier.split(",").enumerate(){
+                            let val = val.parse::<f64>().unwrap();
+                            match i {
+                                0 => parsed_bezier.0 = val,
+                                1 => parsed_bezier.1 = val,
+                                2 => parsed_bezier.2 = val,
+                                3 => parsed_bezier.3 = val,
+                                _ => (),
+                            }
+                        }
+                    },
+                }
+                if transition.execute(&new_img, &mut out, &sender, &stop_recv, parsed_pos, parsed_bezier) {
                     if let Some(gif) = gif {
                         animation(gif, new_img, out, sender, stop_recv);
                     }

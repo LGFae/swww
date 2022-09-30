@@ -30,6 +30,8 @@ bincode = "=1.3.3"
 lazy_static = "=1.4.0"
 fast_image_resize = "=1.0.0"
 rand = "=0.8.5"
+curve = "0.6.1"
+keyframe = "1.1.1"
 
 [dev-dependencies]
 assert_cmd = "=2.0.4"
