@@ -42,7 +42,7 @@ pub struct ProcessorRequest {
     filter: FilterType,
     step: u8,
     fps: Duration,
-    angle: f64
+    angle: f64,
 }
 
 impl ProcessorRequest {
@@ -57,7 +57,7 @@ impl ProcessorRequest {
             filter: img.filter.get_image_filter(),
             step: img.transition_step,
             fps: Duration::from_nanos(1_000_000_000 / img.transition_fps as u64),
-            angle: img.transition_angle
+            angle: img.transition_angle,
         }
     }
 
@@ -77,7 +77,7 @@ impl ProcessorRequest {
             self.speed,
             self.step,
             self.fps,
-            self.angle
+            self.angle,
         );
         let img = image::io::Reader::open(&self.path);
         let animation = {

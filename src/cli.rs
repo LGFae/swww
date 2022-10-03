@@ -197,7 +197,7 @@ pub struct Img {
     ///the oposite of that.
     ///
     ///'wipe' is simillar to 'left' but allows you to specify the angle for transition (with the --transition-angle flag).
-    /// 
+    ///
     ///'any' is like 'center', but selects a random spot to start the transition from
     ///
     ///Finally, 'random' will select a transition effect at random
@@ -241,7 +241,7 @@ pub struct Img {
     pub transition_fps: u8,
 
     ///This is only used for the 'wipe' transition. It controls the angle of the wipe (default is '0').
-    /// 
+    ///
     ///Note that the angle is in degrees, where '0' is right to left and '90' is top to bottom, and '270' bottom to top
     #[arg(long, env = "SWWW_TRANSITION_ANGLE", default_value = "0")]
     pub transition_angle: f64,

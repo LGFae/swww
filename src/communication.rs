@@ -2,16 +2,20 @@
 //! some helper functions to make communication more streamlined
 use crate::{
     cli::{Filter, Swww},
-    daemon:: BgInfo
+    daemon::BgInfo,
 };
 use serde::{Deserialize, Serialize};
-use std::{os::unix::net::UnixStream, time::Duration, path::{Path, PathBuf}};
+use std::{
+    os::unix::net::UnixStream,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 #[derive(Serialize, Deserialize)]
 pub enum Answer {
     Ok,
-    Err(String) ,
-    Info(Vec<BgInfo>)
+    Err(String),
+    Info(Vec<BgInfo>),
 }
 
 impl Answer {
