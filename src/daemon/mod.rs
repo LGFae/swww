@@ -4,7 +4,8 @@ use simplelog::{ColorChoice, LevelFilter, TermLogger, TerminalMode, ThreadLogMod
 
 use smithay_client_toolkit::{
     environment::Environment,
-    output::{add_output_listener, with_output_info, OutputInfo, OutputListener},
+    get_surface_scale_factor,
+    output::{with_output_info, OutputInfo},
     reexports::{
         calloop::{
             self,
@@ -28,7 +29,6 @@ use std::{
     os::unix::net::{UnixListener, UnixStream},
     path::PathBuf,
     rc::Rc,
-    sync::{Arc, RwLock},
 };
 
 use crate::cli::{Clear, Img, Swww};
@@ -68,6 +68,7 @@ impl fmt::Display for BgImg {
 pub struct BgInfo {
     name: String,
     dim: (u32, u32),
+    scale_factor: i32,
     img: BgImg,
 }
 
@@ -75,16 +76,14 @@ impl fmt::Display for BgInfo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "{} = {}x{}, currently displaying: {}",
-            self.name, self.dim.0, self.dim.1, self.img
+            "{}: {}x{}, scale: {}, currently displaying: {}",
+            self.name, self.dim.0, self.dim.1, self.scale_factor, self.img
         )
     }
 }
 
 struct Bg {
     info: BgInfo,
-    _listener: OutputListener,
-    scale_factor: Arc<RwLock<i32>>,
     surface: wl_surface::WlSurface,
     layer_surface: Main<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1>,
     next_render_event: Rc<Cell<Option<RenderEvent>>>,
@@ -95,7 +94,6 @@ impl Bg {
     fn new(
         output: &wl_output::WlOutput,
         output_name: String,
-        scale_factor: i32,
         surface: wl_surface::WlSurface,
         layer_shell: &Attached<zwlr_layer_shell_v1::ZwlrLayerShellV1>,
         pool: MemPool,
@@ -135,26 +133,17 @@ impl Bg {
         // Commit so that the server will send a configure event
         surface.commit();
 
-        let scale_factor = Arc::new(RwLock::new(scale_factor));
-        let ps = Arc::clone(&scale_factor);
-        let listener = add_output_listener(output, move |_, info, _| {
-            if let Ok(mut ps) = ps.write() {
-                *ps = info.scale_factor;
-            }
-        });
-
         Self {
             surface,
-            scale_factor,
             layer_surface,
             next_render_event,
             pool,
             info: BgInfo {
                 name: output_name,
                 dim: (0, 0),
+                scale_factor: 1,
                 img: BgImg::Color([0, 0, 0]),
             },
-            _listener: listener,
         }
     }
 
@@ -165,21 +154,20 @@ impl Bg {
         match self.next_render_event.take() {
             Some(RenderEvent::Closed) => Some(true),
             Some(RenderEvent::Configure { width, height }) => {
-                let scale_factor = match self.scale_factor.read() {
-                    Ok(i) => *i as u32,
-                    Err(_) => 1_u32,
-                };
-                self.surface.set_buffer_scale(scale_factor as i32);
-                if self.info.dim != (width * scale_factor, height * scale_factor) {
-                    self.info.dim = (width * scale_factor, height * scale_factor);
-                    self.pool
-                        .resize(self.info.dim.0 as usize * self.info.dim.1 as usize * 4)
-                        .unwrap();
+                let scale_factor = get_surface_scale_factor(&self.surface);
+                self.surface.set_buffer_scale(scale_factor);
+                if self.info.dim != (width, height) || self.info.scale_factor != scale_factor {
+                    self.info.dim = (width, height);
+                    self.info.scale_factor = scale_factor;
+                    let width = width as usize * scale_factor as usize;
+                    let height = height as usize * scale_factor as usize;
+                    self.pool.resize(width * height * 4).unwrap();
                     self.clear([0, 0, 0]);
-                    debug!("Configured output: {}", self.info.name);
+                    //self.surface.commit();
+                    debug!("Configured {}", self.info);
                     Some(false)
                 } else {
-                    debug!("Output {} is already configured correctly.", self.info.name);
+                    debug!("Output {} is already configured correctly", self.info.name);
                     None
                 }
             }
@@ -345,14 +333,7 @@ fn create_backgrounds(
         empty_region.destroy();
 
         debug!("New background with output: {:?}", info);
-        let bg = Bg::new(
-            output,
-            info.name.clone(),
-            info.scale_factor,
-            surface,
-            layer_shell,
-            pool,
-        );
+        let bg = Bg::new(output, info.name.clone(), surface, layer_shell, pool);
         bgs.borrow_mut().push(bg);
     }
 }
