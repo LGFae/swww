@@ -48,7 +48,7 @@ impl ProcessorRequest {
     pub fn new(info: &BgInfo, old_img: Box<[u8]>, img: &Img) -> Self {
         Self {
             outputs: vec![info.name.to_string()],
-            dimensions: info.dim,
+            dimensions: info.real_dim(),
             old_img,
             path: img.path.clone(),
             transition_type: img.transition_type.clone(),

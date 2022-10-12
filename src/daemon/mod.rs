@@ -72,6 +72,15 @@ pub struct BgInfo {
     img: BgImg,
 }
 
+impl BgInfo {
+    fn real_dim(&self) -> (u32, u32) {
+        (
+            self.dim.0 * self.scale_factor as u32,
+            self.dim.1 * self.scale_factor as u32,
+        )
+    }
+}
+
 impl fmt::Display for BgInfo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
@@ -155,15 +164,15 @@ impl Bg {
             Some(RenderEvent::Closed) => Some(true),
             Some(RenderEvent::Configure { width, height }) => {
                 let scale_factor = get_surface_scale_factor(&self.surface);
-                self.surface.set_buffer_scale(scale_factor);
                 if self.info.dim != (width, height) || self.info.scale_factor != scale_factor {
+                    self.surface.set_buffer_scale(scale_factor);
                     self.info.dim = (width, height);
                     self.info.scale_factor = scale_factor;
                     let width = width as usize * scale_factor as usize;
                     let height = height as usize * scale_factor as usize;
                     self.pool.resize(width * height * 4).unwrap();
                     // We must clear the outputs so that animations work due to the new underlying
-                    // buffer needing to be the exact size of the monitor's. 
+                    // buffer needing to be the exact size of the monitor's.
                     self.clear([0, 0, 0]);
                     debug!("Configured {}", self.info);
                     Some(false)
@@ -179,9 +188,10 @@ impl Bg {
     ///'color' argument is in rbg. We copy it correctly to brgx inside the function
     fn clear(&mut self, color: [u8; 3]) {
         self.info.img = BgImg::Color(color);
-        let stride = 4 * self.info.dim.0 as i32;
-        let width = self.info.dim.0 as i32;
-        let height = self.info.dim.1 as i32;
+        let dim = self.info.real_dim();
+        let stride = 4 * dim.0 as i32;
+        let width = dim.0 as i32;
+        let height = dim.1 as i32;
 
         let buffer = self
             .pool
@@ -200,9 +210,10 @@ impl Bg {
     }
 
     fn draw(&mut self, img: &ReadiedPack) {
-        let stride = 4 * self.info.dim.0 as i32;
-        let width = self.info.dim.0 as i32;
-        let height = self.info.dim.1 as i32;
+        let dim = self.info.real_dim();
+        let stride = 4 * dim.0 as i32;
+        let width = dim.0 as i32;
+        let height = dim.1 as i32;
 
         let buffer = self
             .pool
@@ -219,7 +230,9 @@ impl Bg {
     ///This method is what makes necessary that we use the mempoll, instead of the "easier"
     ///automempoll
     fn get_current_img(&mut self) -> &[u8] {
-        self.pool.mmap()
+        let dim = self.info.real_dim();
+        let size = dim.0 as usize * dim.1 as usize * 4;
+        &self.pool.mmap()[0..size]
     }
 }
 
@@ -526,7 +539,7 @@ fn make_processor_requests(bgs: &mut RefMut<Vec<Bg>>, img: &Img) -> Vec<Processo
         .for_each(|bg| {
             if let Some(i) = groups
                 .iter()
-                .position(|g| bg.info.dim == g.0.dim() && bg.info.img == *g.1)
+                .position(|g| bg.info.real_dim() == g.0.dim() && bg.info.img == *g.1)
             {
                 groups[i].0.add_output(&bg.info.name);
             } else {
