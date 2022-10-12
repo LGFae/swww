@@ -162,8 +162,9 @@ impl Bg {
                     let width = width as usize * scale_factor as usize;
                     let height = height as usize * scale_factor as usize;
                     self.pool.resize(width * height * 4).unwrap();
+                    // We must clear the outputs so that animations work due to the new underlying
+                    // buffer needing to be the exact size of the monitor's. 
                     self.clear([0, 0, 0]);
-                    //self.surface.commit();
                     debug!("Configured {}", self.info);
                     Some(false)
                 } else {
