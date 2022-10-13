@@ -188,15 +188,15 @@ pub struct Img {
     ///
     ///Possible transitions are:
     ///
-    ///simple | left | right | top | bottom | center | outer | any | random | wipe
+    ///simple | left | right | top | bottom | wipe | center | outer | any | random
     ///
     ///The 'left', 'right', 'top' and 'bottom' options make the transition happen from that
     ///position to its oposite in the screen.
     ///
+    ///'wipe' is simillar to 'left' but allows you to specify the angle for transition (with the --transition-angle flag).
+    /// 
     ///'center' causes a transition from the center to the edges of the screen, while 'outer' is
     ///the oposite of that.
-    ///
-    ///'wipe' is simillar to 'left' but allows you to specify the angle for transition (with the --transition-angle flag).
     ///
     ///'any' is like 'center', but selects a random spot to start the transition from
     ///
