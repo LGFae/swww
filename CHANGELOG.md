@@ -1,10 +1,20 @@
 ### Unreleased
 
+
+### 0.5.0
+
 **BREAKING CHANGES**:
 
   * `swww query` now formats its output as `<output>: ...`, instead of
   `<output> = ...`. This will break your scripts if you relied on the output's
   format.
+
+Improvements:
+
+  * Fixed `swww` getting stuck on a futex when a new monitor was connected (#26)
+  * New `wipe` transition by #flick0
+  * Several small code improvements by @WhyNotHugo
+  * Typo fix (@thebenperson)
 
 ### 0.4.3
 
