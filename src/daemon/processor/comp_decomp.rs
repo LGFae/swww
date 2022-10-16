@@ -193,7 +193,11 @@ struct ZipEq<'a, I> {
 
 fn zip_eq<'a, I>(i: &'a mut [I], j: &'a [I]) -> ZipEq<'a, I> {
     if i.len() != j.len() {
-        unreachable!("Iterators of zip_eq have different sizes!!");
+        unreachable!(
+            "Iterators of zip_eq have different sizes: {}, {}",
+            i.len(),
+            j.len()
+        );
     }
     ZipEq {
         a: i.iter_mut(),

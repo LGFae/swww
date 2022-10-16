@@ -1,5 +1,10 @@
 ### Unreleased
 
+**BREAKING CHANGES**:
+
+  * `swww query` now formats its output as `<output>: ...`, instead of
+  `<output> = ...`. This will break your scripts if you relied on the output's
+  format.
 
 ### 0.4.3
 

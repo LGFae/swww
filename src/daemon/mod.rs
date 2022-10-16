@@ -4,7 +4,8 @@ use simplelog::{ColorChoice, LevelFilter, TermLogger, TerminalMode, ThreadLogMod
 
 use smithay_client_toolkit::{
     environment::Environment,
-    output::{add_output_listener, with_output_info, OutputInfo, OutputListener},
+    get_surface_scale_factor,
+    output::{with_output_info, OutputInfo},
     reexports::{
         calloop::{
             self,
@@ -28,7 +29,6 @@ use std::{
     os::unix::net::{UnixListener, UnixStream},
     path::PathBuf,
     rc::Rc,
-    sync::{Arc, RwLock},
 };
 
 use crate::cli::{Clear, Img, Swww};
@@ -68,23 +68,31 @@ impl fmt::Display for BgImg {
 pub struct BgInfo {
     name: String,
     dim: (u32, u32),
+    scale_factor: i32,
     img: BgImg,
+}
+
+impl BgInfo {
+    fn real_dim(&self) -> (u32, u32) {
+        (
+            self.dim.0 * self.scale_factor as u32,
+            self.dim.1 * self.scale_factor as u32,
+        )
+    }
 }
 
 impl fmt::Display for BgInfo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "{} = {}x{}, currently displaying: {}",
-            self.name, self.dim.0, self.dim.1, self.img
+            "{}: {}x{}, scale: {}, currently displaying: {}",
+            self.name, self.dim.0, self.dim.1, self.scale_factor, self.img
         )
     }
 }
 
 struct Bg {
     info: BgInfo,
-    _listener: OutputListener,
-    scale_factor: Arc<RwLock<i32>>,
     surface: wl_surface::WlSurface,
     layer_surface: Main<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1>,
     next_render_event: Rc<Cell<Option<RenderEvent>>>,
@@ -95,7 +103,6 @@ impl Bg {
     fn new(
         output: &wl_output::WlOutput,
         output_name: String,
-        scale_factor: i32,
         surface: wl_surface::WlSurface,
         layer_shell: &Attached<zwlr_layer_shell_v1::ZwlrLayerShellV1>,
         pool: MemPool,
@@ -135,26 +142,17 @@ impl Bg {
         // Commit so that the server will send a configure event
         surface.commit();
 
-        let scale_factor = Arc::new(RwLock::new(scale_factor));
-        let ps = Arc::clone(&scale_factor);
-        let listener = add_output_listener(output, move |_, info, _| {
-            if let Ok(mut ps) = ps.write() {
-                *ps = info.scale_factor;
-            }
-        });
-
         Self {
             surface,
-            scale_factor,
             layer_surface,
             next_render_event,
             pool,
             info: BgInfo {
                 name: output_name,
                 dim: (0, 0),
+                scale_factor: 1,
                 img: BgImg::Color([0, 0, 0]),
             },
-            _listener: listener,
         }
     }
 
@@ -165,21 +163,21 @@ impl Bg {
         match self.next_render_event.take() {
             Some(RenderEvent::Closed) => Some(true),
             Some(RenderEvent::Configure { width, height }) => {
-                let scale_factor = match self.scale_factor.read() {
-                    Ok(i) => *i as u32,
-                    Err(_) => 1_u32,
-                };
-                self.surface.set_buffer_scale(scale_factor as i32);
-                if self.info.dim != (width * scale_factor, height * scale_factor) {
-                    self.info.dim = (width * scale_factor, height * scale_factor);
-                    self.pool
-                        .resize(self.info.dim.0 as usize * self.info.dim.1 as usize * 4)
-                        .unwrap();
+                let scale_factor = get_surface_scale_factor(&self.surface);
+                if self.info.dim != (width, height) || self.info.scale_factor != scale_factor {
+                    self.surface.set_buffer_scale(scale_factor);
+                    self.info.dim = (width, height);
+                    self.info.scale_factor = scale_factor;
+                    let width = width as usize * scale_factor as usize;
+                    let height = height as usize * scale_factor as usize;
+                    self.pool.resize(width * height * 4).unwrap();
+                    // We must clear the outputs so that animations work due to the new underlying
+                    // buffer needing to be the exact size of the monitor's.
                     self.clear([0, 0, 0]);
-                    debug!("Configured output: {}", self.info.name);
+                    debug!("Configured {}", self.info);
                     Some(false)
                 } else {
-                    debug!("Output {} is already configured correctly.", self.info.name);
+                    debug!("Output {} is already configured correctly", self.info.name);
                     None
                 }
             }
@@ -190,9 +188,10 @@ impl Bg {
     ///'color' argument is in rbg. We copy it correctly to brgx inside the function
     fn clear(&mut self, color: [u8; 3]) {
         self.info.img = BgImg::Color(color);
-        let stride = 4 * self.info.dim.0 as i32;
-        let width = self.info.dim.0 as i32;
-        let height = self.info.dim.1 as i32;
+        let dim = self.info.real_dim();
+        let stride = 4 * dim.0 as i32;
+        let width = dim.0 as i32;
+        let height = dim.1 as i32;
 
         let buffer = self
             .pool
@@ -211,9 +210,10 @@ impl Bg {
     }
 
     fn draw(&mut self, img: &ReadiedPack) {
-        let stride = 4 * self.info.dim.0 as i32;
-        let width = self.info.dim.0 as i32;
-        let height = self.info.dim.1 as i32;
+        let dim = self.info.real_dim();
+        let stride = 4 * dim.0 as i32;
+        let width = dim.0 as i32;
+        let height = dim.1 as i32;
 
         let buffer = self
             .pool
@@ -230,7 +230,9 @@ impl Bg {
     ///This method is what makes necessary that we use the mempoll, instead of the "easier"
     ///automempoll
     fn get_current_img(&mut self) -> &[u8] {
-        self.pool.mmap()
+        let dim = self.info.real_dim();
+        let size = dim.0 as usize * dim.1 as usize * 4;
+        &self.pool.mmap()[0..size]
     }
 }
 
@@ -345,14 +347,7 @@ fn create_backgrounds(
         empty_region.destroy();
 
         debug!("New background with output: {:?}", info);
-        let bg = Bg::new(
-            output,
-            info.name.clone(),
-            info.scale_factor,
-            surface,
-            layer_shell,
-            pool,
-        );
+        let bg = Bg::new(output, info.name.clone(), surface, layer_shell, pool);
         bgs.borrow_mut().push(bg);
     }
 }
@@ -544,7 +539,7 @@ fn make_processor_requests(bgs: &mut RefMut<Vec<Bg>>, img: &Img) -> Vec<Processo
         .for_each(|bg| {
             if let Some(i) = groups
                 .iter()
-                .position(|g| bg.info.dim == g.0.dim() && bg.info.img == *g.1)
+                .position(|g| bg.info.real_dim() == g.0.dim() && bg.info.img == *g.1)
             {
                 groups[i].0.add_output(&bg.info.name);
             } else {
