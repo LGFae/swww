@@ -38,6 +38,7 @@ pub struct Transition {
     speed: u8,
     step: u8,
     fps: Duration,
+    angle: f64,
 }
 
 /// All transitions return whether or not they completed
@@ -49,6 +50,7 @@ impl Transition {
         speed: u8,
         step: u8,
         fps: Duration,
+        angle: f64,
     ) -> Self {
         Transition {
             old_img,
@@ -57,6 +59,7 @@ impl Transition {
             speed,
             step,
             fps,
+            angle,
         }
     }
 
@@ -78,6 +81,7 @@ impl Transition {
             TransitionType::Outer => self.outer(new_img, outputs, sender, stop_recv),
             TransitionType::Any => self.any(new_img, outputs, sender, stop_recv),
             TransitionType::Random => self.random(new_img, outputs, sender, stop_recv),
+            TransitionType::Wipe => self.wipe(new_img, outputs, sender, stop_recv),
         }
     }
 
@@ -230,6 +234,61 @@ impl Transition {
             } else {
                 current_line = 0;
             }
+        }
+    }
+
+    fn wipe(
+        mut self,
+        new_img: &[u8],
+        outputs: &mut Vec<String>,
+        sender: &SyncSender<(Vec<String>, ReadiedPack)>,
+        stop_recv: &mpsc::Receiver<Vec<String>>,
+    ) -> bool {
+        let fps = self.fps;
+        let speed = self.speed;
+        let width = self.dimensions.0;
+        let height = self.dimensions.1;
+        let mut now = Instant::now();
+        let center = (width / 2, height / 2);
+        let screen_diag = ((width.pow(2) + height.pow(2)) as f64).sqrt();
+
+        let mut offset = 0.0;
+
+        let angle = self.angle.to_radians();
+        let circle_radius = screen_diag / 2.0;
+
+        // line formula: (x-h)*a + (y-k)*b + C = r^2
+        // https://www.desmos.com/calculator/vpvzk12yar
+        //
+        // checks if a pixel is to the left or right of the line
+        let is_low = |pix_x: f64, pix_y: f64, offset: f64, radius: f64| {
+            let a = radius * angle.cos();
+            let b = radius * angle.sin();
+            let x = pix_x - center.0 as f64;
+            let y = pix_y - center.1 as f64;
+            let res = x * a + y * b + offset;
+            if res >= radius.powf(2.0) {
+                true
+            } else {
+                false
+            }
+        };
+        loop {
+            let transition_img =
+                ReadiedPack::new(&mut self.old_img, new_img, |old_pix, new_pix, i| {
+                    let width = width as usize;
+                    let height = height as usize;
+                    let pix_x = i % width;
+                    let pix_y = height - i / width;
+                    if is_low(pix_x as f64, pix_y as f64, offset, circle_radius) {
+                        let step =
+                            self.step + ((offset as usize - (i / width)) / speed as usize) as u8;
+                        change_cols(step, old_pix, *new_pix);
+                    }
+                });
+            send_transition_frame!(transition_img, outputs, now, fps, sender, stop_recv);
+            now = Instant::now();
+            offset += speed as f64 * circle_radius;
         }
     }
 
@@ -434,6 +493,7 @@ mod tests {
             1,
             100,
             Duration::from_nanos(1),
+            0.0,
         )
     }
 

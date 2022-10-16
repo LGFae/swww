@@ -74,6 +74,7 @@ pub enum TransitionType {
     Outer,
     Any,
     Random,
+    Wipe,
 }
 
 impl std::str::FromStr for TransitionType {
@@ -90,8 +91,9 @@ impl std::str::FromStr for TransitionType {
             "outer" => Ok(Self::Outer),
             "any" => Ok(Self::Any),
             "random" => Ok(Self::Random),
+            "wipe" => Ok(Self::Wipe),
             _ => Err("unrecognized transition type. Valid transitions are:\
-                     simple | lest | right | top | bottom | center | outer | random\
+                     simple | lest | right | top | bottom | center | outer | random | wipe\
                      see swww img --help for more details"),
         }
     }
@@ -186,11 +188,13 @@ pub struct Img {
     ///
     ///Possible transitions are:
     ///
-    ///simple | left | right | top | bottom | center | outer | any | random
+    ///simple | left | right | top | bottom | wipe | center | outer | any | random
     ///
     ///The 'left', 'right', 'top' and 'bottom' options make the transition happen from that
     ///position to its oposite in the screen.
     ///
+    ///'wipe' is simillar to 'left' but allows you to specify the angle for transition (with the --transition-angle flag).
+    /// 
     ///'center' causes a transition from the center to the edges of the screen, while 'outer' is
     ///the oposite of that.
     ///
@@ -235,6 +239,12 @@ pub struct Img {
     ///approach the new image every frame.
     #[arg(long, env = "SWWW_TRANSITION_FPS", default_value = "30")]
     pub transition_fps: u8,
+
+    ///This is only used for the 'wipe' transition. It controls the angle of the wipe (default is '0').
+    ///
+    ///Note that the angle is in degrees, where '0' is right to left and '90' is top to bottom, and '270' bottom to top
+    #[arg(long, env = "SWWW_TRANSITION_ANGLE", default_value = "0")]
+    pub transition_angle: f64,
 }
 
 #[cfg(test)]
