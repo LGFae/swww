@@ -75,6 +75,7 @@ pub enum TransitionType {
     Any,
     Random,
     Wipe,
+    Grow,
 }
 
 impl std::str::FromStr for TransitionType {
@@ -87,13 +88,14 @@ impl std::str::FromStr for TransitionType {
             "right" => Ok(Self::Right),
             "top" => Ok(Self::Top),
             "bottom" => Ok(Self::Bottom),
+            "wipe" => Ok(Self::Wipe),
+            "grow" => Ok(Self::Grow),
             "center" => Ok(Self::Center),
             "outer" => Ok(Self::Outer),
             "any" => Ok(Self::Any),
             "random" => Ok(Self::Random),
-            "wipe" => Ok(Self::Wipe),
             _ => Err("unrecognized transition type. Valid transitions are:\
-                     simple | lest | right | top | bottom | center | outer | random | wipe\
+                     simple | lest | right | top | bottom | wipe | grow | center | outer | random\
                      see swww img --help for more details"),
         }
     }
@@ -188,17 +190,21 @@ pub struct Img {
     ///
     ///Possible transitions are:
     ///
-    ///simple | left | right | top | bottom | wipe | center | outer | any | random
+    ///simple | left | right | top | bottom | wipe | grow | center | any | outer | random
     ///
     ///The 'left', 'right', 'top' and 'bottom' options make the transition happen from that
     ///position to its oposite in the screen.
     ///
     ///'wipe' is simillar to 'left' but allows you to specify the angle for transition (with the --transition-angle flag).
-    /// 
-    ///'center' causes a transition from the center to the edges of the screen, while 'outer' is
-    ///the oposite of that.
     ///
-    ///'any' is like 'center', but selects a random spot to start the transition from
+    ///'grow' causes a growing circle to transition across the screen and allows changing the circle's center\
+    /// position (with --transition-pos flag).
+    ///
+    ///'center' an alias to 'grow' with position set to center of screen.
+    ///
+    ///'any' an alias to 'grow' with position set to a random point on screen.
+    ///
+    ///'outer' same as grow but the circle shrinks instead of growing.
     ///
     ///Finally, 'random' will select a transition effect at random
     #[arg(short, long, env = "SWWW_TRANSITION", default_value = "simple")]
@@ -245,6 +251,16 @@ pub struct Img {
     ///Note that the angle is in degrees, where '0' is right to left and '90' is top to bottom, and '270' bottom to top
     #[arg(long, env = "SWWW_TRANSITION_ANGLE", default_value = "0")]
     pub transition_angle: f64,
+
+    ///This is only used for the 'grow','outer' transitions. It controls the center of circle (default is 'center').
+    ///
+    ///position values can be given in the format of '<x_pos>,<y_pos>', for example '700,0' is 700px from left and 0px from bottom
+    ///x_pos and y_pos can also be percentages, which are parsed according to screen size, for example '50%,50%' for center
+    ///
+    ///the value can also be an alias which will set the position accordingly):
+    /// 'center' | 'top' | 'left' | 'right' | 'bottom' | 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
+    #[arg(long, env = "SWWW_TRANSITION_POS", default_value = "center")]
+    pub transition_pos: String,
 }
 
 #[cfg(test)]

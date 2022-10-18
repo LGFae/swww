@@ -43,21 +43,39 @@ pub struct ProcessorRequest {
     step: u8,
     fps: Duration,
     angle: f64,
+    pos: (u32, u32),
 }
 
 impl ProcessorRequest {
     pub fn new(info: &BgInfo, old_img: Box<[u8]>, img: &Img) -> Self {
+        let dimensions = info.real_dim();
+        let mut pos = parse_coords(img.transition_pos.clone(), dimensions);
+        let transition_type: TransitionType = match img.transition_type {
+            TransitionType::Center => {
+                pos = (dimensions.0 / 2, dimensions.1 / 2);
+                TransitionType::Grow
+            }
+            TransitionType::Any => {
+                pos = (
+                    rand::random::<u32>() % dimensions.0,
+                    rand::random::<u32>() % dimensions.1,
+                );
+                TransitionType::Grow
+            }
+            _ => img.transition_type.clone(),
+        };
         Self {
             outputs: vec![info.name.to_string()],
-            dimensions: info.real_dim(),
+            dimensions: dimensions,
             old_img,
             path: img.path.clone(),
-            transition_type: img.transition_type.clone(),
+            transition_type: transition_type,
             speed: img.transition_speed,
             filter: img.filter.get_image_filter(),
             step: img.transition_step,
             fps: Duration::from_nanos(1_000_000_000 / img.transition_fps as u64),
             angle: img.transition_angle,
+            pos: pos,
         }
     }
 
@@ -78,6 +96,7 @@ impl ProcessorRequest {
             self.step,
             self.fps,
             self.angle,
+            self.pos,
         );
         let img = image::io::Reader::open(&self.path);
         let animation = {
@@ -308,4 +327,103 @@ fn send_frame(
         Ok(()) => false,
         Err(_) => true,
     }
+}
+
+// parses percentages and numbers in format of "<coord1>,<coord2>"
+fn parse_coords(raw: String, dimensions: (u32, u32)) -> (u32, u32) {
+    let coords = raw.split(',').map(|s| s.trim()).collect::<Vec<&str>>();
+    let x: &str;
+    let y: &str;
+    if coords.len() != 2 {
+        match coords[0] {
+            "center" => {
+                x = "50%";
+                y = "50%";
+            }
+            "top" => {
+                x = "50%";
+                y = "100%";
+            }
+            "bottom" => {
+                x = "50%";
+                y = "0";
+            }
+            "left" => {
+                x = "0";
+                y = "50%";
+            }
+            "right" => {
+                x = "100%";
+                y = "50%";
+            }
+            "top-left" => {
+                x = "0";
+                y = "100%";
+            }
+            "top-right" => {
+                x = "100%";
+                y = "100%";
+            }
+            "bottom-left" => {
+                x = "0";
+                y = "0";
+            }
+            "bottom-right" => {
+                x = "100%";
+                y = "0";
+            }
+            _ => {
+                debug!(
+                    "Invalid position keyword, using center as fallback: {}",
+                    raw
+                );
+                x = "50%";
+                y = "50%";
+            }
+        }
+    } else {
+        x = coords[0];
+        y = coords[1];
+    }
+    let mut parsed_x: u32;
+    let mut parsed_y: u32;
+
+    //parse x coord
+    match x.parse::<u32>() {
+        Ok(x) => parsed_x = x,
+        Err(_) => {
+            debug!("Invalid x coord, trying to parse as percentage: {}", x);
+            if x.ends_with("%") {
+                let x = x.trim_end_matches("%");
+                match x.parse::<u32>() {
+                    Ok(x) => parsed_x = x,
+                    Err(_) => parsed_x = 0,
+                }
+                parsed_x = parsed_x * dimensions.0 / 100;
+            } else {
+                debug!("Invalid x coord, using 0 as fallback: {}", x);
+                parsed_x = 0;
+            }
+        }
+    }
+
+    //parse y coord
+    match y.parse::<u32>() {
+        Ok(y) => parsed_y = y,
+        Err(_) => {
+            debug!("Invalid y coord, trying to parse as percentage: {}", y);
+            if y.ends_with("%") {
+                let y = y.trim_end_matches("%");
+                match y.parse::<u32>() {
+                    Ok(y) => parsed_y = y,
+                    Err(_) => parsed_y = 0,
+                }
+                parsed_y = parsed_y * dimensions.1 / 100;
+            } else {
+                debug!("Invalid y coord, using 0 as fallback: {}", y);
+                parsed_y = 0;
+            }
+        }
+    }
+    (parsed_x, parsed_y)
 }
