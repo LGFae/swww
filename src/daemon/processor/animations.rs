@@ -341,13 +341,13 @@ impl Transition {
         let mut dist_center = {
             let mut x = center_x as usize;
             let mut y = center_y as usize;
-            if x < width/2 {
+            if x < width / 2 {
                 x = width - 1 - x;
             }
-            if y < height/2{
+            if y < height / 2 {
                 y = height - 1 - y;
             }
-            ((x.pow(2)+y.pow(2)) as f64).sqrt() as usize
+            ((x.pow(2) + y.pow(2)) as f64).sqrt() as usize
         };
         let mut now = Instant::now();
         loop {
