@@ -130,7 +130,7 @@ towards the edges.
 
 There is also `simple`, which simply fades into the new image, `any`, which is
 like `center` but starts at a random point, and `random`, which selects a
-transition effect at ranom.
+transition effect at random.
 
 ## Troubleshooting
 
