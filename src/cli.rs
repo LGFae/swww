@@ -95,7 +95,7 @@ impl std::str::FromStr for TransitionType {
             "any" => Ok(Self::Any),
             "random" => Ok(Self::Random),
             _ => Err("unrecognized transition type. Valid transitions are:\
-                     simple | lest | right | top | bottom | wipe | grow | center | outer | random\
+                     simple | left | right | top | bottom | wipe | grow | center | outer | random\
                      see swww img --help for more details"),
         }
     }
@@ -197,7 +197,7 @@ pub struct Img {
     ///
     ///'wipe' is simillar to 'left' but allows you to specify the angle for transition (with the --transition-angle flag).
     ///
-    ///'grow' causes a growing circle to transition across the screen and allows changing the circle's center\
+    ///'grow' causes a growing circle to transition across the screen and allows changing the circle's center
     /// position (with --transition-pos flag).
     ///
     ///'center' an alias to 'grow' with position set to center of screen.
@@ -254,14 +254,101 @@ pub struct Img {
 
     ///This is only used for the 'grow','outer' transitions. It controls the center of circle (default is 'center').
     ///
-    ///position values can be given in the format of '<x_pos>,<y_pos>', for example '700,0' is 700px from left and 0px from bottom
-    ///x_pos and y_pos can also be percentages, which are parsed according to screen size, for example '50%,50%' for center
+    ///position values are in the format 'x,y' where x and y are in the range [0,1.0] and represent the percentage of screen dimension
     ///
     ///the value can also be an alias which will set the position accordingly):
     /// 'center' | 'top' | 'left' | 'right' | 'bottom' | 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
-    #[arg(long, env = "SWWW_TRANSITION_POS", default_value = "center")]
-    pub transition_pos: String,
+    #[arg(long, env = "SWWW_TRANSITION_POS", default_value = "center", value_parser = parse_coords)]
+    pub transition_pos:  (f32, f32),
 }
+// parses percentages and numbers in format of "<coord1>,<coord2>"
+fn parse_coords(raw: &str) -> Result<(f32,f32), String> {
+
+    let coords = raw.split(',').map(|s| s.trim()).collect::<Vec<&str>>();
+    let x: &str;
+    let y: &str;
+    if coords.len() != 2 {
+        match coords[0] {
+            "center" => {
+                x = "0.5";
+                y = "0.5";
+            }
+            "top" => {
+                x = "0.5";
+                y = "1.0";
+            }
+            "bottom" => {
+                x = "0.5";
+                y = "0";
+            }
+            "left" => {
+                x = "0";
+                y = "0.5";
+            }
+            "right" => {
+                x = "1.0";
+                y = "0.5";
+            }
+            "top-left" => {
+                x = "0";
+                y = "1.0";
+            }
+            "top-right" => {
+                x = "1.0";
+                y = "1.0";
+            }
+            "bottom-left" => {
+                x = "0";
+                y = "0";
+            }
+            "bottom-right" => {
+                x = "1.0%";
+                y = "0";
+            }
+            _ => {
+                return Err(format!(
+                    "Invalid position keyword: {}",
+                    raw
+                ))
+            }
+        }
+    } else {
+        x = coords[0];
+        y = coords[1];
+    }
+    let parsed_x: f32;
+    let parsed_y: f32;
+
+    //parse x coord
+    match x.parse::<f32>() {
+        Ok(x) => {
+            if x > 1.0 || x < 0.0{
+                return Err(format!(
+                    "x coord not in range [0,1.0]: {}",
+                    x
+                ))
+            }
+            parsed_x = x
+        },
+        Err(_) => return Err(format!("Invalid x coord: {}", x)),
+    }
+
+    //parse y coord
+    match y.parse::<f32>() {
+        Ok(y) => {
+            if y > 1.0 || y < 0.0{
+                return Err(format!(
+                    "y coord not in range [0,1.0]: {}",
+                    y
+                ))
+            }
+            parsed_y = y
+        },
+        Err(_) => return Err(format!("Invalid y coord: {}", y)),
+    }
+    Ok((parsed_x, parsed_y))
+}
+
 
 #[cfg(test)]
 mod tests {
