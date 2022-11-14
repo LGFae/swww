@@ -39,7 +39,7 @@ pub struct Transition {
     step: u8,
     fps: Duration,
     angle: f64,
-    pos: (u32, u32),
+    pos: (f32, f32),
 }
 
 /// All transitions return whether or not they completed
@@ -52,7 +52,7 @@ impl Transition {
         step: u8,
         fps: Duration,
         angle: f64,
-        pos: (u32, u32),
+        pos: (f32, f32),
     ) -> Self {
         Transition {
             old_img,
@@ -84,25 +84,30 @@ impl Transition {
             TransitionType::Wipe => self.wipe(new_img, outputs, sender, stop_recv),
             TransitionType::Grow => self.grow(new_img, outputs, sender, stop_recv),
             TransitionType::Outer => self.outer(new_img, outputs, sender, stop_recv),
-            TransitionType::Center => false,
-            TransitionType::Any => false,
+            TransitionType::Center =>  self.center(new_img, outputs, sender, stop_recv),
+            TransitionType::Any => self.any(new_img, outputs, sender, stop_recv),
         }
     }
 
     fn random(
-        self,
+        mut self,
         new_img: &[u8],
         outputs: &mut Vec<String>,
         sender: &SyncSender<(Vec<String>, ReadiedPack)>,
         stop_recv: &mpsc::Receiver<Vec<String>>,
     ) -> bool {
         let r: u8 = rand::random();
-        match r % 8 {
+        match r % 7 {
             0 => self.simple(new_img, outputs, sender, stop_recv),
             1 => self.left(new_img, outputs, sender, stop_recv),
             2 => self.right(new_img, outputs, sender, stop_recv),
             3 => self.top(new_img, outputs, sender, stop_recv),
             4 => self.bottom(new_img, outputs, sender, stop_recv),
+            5 => {
+                self.angle = rand::random::<f64>() % 360.0;
+                self.wipe(new_img, outputs, sender, stop_recv)
+            },
+            6 => self.any(new_img, outputs, sender, stop_recv),
             _ => unreachable!(),
         }
     }
@@ -373,6 +378,40 @@ impl Transition {
             }
         }
     }
+
+    // aliases
+
+    fn any(
+        mut self,
+        new_img: &[u8],
+        outputs: &mut Vec<String>,
+        sender: &SyncSender<(Vec<String>, ReadiedPack)>,
+        stop_recv: &mpsc::Receiver<Vec<String>>,
+    ) -> bool {
+        self.pos = (
+            (rand::random::<u32>() % self.dimensions.0) as f32,
+            (rand::random::<u32>() % self.dimensions.1) as f32,
+        );
+        match rand::random::<u8>() % 2 {
+            0 => self.grow(new_img, outputs, sender, stop_recv),
+            1 => self.outer(new_img, outputs, sender, stop_recv),
+            _ => unreachable!(),
+        }
+    }
+
+    fn center(
+        mut self,
+        new_img: &[u8],
+        outputs: &mut Vec<String>,
+        sender: &SyncSender<(Vec<String>, ReadiedPack)>,
+        stop_recv: &mpsc::Receiver<Vec<String>>,
+    ) -> bool {
+        self.pos = (
+            (self.dimensions.0/2) as f32,
+            (self.dimensions.1/2) as f32,
+        );
+        self.grow(new_img, outputs, sender, stop_recv)
+    }
 }
 
 fn change_cols(step: u8, old: &mut [u8; 4], new: [u8; 4]) {
@@ -468,7 +507,7 @@ mod tests {
             100,
             Duration::from_nanos(1),
             0.0,
-            (0, 0),
+            (0.0, 0.0),
         )
     }
 
