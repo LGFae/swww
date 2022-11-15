@@ -1,5 +1,8 @@
 ### Unreleased
 
+  * New grow transition. Grow and outer transition now accept a --transition-pos
+  command line argument. By @flick0.
+  * Very slightly faster decompression routine
 
 ### 0.5.0
 
@@ -12,7 +15,7 @@
 Improvements:
 
   * Fixed `swww` getting stuck on a futex when a new monitor was connected (#26)
-  * New `wipe` transition by #flick0
+  * New `wipe` transition by @flick0
   * Several small code improvements by @WhyNotHugo
   * Typo fix (@thebenperson)
 

@@ -383,7 +383,7 @@ impl Transition {
                     let pix_center_dist = diff_x * diff_x + diff_y * diff_y;
                     if pix_center_dist >= dist_center * dist_center {
                         let step =
-                            self.step + (pix_center_dist - (dist_center * dist_center)) as u8;
+                            self.step.saturating_add((pix_center_dist - (dist_center * dist_center)) as u8);
                         change_cols(step, old_pix, *new_pix);
                     }
                 });

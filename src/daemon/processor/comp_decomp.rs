@@ -70,6 +70,7 @@ where
         v.push((diffs % 255) as u8);
         v.append(&mut to_add);
     }
+    v.push(0);
     v.into_boxed_slice()
 }
 
@@ -77,7 +78,7 @@ fn unpack_bytes(buf: &mut [u8], diff: &[u8]) {
     let buf_chunks = pixels_mut(buf);
     let mut diff_idx = 0;
     let mut pix_idx = 0;
-    while diff_idx < diff.len() {
+    while diff_idx < diff.len() - 1 {
         while diff[diff_idx] == u8::MAX {
             pix_idx += u8::MAX as usize;
             diff_idx += 1;
@@ -93,7 +94,7 @@ fn unpack_bytes(buf: &mut [u8], diff: &[u8]) {
         to_cpy += diff[diff_idx] as usize;
         diff_idx += 1;
 
-        for _ in 1..to_cpy {
+        for _ in 0..to_cpy {
             unsafe {
                 buf_chunks
                     .get_unchecked_mut(pix_idx)
@@ -102,12 +103,7 @@ fn unpack_bytes(buf: &mut [u8], diff: &[u8]) {
             diff_idx += 3;
             pix_idx += 1;
         }
-        unsafe {
-            buf_chunks.get_unchecked_mut(pix_idx)[0..3]
-                .clone_from_slice(diff.get_unchecked(diff_idx..diff_idx + 3));
-        }
-        diff_idx += 3;
-        pix_idx += 2;
+        pix_idx += 1;
     }
 }
 
