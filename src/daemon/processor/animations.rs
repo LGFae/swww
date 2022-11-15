@@ -17,6 +17,9 @@ use super::{
     img_resize, send_frame,
 };
 
+
+use keyframe::{ease,mint::Vector2,functions::BezierCurve, num_traits::Pow};
+
 macro_rules! send_transition_frame {
     ($img:ident, $outputs:ident, $now:ident, $fps:ident, $sender:ident, $stop_recv:ident) => {
         if $img.is_empty() {
@@ -40,6 +43,8 @@ pub struct Transition {
     fps: Duration,
     angle: f64,
     pos: (f32, f32),
+    curve: BezierCurve,
+    time: f64,
 }
 
 /// All transitions return whether or not they completed
@@ -63,6 +68,10 @@ impl Transition {
             fps,
             angle,
             pos,
+            curve: BezierCurve::from(
+                Vector2::from([0.6,0.0]), Vector2::from([0.3,1.0])
+            ),
+            time: 0.0,
         }
     }
 
@@ -87,6 +96,11 @@ impl Transition {
             TransitionType::Center =>  self.center(new_img, outputs, sender, stop_recv),
             TransitionType::Any => self.any(new_img, outputs, sender, stop_recv),
         }
+    }
+
+    fn interpolate(&mut self,min_step:f64,max_step: f64)->f64{
+        self.time += 1.0/max_step + (self.speed as f64)/1000.0;
+        ease(self.curve,min_step,max_step, self.time)
     }
 
     fn random(
@@ -143,6 +157,7 @@ impl Transition {
         let width = self.dimensions.0 as usize;
         let mut current_column = 0;
         let mut now = Instant::now();
+
         loop {
             let transition_img =
                 ReadiedPack::new(&mut self.old_img, new_img, |old_pix, new_pix, i| {
@@ -153,7 +168,7 @@ impl Transition {
                 });
             send_transition_frame!(transition_img, outputs, now, fps, sender, stop_recv);
             now = Instant::now();
-            current_column += speed;
+            current_column = self.interpolate(0.0,width as f64) as usize;
         }
     }
 
@@ -179,11 +194,7 @@ impl Transition {
                 });
             send_transition_frame!(transition_img, outputs, now, fps, sender, stop_recv);
             now = Instant::now();
-            if current_column >= speed {
-                current_column -= speed;
-            } else {
-                current_column = 0;
-            }
+            current_column = self.interpolate(width as f64,0.0) as usize;
         }
     }
 
@@ -197,6 +208,7 @@ impl Transition {
         let fps = self.fps;
         let speed = self.speed as usize;
         let width = self.dimensions.0 as usize;
+        let height = self.dimensions.1 as usize;
         let mut current_line = 0;
         let mut now = Instant::now();
         loop {
@@ -209,7 +221,7 @@ impl Transition {
                 });
             send_transition_frame!(transition_img, outputs, now, fps, sender, stop_recv);
             now = Instant::now();
-            current_line += speed;
+            current_line = self.interpolate(height as f64,0.0) as usize;
         }
     }
 
@@ -223,6 +235,7 @@ impl Transition {
         let fps = self.fps;
         let speed = self.speed as usize;
         let width = self.dimensions.0 as usize;
+        let height = self.dimensions.1 as usize;
         let mut current_line = self.dimensions.1 as usize;
         let mut now = Instant::now();
         loop {
@@ -235,11 +248,8 @@ impl Transition {
                 });
             send_transition_frame!(transition_img, outputs, now, fps, sender, stop_recv);
             now = Instant::now();
-            if current_line >= speed {
-                current_line -= speed;
-            } else {
-                current_line = 0;
-            }
+            current_line = self.interpolate(0.0,height as f64) as usize;
+
         }
     }
 
@@ -262,6 +272,8 @@ impl Transition {
 
         let angle = self.angle.to_radians();
         let circle_radius = screen_diag / 2.0;
+
+        let max_offset = circle_radius.pow(2.0) * 2.0;
 
         // line formula: (x-h)*a + (y-k)*b + C = r^2
         // https://www.desmos.com/calculator/vpvzk12yar
@@ -290,7 +302,7 @@ impl Transition {
                 });
             send_transition_frame!(transition_img, outputs, now, fps, sender, stop_recv);
             now = Instant::now();
-            offset += speed as f64 * circle_radius;
+            offset = self.interpolate(0.0,max_offset);
         }
     }
 
@@ -302,11 +314,21 @@ impl Transition {
         stop_recv: &mpsc::Receiver<Vec<String>>,
     ) -> bool {
         let fps = self.fps;
-        let speed = self.speed as usize;
         let (width, height) = (self.dimensions.0 as usize, self.dimensions.1 as usize);
         let (center_x, center_y) = self.pos;
         let mut dist_center = 0;
         let mut now = Instant::now();
+        let dist_end = {
+            let mut x = center_x as usize;
+            let mut y = center_y as usize;
+            if x < width / 2 {
+                x = width - 1 - x;
+            }
+            if y < height / 2 {
+                y = height - 1 - y;
+            }
+            ((x.pow(2) + y.pow(2)) as f64).sqrt() as usize
+        };
         loop {
             let transition_img =
                 ReadiedPack::new(&mut self.old_img, new_img, |old_pix, new_pix, i| {
@@ -324,7 +346,7 @@ impl Transition {
                 });
             send_transition_frame!(transition_img, outputs, now, fps, sender, stop_recv);
             now = Instant::now();
-            dist_center += speed;
+            dist_center = self.interpolate(dist_center as f64,dist_end as f64) as usize;
         }
     }
 
@@ -336,7 +358,6 @@ impl Transition {
         stop_recv: &mpsc::Receiver<Vec<String>>,
     ) -> bool {
         let fps = self.fps;
-        let speed = self.speed as usize;
         let (width, height) = (self.dimensions.0 as usize, self.dimensions.1 as usize);
         let (center_x, center_y) = self.pos;
         let mut dist_center = {
@@ -350,6 +371,7 @@ impl Transition {
             }
             ((x.pow(2) + y.pow(2)) as f64).sqrt() as usize
         };
+        let dist_end = 0.0;
         let mut now = Instant::now();
         loop {
             let transition_img =
@@ -367,11 +389,7 @@ impl Transition {
                 });
             send_transition_frame!(transition_img, outputs, now, fps, sender, stop_recv);
             now = Instant::now();
-            if dist_center >= speed {
-                dist_center -= speed;
-            } else {
-                dist_center = 0;
-            }
+            dist_center = self.interpolate(dist_center as f64,dist_end as f64) as usize;
         }
     }
 
