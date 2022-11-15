@@ -103,7 +103,7 @@ impl std::str::FromStr for TransitionType {
 
 #[derive(Parser, Serialize, Deserialize)]
 #[command(version, name = "swww")]
-///The Final Solution to your Wayland Wallpaper Woes
+///A Solution to your Wayland Wallpaper Woes
 ///
 ///Change what your monitors display as a background by controlling the swww daemon at runtime.
 ///Supports animated gifs and putting different stuff in different monitors. I also did my best to
