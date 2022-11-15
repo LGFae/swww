@@ -43,21 +43,27 @@ pub struct ProcessorRequest {
     step: u8,
     fps: Duration,
     angle: f64,
+    pos: (f32, f32),
 }
 
 impl ProcessorRequest {
     pub fn new(info: &BgInfo, old_img: Box<[u8]>, img: &Img) -> Self {
+        let dimensions = info.real_dim();
+        let raw_pos = img.transition_pos;
+        let pos = (raw_pos.0 * dimensions.0 as f32, raw_pos.1 * dimensions.1 as f32);
+        let transition_type: TransitionType = img.transition_type.clone();
         Self {
             outputs: vec![info.name.to_string()],
-            dimensions: info.real_dim(),
+            dimensions,
             old_img,
             path: img.path.clone(),
-            transition_type: img.transition_type.clone(),
+            transition_type,
             speed: img.transition_speed,
             filter: img.filter.get_image_filter(),
             step: img.transition_step,
             fps: Duration::from_nanos(1_000_000_000 / img.transition_fps as u64),
             angle: img.transition_angle,
+            pos,
         }
     }
 
@@ -78,6 +84,7 @@ impl ProcessorRequest {
             self.step,
             self.fps,
             self.angle,
+            self.pos,
         );
         let img = image::io::Reader::open(&self.path);
         let animation = {
@@ -309,3 +316,4 @@ fn send_frame(
         Err(_) => true,
     }
 }
+
