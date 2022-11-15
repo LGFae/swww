@@ -273,11 +273,7 @@ impl Transition {
             let x = pix_x - center.0 as f64;
             let y = pix_y - center.1 as f64;
             let res = x * a + y * b + offset;
-            if res >= radius.powf(2.0) {
-                true
-            } else {
-                false
-            }
+            res >= radius.powf(2.0)
         };
         loop {
             let transition_img =
