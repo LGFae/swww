@@ -44,6 +44,7 @@ pub struct ProcessorRequest {
     fps: Duration,
     angle: f64,
     pos: (f32, f32),
+    bezier: (f32, f32, f32, f32),
 }
 
 impl ProcessorRequest {
@@ -64,6 +65,7 @@ impl ProcessorRequest {
             fps: Duration::from_nanos(1_000_000_000 / img.transition_fps as u64),
             angle: img.transition_angle,
             pos,
+            bezier: img.transition_bezier,
         }
     }
 
@@ -85,6 +87,7 @@ impl ProcessorRequest {
             self.fps,
             self.angle,
             self.pos,
+            self.bezier,
         );
         let img = image::io::Reader::open(&self.path);
         let animation = {

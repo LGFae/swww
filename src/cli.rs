@@ -260,7 +260,17 @@ pub struct Img {
     /// 'center' | 'top' | 'left' | 'right' | 'bottom' | 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
     #[arg(long, env = "SWWW_TRANSITION_POS", default_value = "center", value_parser = parse_coords)]
     pub transition_pos:  (f32, f32),
+
+    #[arg(long, env = "SWWW_TRANSITION_BEZIER", default_value = ".54,0,.34,.99", value_parser = parse_bezier)]
+    pub transition_bezier: (f32, f32, f32, f32),
 }
+
+fn parse_bezier(raw: &str) -> Result<(f32,f32,f32,f32),String>{
+    let mut iter = raw.split(',');
+    let mut parse = || iter.next().ok_or("Not enough values".to_string()).and_then(|s| s.parse::<f32>().map_err(|e| e.to_string()));
+    Ok((parse()?, parse()?, parse()?, parse()?))
+}
+
 // parses percentages and numbers in format of "<coord1>,<coord2>"
 fn parse_coords(raw: &str) -> Result<(f32,f32), String> {
 

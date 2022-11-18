@@ -58,6 +58,7 @@ impl Transition {
         fps: Duration,
         angle: f64,
         pos: (f32, f32),
+        bezier: (f32, f32, f32, f32),
     ) -> Self {
         Transition {
             old_img,
@@ -69,7 +70,7 @@ impl Transition {
             angle,
             pos,
             curve: BezierCurve::from(
-                Vector2::from([0.6,0.0]), Vector2::from([0.3,1.0])
+                Vector2::from([bezier.0,bezier.1]), Vector2::from([bezier.2,bezier.3])
             ),
             time: 0.0,
         }
@@ -522,6 +523,7 @@ mod tests {
             Duration::from_nanos(1),
             0.0,
             (0.0, 0.0),
+            (0.0, 0.0,1.0,1.0),
         )
     }
 
