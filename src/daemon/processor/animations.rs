@@ -120,7 +120,7 @@ impl Transition {
     fn bezier_seq(&self,start:f32,end:f32) -> (AnimationSequence<f32>,Instant){
         (keyframes![
             (start,0.0,self.bezier),
-            (end,self.duration as f32, self.bezier)
+            (end,self.duration, self.bezier)
         ],Instant::now())
     }
 
