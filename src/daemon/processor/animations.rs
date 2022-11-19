@@ -161,7 +161,7 @@ impl Transition {
         loop {
             let transition_img =
                 ReadiedPack::new(&mut self.old_img, new_img, |old_pix, new_pix, i| {
-                    let (width) = (width as usize);
+                    let width = width as usize;
                     if (i % width) as f32 <= current_column {
                         let step = self.step + (current_column - (i % width) as f32 / speed) as u8;
                         change_cols(step, old_pix, *new_pix);
@@ -194,7 +194,7 @@ impl Transition {
             let transition_img =
                 ReadiedPack::new(&mut self.old_img, new_img, |old_pix, new_pix, i| {
                     let width = width as usize;
-                    if (i % width) as f32 >= current_column {
+                    if (i % width) >= current_column as usize {
                         let step = self.step + (((i % width) as f32 - current_column) / speed) as u8;
                         change_cols(step, old_pix, *new_pix);
                     }

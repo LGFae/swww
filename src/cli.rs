@@ -267,7 +267,10 @@ pub struct Img {
 
 fn parse_bezier(raw: &str) -> Result<(f32,f32,f32,f32),String>{
     let mut iter = raw.split(',');
-    let mut parse = || iter.next().ok_or("Not enough values".to_string()).and_then(|s| s.parse::<f32>().map_err(|e| e.to_string()));
+    let mut parse = || iter.next()
+        .ok_or_else(|| "Not enough values".to_string())
+        .and_then(|s| s.parse::<f32>()
+        .map_err(|e| e.to_string()));
     Ok((parse()?, parse()?, parse()?, parse()?))
 }
 
