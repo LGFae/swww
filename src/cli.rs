@@ -249,7 +249,7 @@ pub struct Img {
     ///This is only used for the 'wipe' transition. It controls the angle of the wipe (default is '0').
     ///
     ///Note that the angle is in degrees, where '0' is right to left and '90' is top to bottom, and '270' bottom to top
-    #[arg(long, env = "SWWW_TRANSITION_ANGLE", default_value = "0")]
+    #[arg(long, env = "SWWW_TRANSITION_ANGLE", default_value = "45")]
     pub transition_angle: f64,
 
     ///This is only used for the 'grow','outer' transitions. It controls the center of circle (default is 'center').

@@ -9,6 +9,7 @@ use std::{
 use fast_image_resize::FilterType;
 use image::{codecs::gif::GifDecoder, AnimationDecoder};
 use log::debug;
+use log::info;
 
 use crate::cli::TransitionType;
 
@@ -283,30 +284,32 @@ impl Transition {
         stop_recv: &mpsc::Receiver<Vec<String>>,
     ) -> bool {
         let fps = self.fps;
-        let (width, height) = (self.dimensions.0 as f32, self.dimensions.1 as f32);
+        let width = self.dimensions.0;
+        let height = self.dimensions.1;
         let mut now = Instant::now();
-        let center = (width / 2.0, height / 2.0);
-        let screen_diag = ((width.pow(2) + height.pow(2)) as f32).sqrt();
+        let center = (width / 2, height / 2);
+        let screen_diag = ((width.pow(2) + height.pow(2)) as f64).sqrt();
 
         let mut offset = 0.0;
 
         let angle = self.angle.to_radians();
         let circle_radius = screen_diag / 2.0;
+        let max_offset = circle_radius.powf(2.0)*2.0;
 
         // line formula: (x-h)*a + (y-k)*b + C = r^2
         // https://www.desmos.com/calculator/vpvzk12yar
         //
         // checks if a pixel is to the left or right of the line
-        let is_low = |pix_x: f32, pix_y: f32, offset: f32, radius: f32| {
-            let a = radius * angle.cos() as f32;
-            let b = radius * angle.sin() as f32;
-            let x = pix_x - center.0 as f32;
-            let y = pix_y - center.1 as f32;
+        let is_low = |pix_x: f64, pix_y: f64, offset: f64, radius: f64| {
+            let a = radius * angle.cos();
+            let b = radius * angle.sin();
+            let x = pix_x - center.0 as f64;
+            let y = pix_y - center.1 as f64;
             let res = x * a + y * b + offset;
             res >= radius.powf(2.0)
         };
 
-        let (mut seq, start) = self.bezier_seq(0.0, circle_radius);
+        let (mut seq,start) = self.bezier_seq(0.0, max_offset as f32);
 
         let mut step = self.step;
 
@@ -317,16 +320,16 @@ impl Transition {
                     let height = height as usize;
                     let pix_x = i % width;
                     let pix_y = height - i / width;
-                    if is_low(pix_x as f32, pix_y as f32, offset, circle_radius) {
+                    if is_low(pix_x as f64, pix_y as f64, offset, circle_radius) {
                         change_cols(step, old_pix, *new_pix);
                     }
                 });
             send_transition_frame!(transition_img, outputs, now, fps, sender, stop_recv);
             now = Instant::now();
 
-            offset = seq.now();
+            offset = seq.now() as f64;
             seq.advance_to(start.elapsed().as_secs_f64());
-            step = self.step + ((offset - height / (offset-seq.now()).abs())) as u8;
+            step = self.step + ((offset as f32 - height as f32) / 4.0) as u8;
         }
     }
 
