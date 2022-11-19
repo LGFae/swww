@@ -9,7 +9,6 @@ use std::{
 use fast_image_resize::FilterType;
 use image::{codecs::gif::GifDecoder, AnimationDecoder};
 use log::debug;
-use log::info;
 
 use crate::cli::TransitionType;
 

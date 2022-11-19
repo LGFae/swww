@@ -223,17 +223,9 @@ pub struct Img {
     #[arg(long, env = "SWWW_TRANSITION_STEP", default_value = "10")]
     pub transition_step: u8,
 
-    ///How fast the transition 'sweeps' through the screen
+    ///How long the transition takes to complete in seconds.
     ///
-    ///For any transition except 'simple', they work by starting at some point (or line), and
-    ///working their way through the screen, while changing the colors of the values they've passed
-    ///through. For exemple, 'left' will cause the transition to start from the left of the screen,
-    ///moving towards the right. Every value that's to the left will be updated accordingly. This
-    ///controls how fast the 'going to the right' motion goes.
-    ///
-    ///A value of 'n' means that we'll go 'n' columns at a time for the 'left' transition, for
-    ///example. For the transitions that work with radii ('center', 'outer' and 'any') a value of
-    ///'n' means that we'll increase the radius by 'n' every time.
+    ///Note that this doesnt work with the 'simple' transition
     #[arg(long, env = "SWWW_TRANSITION_DURATION", default_value = "3")]
     pub transition_duration: f32,
 
@@ -261,6 +253,11 @@ pub struct Img {
     #[arg(long, env = "SWWW_TRANSITION_POS", default_value = "center", value_parser = parse_coords)]
     pub transition_pos:  (f32, f32),
 
+
+    ///bezier curve to use for the transition
+    ///https://cubic-bezier.com is a good website to get these values from
+    ///
+    ///eg: 0.0,0.0,1.0,1.0 for linear animation
     #[arg(long, env = "SWWW_TRANSITION_BEZIER", default_value = ".54,0,.34,.99", value_parser = parse_bezier)]
     pub transition_bezier: (f32, f32, f32, f32),
 }
