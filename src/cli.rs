@@ -234,8 +234,8 @@ pub struct Img {
     ///A value of 'n' means that we'll go 'n' columns at a time for the 'left' transition, for
     ///example. For the transitions that work with radii ('center', 'outer' and 'any') a value of
     ///'n' means that we'll increase the radius by 'n' every time.
-    #[arg(long, env = "SWWW_TRANSITION_SPEED", default_value = "5")]
-    pub transition_speed: u8,
+    #[arg(long, env = "SWWW_TRANSITION_DURATION", default_value = "3")]
+    pub transition_duration: f32,
 
     ///Frame rate for the transition effect.
     ///
