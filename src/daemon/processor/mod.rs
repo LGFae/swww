@@ -12,6 +12,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+use keyframe::{mint::Vector2,functions::BezierCurve};
+
 use crate::{
     cli::{Img, TransitionType},
     Answer,
@@ -22,6 +24,7 @@ pub mod comp_decomp;
 
 use animations::{GifProcessor, Transition};
 use comp_decomp::ReadiedPack;
+
 
 use super::BgInfo;
 
@@ -44,7 +47,7 @@ pub struct ProcessorRequest {
     fps: Duration,
     angle: f64,
     pos: (f32, f32),
-    bezier: (f32, f32, f32, f32),
+    bezier: BezierCurve,
 }
 
 impl ProcessorRequest {
@@ -65,7 +68,10 @@ impl ProcessorRequest {
             fps: Duration::from_nanos(1_000_000_000 / img.transition_fps as u64),
             angle: img.transition_angle,
             pos,
-            bezier: img.transition_bezier,
+            bezier: BezierCurve::from(
+                Vector2 { x: img.transition_bezier.0, y: img.transition_bezier.1 },
+                Vector2 { x: img.transition_bezier.2, y: img.transition_bezier.3 },
+            )
         }
     }
 
