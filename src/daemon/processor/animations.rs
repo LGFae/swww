@@ -173,7 +173,11 @@ impl Transition {
             current_column = seq.now();
             seq.advance_to(start.elapsed().as_secs_f64());
             step = self.step + ((current_column - height) / (current_column-seq.now()).abs()) as u8;
+            if start.elapsed().as_secs_f64() >= seq.duration() {
+                break;
+            }
         }
+        self.simple(new_img, outputs, sender, stop_recv)
     }
 
     fn right(
@@ -206,7 +210,11 @@ impl Transition {
             current_column = seq.now();
             seq.advance_to(start.elapsed().as_secs_f64());
             step = self.step + ((current_column - height) / (current_column-seq.now()).abs()) as u8;
+            if start.elapsed().as_secs_f64() >= seq.duration() {
+                break;
+            }
         }
+        self.simple(new_img, outputs, sender, stop_recv)
     }
 
     fn top(
@@ -239,7 +247,11 @@ impl Transition {
             current_line = seq.now();
             seq.advance_to(start.elapsed().as_secs_f64());
             step = self.step + ((current_line - height) / (current_line-seq.now()).abs()) as u8;
+            if start.elapsed().as_secs_f64() >= seq.duration() {
+                break;
+            }
         }
+        self.simple(new_img, outputs, sender, stop_recv)
     }
 
     fn bottom(
@@ -272,7 +284,11 @@ impl Transition {
             current_line = seq.now();
             seq.advance_to(start.elapsed().as_secs_f64());
             step = self.step + ((current_line - height) / (current_line-seq.now()).abs()) as u8;
+            if start.elapsed().as_secs_f64() >= seq.duration() {
+                break;
+            }
         }
+        self.simple(new_img, outputs, sender, stop_recv)
     }
 
     fn wipe(
@@ -328,8 +344,11 @@ impl Transition {
 
             offset = seq.now() as f64;
             seq.advance_to(start.elapsed().as_secs_f64());
-            step = self.step + ((offset as f32 - height as f32) / 4.0) as u8;
+            if start.elapsed().as_secs_f64() >= seq.duration() {
+                break;
+            }
         }
+        self.simple(new_img, outputs, sender, stop_recv)
     }
 
     fn grow(
@@ -376,10 +395,13 @@ impl Transition {
                 });
             send_transition_frame!(transition_img, outputs, now, fps, sender, stop_recv);
             now = Instant::now();
-
             dist_center = seq.now();
             seq.advance_to(start.elapsed().as_secs_f64());
+            if start.elapsed().as_secs_f64() >= seq.duration() {
+                break;
+            }
         }
+        self.simple(new_img, outputs, sender, stop_recv)
     }
 
     fn outer(
@@ -427,7 +449,12 @@ impl Transition {
 
             dist_center = seq.now();
             seq.advance_to(start.elapsed().as_secs_f64());
+
+            if start.elapsed().as_secs_f64() >= seq.duration() {
+                break;
+            }
         }
+        self.simple(new_img, outputs, sender, stop_recv)
     }
 
     // aliases
