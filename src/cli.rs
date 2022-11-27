@@ -268,7 +268,12 @@ fn parse_bezier(raw: &str) -> Result<(f32,f32,f32,f32),String>{
         .ok_or_else(|| "Not enough values".to_string())
         .and_then(|s| s.parse::<f32>()
         .map_err(|e| e.to_string()));
-    Ok((parse()?, parse()?, parse()?, parse()?))
+
+    let parsed = (parse()?, parse()?, parse()?, parse()?);
+    if parsed == (0.0,0.0,0.0,0.0) {
+        return Err("Invalid bezier curve: 0,0,0,0 (try using 0,0,1,1 instead)".to_string());
+    }
+    Ok(parsed)
 }
 
 // parses percentages and numbers in format of "<coord1>,<coord2>"
