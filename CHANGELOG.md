@@ -1,7 +1,18 @@
 ### Unreleased
 
+**BREAKING CHANGES**
+
+  * `transition-speed` no longer exists. Now, speed is controlled through a
+  bezier curve (`transition-bezier`), and duration (`transition-duration`)
+  flags (note this also applies to the env var, SWWW_TRANSITION_SPEED).
+
+Improvements:
+
   * New grow transition. Grow and outer transition now accept a --transition-pos
   command line argument. By @flick0.
+  * Transitions `grow` and `outer` now both work with bezier curves (see
+  breaking changes, above). This allows for finer control in animation speed
+  than before. Also by @flick0.
   * Very slightly faster decompression routine
 
 ### 0.5.0

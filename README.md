@@ -89,8 +89,7 @@ swww img <path/to/img> --transition-step <1 to 255> --transition-fps <1 to 255>
 swww img <path/to/img> --transition-type center
 
 # Note you may also control the above by setting up the SWWW_TRANSITION_FPS,
-# SWWW_TRANSITION_STEP, SWWW_TRANSITION_SPEED and SWWW_TRANSITION environment
-# variables.
+# SWWW_TRANSITION_STEP, and SWWW_TRANSITION_TYPE environment variables.
 
 # To see all options, run
 swww img --help
