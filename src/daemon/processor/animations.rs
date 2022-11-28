@@ -17,7 +17,7 @@ use super::{
     img_resize, send_frame,
 };
 
-use keyframe::{keyframes,AnimationSequence,functions::BezierCurve, num_traits::Pow};
+use keyframe::{functions::BezierCurve, keyframes, num_traits::Pow, AnimationSequence};
 
 macro_rules! send_transition_frame {
     ($img:ident, $outputs:ident, $now:ident, $fps:ident, $sender:ident, $stop_recv:ident) => {
@@ -67,7 +67,7 @@ impl Transition {
             fps,
             angle,
             pos,
-            bezier
+            bezier,
         }
     }
 
@@ -89,7 +89,7 @@ impl Transition {
             TransitionType::Wipe => self.wipe(new_img, outputs, sender, stop_recv),
             TransitionType::Grow => self.grow(new_img, outputs, sender, stop_recv),
             TransitionType::Outer => self.outer(new_img, outputs, sender, stop_recv),
-            TransitionType::Center =>  self.center(new_img, outputs, sender, stop_recv),
+            TransitionType::Center => self.center(new_img, outputs, sender, stop_recv),
             TransitionType::Any => self.any(new_img, outputs, sender, stop_recv),
         }
     }
@@ -111,17 +111,17 @@ impl Transition {
             5 => {
                 self.angle = rand::random::<f64>() % 360.0;
                 self.wipe(new_img, outputs, sender, stop_recv)
-            },
+            }
             6 => self.any(new_img, outputs, sender, stop_recv),
             _ => unreachable!(),
         }
     }
 
-    fn bezier_seq(&self,start:f32,end:f32) -> (AnimationSequence<f32>,Instant){
-        (keyframes![
-            (start,0.0,self.bezier),
-            (end,self.duration, self.bezier)
-        ],Instant::now())
+    fn bezier_seq(&self, start: f32, end: f32) -> (AnimationSequence<f32>, Instant) {
+        (
+            keyframes![(start, 0.0, self.bezier), (end, self.duration, self.bezier)],
+            Instant::now(),
+        )
     }
 
     fn simple(
@@ -158,13 +158,13 @@ impl Transition {
         let screen_diag = ((width.pow(2) + height.pow(2)) as f64).sqrt();
 
         let circle_radius = screen_diag / 2.0;
-        let max_offset = circle_radius.powf(2.0)*2.0;
+        let max_offset = circle_radius.powf(2.0) * 2.0;
 
         let angle = self.angle.to_radians();
 
         let mut offset = {
-            let (x,y) = angle.sin_cos();
-            (x.abs()*width as f64/2.0 + y.abs()*height as f64/2.0).abs()
+            let (x, y) = angle.sin_cos();
+            (x.abs() * width as f64 / 2.0 + y.abs() * height as f64 / 2.0).abs()
         };
 
         // line formula: (x-h)*a + (y-k)*b + C = r^2
@@ -180,7 +180,7 @@ impl Transition {
             res >= radius.powf(2.0)
         };
 
-        let (mut seq,start) = self.bezier_seq(0.0, max_offset as f32);
+        let (mut seq, start) = self.bezier_seq(0.0, max_offset as f32);
 
         let step = self.step;
 
@@ -217,8 +217,8 @@ impl Transition {
         let fps = self.fps;
         let (width, height) = (self.dimensions.0 as f32, self.dimensions.1 as f32);
         let (center_x, center_y) = self.pos;
-        let mut dist_center:f32 = 0.0;
-        let dist_end:f32 = {
+        let mut dist_center: f32 = 0.0;
+        let dist_end: f32 = {
             let mut x = center_x;
             let mut y = center_y;
             if x < width / 2.0 {
@@ -231,21 +231,21 @@ impl Transition {
         };
         let mut now = Instant::now();
 
-        let (mut seq,start) = self.bezier_seq(0.0,dist_end);
+        let (mut seq, start) = self.bezier_seq(0.0, dist_end);
 
-        loop{
+        loop {
             let transition_img =
                 ReadiedPack::new(&mut self.old_img, new_img, |old_pix, new_pix, i| {
-                    let (width,height) = (width as usize,height as usize);
+                    let (width, height) = (width as usize, height as usize);
                     let pix_x = i % width;
                     let pix_y = height - i / width;
                     let diff_x = pix_x.abs_diff(center_x as usize) as f32;
                     let diff_y = pix_y.abs_diff(center_y as usize) as f32;
-                    let pix_center_dist = diff_x.powf(2.0) + diff_y.powf(2.0);
-                    if pix_center_dist <= dist_center.powf(2.0) {
+                    let pix_center_dist = (diff_x.powf(2.0) + diff_y.powf(2.0)).sqrt();
+                    if pix_center_dist <= dist_center {
                         let step = self
                             .step
-                            .saturating_add((dist_center.powf(2.0) - pix_center_dist) as u8);
+                            .saturating_add((dist_center - pix_center_dist).log2() as u8);
                         change_cols(step, old_pix, *new_pix);
                     }
                 });
@@ -283,20 +283,21 @@ impl Transition {
         };
         let mut now = Instant::now();
 
-        let (mut seq,start) = self.bezier_seq(dist_center,0.0);
+        let (mut seq, start) = self.bezier_seq(dist_center, 0.0);
 
         loop {
             let transition_img =
                 ReadiedPack::new(&mut self.old_img, new_img, |old_pix, new_pix, i| {
-                    let (width,height) = (width as usize,height as usize);
+                    let (width, height) = (width as usize, height as usize);
                     let pix_x = i % width;
                     let pix_y = height - i / width;
                     let diff_x = pix_x.abs_diff(center_x as usize) as f32;
                     let diff_y = pix_y.abs_diff(center_y as usize) as f32;
-                    let pix_center_dist = diff_x.powf(2.0) + diff_y.powf(2.0);
-                    if pix_center_dist >= dist_center.powf(2.0) {
-                        let step =
-                            self.step.saturating_add((pix_center_dist - dist_center.powf(2.0)) as u8);
+                    let pix_center_dist = (diff_x.powf(2.0) + diff_y.powf(2.0)).sqrt();
+                    if pix_center_dist >= dist_center {
+                        let step = self
+                            .step
+                            .saturating_add((pix_center_dist - dist_center).log2() as u8);
                         change_cols(step, old_pix, *new_pix);
                     }
                 });
@@ -341,8 +342,8 @@ impl Transition {
         stop_recv: &mpsc::Receiver<Vec<String>>,
     ) -> bool {
         self.pos = (
-            (self.dimensions.0/2) as f32,
-            (self.dimensions.1/2) as f32,
+            (self.dimensions.0 / 2) as f32,
+            (self.dimensions.1 / 2) as f32,
         );
         self.grow(new_img, outputs, sender, stop_recv)
     }
@@ -353,7 +354,7 @@ impl Transition {
         outputs: &mut Vec<String>,
         sender: &SyncSender<(Vec<String>, ReadiedPack)>,
         stop_recv: &mpsc::Receiver<Vec<String>>,
-    ) -> bool{
+    ) -> bool {
         self.angle = 0.0;
         self.wipe(new_img, outputs, sender, stop_recv)
     }
@@ -364,7 +365,7 @@ impl Transition {
         outputs: &mut Vec<String>,
         sender: &SyncSender<(Vec<String>, ReadiedPack)>,
         stop_recv: &mpsc::Receiver<Vec<String>>,
-    ) -> bool{
+    ) -> bool {
         self.angle = 180.0;
         self.wipe(new_img, outputs, sender, stop_recv)
     }
@@ -375,7 +376,7 @@ impl Transition {
         outputs: &mut Vec<String>,
         sender: &SyncSender<(Vec<String>, ReadiedPack)>,
         stop_recv: &mpsc::Receiver<Vec<String>>,
-    ) -> bool{
+    ) -> bool {
         self.angle = 90.0;
         self.wipe(new_img, outputs, sender, stop_recv)
     }
@@ -386,7 +387,7 @@ impl Transition {
         outputs: &mut Vec<String>,
         sender: &SyncSender<(Vec<String>, ReadiedPack)>,
         stop_recv: &mpsc::Receiver<Vec<String>>,
-    ) -> bool{
+    ) -> bool {
         self.angle = 270.0;
         self.wipe(new_img, outputs, sender, stop_recv)
     }
@@ -451,8 +452,8 @@ impl GifProcessor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use keyframe::mint::Vector2;
     use smithay_client_toolkit::reexports::calloop::channel::{self, Channel, SyncSender};
-    use keyframe::{mint::Vector2};
 
     #[allow(clippy::type_complexity)]
     fn make_senders_and_receivers() -> (
@@ -487,10 +488,7 @@ mod tests {
             Duration::from_nanos(1),
             0.0,
             (0.0, 0.0),
-            BezierCurve::from(
-                Vector2 { x: 1.0, y: 0.0 },
-                Vector2 { x: 0.0, y: 1.0 },
-            )
+            BezierCurve::from(Vector2 { x: 1.0, y: 0.0 }, Vector2 { x: 0.0, y: 1.0 }),
         )
     }
 

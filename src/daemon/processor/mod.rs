@@ -12,7 +12,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use keyframe::{mint::Vector2,functions::BezierCurve};
+use keyframe::{functions::BezierCurve, mint::Vector2};
 
 use crate::{
     cli::{Img, TransitionType},
@@ -24,7 +24,6 @@ pub mod comp_decomp;
 
 use animations::{GifProcessor, Transition};
 use comp_decomp::ReadiedPack;
-
 
 use super::BgInfo;
 
@@ -54,7 +53,10 @@ impl ProcessorRequest {
     pub fn new(info: &BgInfo, old_img: Box<[u8]>, img: &Img) -> Self {
         let dimensions = info.real_dim();
         let raw_pos = img.transition_pos;
-        let pos = (raw_pos.0 * dimensions.0 as f32, raw_pos.1 * dimensions.1 as f32);
+        let pos = (
+            raw_pos.0 * dimensions.0 as f32,
+            raw_pos.1 * dimensions.1 as f32,
+        );
         let transition_type: TransitionType = img.transition_type.clone();
         Self {
             outputs: vec![info.name.to_string()],
@@ -69,9 +71,15 @@ impl ProcessorRequest {
             angle: img.transition_angle,
             pos,
             bezier: BezierCurve::from(
-                Vector2 { x: img.transition_bezier.0, y: img.transition_bezier.1 },
-                Vector2 { x: img.transition_bezier.2, y: img.transition_bezier.3 },
-            )
+                Vector2 {
+                    x: img.transition_bezier.0,
+                    y: img.transition_bezier.1,
+                },
+                Vector2 {
+                    x: img.transition_bezier.2,
+                    y: img.transition_bezier.3,
+                },
+            ),
         }
     }
 
@@ -325,4 +333,3 @@ fn send_frame(
         Err(_) => true,
     }
 }
-
