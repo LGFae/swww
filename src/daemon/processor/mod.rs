@@ -12,6 +12,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+use keyframe::{functions::BezierCurve, mint::Vector2};
+
 use crate::{
     cli::{Img, TransitionType},
     Answer,
@@ -38,19 +40,23 @@ pub struct ProcessorRequest {
     old_img: Box<[u8]>,
     path: PathBuf,
     transition_type: TransitionType,
-    speed: u8,
+    duration: f32,
     filter: FilterType,
     step: u8,
     fps: Duration,
     angle: f64,
     pos: (f32, f32),
+    bezier: BezierCurve,
 }
 
 impl ProcessorRequest {
     pub fn new(info: &BgInfo, old_img: Box<[u8]>, img: &Img) -> Self {
         let dimensions = info.real_dim();
         let raw_pos = img.transition_pos;
-        let pos = (raw_pos.0 * dimensions.0 as f32, raw_pos.1 * dimensions.1 as f32);
+        let pos = (
+            raw_pos.0 * dimensions.0 as f32,
+            raw_pos.1 * dimensions.1 as f32,
+        );
         let transition_type: TransitionType = img.transition_type.clone();
         Self {
             outputs: vec![info.name.to_string()],
@@ -58,12 +64,22 @@ impl ProcessorRequest {
             old_img,
             path: img.path.clone(),
             transition_type,
-            speed: img.transition_speed,
+            duration: img.transition_duration,
             filter: img.filter.get_image_filter(),
             step: img.transition_step,
             fps: Duration::from_nanos(1_000_000_000 / img.transition_fps as u64),
             angle: img.transition_angle,
             pos,
+            bezier: BezierCurve::from(
+                Vector2 {
+                    x: img.transition_bezier.0,
+                    y: img.transition_bezier.1,
+                },
+                Vector2 {
+                    x: img.transition_bezier.2,
+                    y: img.transition_bezier.3,
+                },
+            ),
         }
     }
 
@@ -80,11 +96,12 @@ impl ProcessorRequest {
             self.old_img,
             self.dimensions,
             self.transition_type,
-            self.speed,
+            self.duration,
             self.step,
             self.fps,
             self.angle,
             self.pos,
+            self.bezier,
         );
         let img = image::io::Reader::open(&self.path);
         let animation = {
@@ -316,4 +333,3 @@ fn send_frame(
         Err(_) => true,
     }
 }
-
