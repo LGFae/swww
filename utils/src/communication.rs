@@ -1,0 +1,165 @@
+use serde::{Deserialize, Serialize};
+use std::{
+    fmt,
+    os::unix::net::UnixStream,
+    path::{Path, PathBuf},
+    time::Duration,
+};
+
+use crate::comp_decomp::BitPack;
+
+#[derive(PartialEq, Eq, Clone, Serialize, Deserialize)]
+pub enum BgImg {
+    Color([u8; 3]),
+    Img(PathBuf),
+}
+
+impl fmt::Display for BgImg {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BgImg::Color(color) => write!(f, "color: {}{}{}", color[0], color[1], color[2]),
+            BgImg::Img(p) => write!(
+                f,
+                "image: {:#?}",
+                p.file_name().unwrap_or_else(|| std::ffi::OsStr::new("?"))
+            ),
+        }
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct BgInfo {
+    pub name: String,
+    pub dim: (u32, u32),
+    pub scale_factor: i32,
+    pub img: BgImg,
+}
+
+impl BgInfo {
+    pub fn real_dim(&self) -> (u32, u32) {
+        (
+            self.dim.0 * self.scale_factor as u32,
+            self.dim.1 * self.scale_factor as u32,
+        )
+    }
+}
+
+impl fmt::Display for BgInfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}: {}x{}, scale: {}, currently displaying: {}",
+            self.name, self.dim.0, self.dim.1, self.scale_factor, self.img
+        )
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Clear {
+    pub color: [u8; 3],
+    pub outputs: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Animation {
+    animation: Box<[(BitPack, Duration)]>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub enum TransitionType {
+    Simple,
+    Left,
+    Right,
+    Top,
+    Bottom,
+    Center,
+    Outer,
+    Any,
+    Random,
+    Wipe,
+    Grow,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct Transition {
+    pub transition_type: TransitionType,
+    pub duration: f32,
+    pub step: u8,
+    pub fps: u8,
+    pub angle: f64,
+    pub pos: (f32, f32),
+    pub bezier: (f32, f32, f32, f32),
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Img {
+    pub img: Vec<u8>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub enum Request {
+    Animation(Vec<(Animation, Vec<String>)>),
+    Clear(Clear),
+    Init,
+    Kill,
+    Query,
+    Img((Transition, Vec<(Img, Vec<String>)>)),
+}
+
+impl Request {
+    pub fn send(&mut self, stream: &UnixStream) -> Result<(), String> {
+        match bincode::serialize_into(stream, self) {
+            Ok(()) => Ok(()),
+            Err(e) => Err(format!("Failed to serialize request: {}", e)),
+        }
+    }
+
+    pub fn receive(stream: &mut UnixStream) -> Result<Self, String> {
+        match bincode::deserialize_from(stream) {
+            Ok(i) => Ok(i),
+            Err(e) => Err(format!("Failed to deserialize request: {}", e)),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub enum Answer {
+    Ok,
+    Err(String),
+    Info(Vec<BgInfo>),
+}
+
+impl Answer {
+    pub fn send(&self, stream: &UnixStream) -> Result<(), String> {
+        match bincode::serialize_into(stream, self) {
+            Ok(()) => Ok(()),
+            Err(e) => Err(format!("Failed to send answer: {}", e)),
+        }
+    }
+
+    pub fn receive(stream: UnixStream) -> Result<Self, String> {
+        #[cfg(debug_assertions)]
+        let timeout = Duration::from_secs(60); //Some operations take a while to respond in debug mode
+        #[cfg(not(debug_assertions))]
+        let timeout = Duration::from_secs(10);
+
+        if let Err(e) = stream.set_read_timeout(Some(timeout)) {
+            return Err(format!("Failed to set read timeout: {}", e));
+        };
+
+        match bincode::deserialize_from(stream) {
+            Ok(i) => Ok(i),
+            Err(e) => Err(format!("Failed to receive answer: {}", e)),
+        }
+    }
+}
+
+pub fn get_socket_path() -> PathBuf {
+    let runtime_dir = if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
+        dir
+    } else {
+        "/tmp/swww".to_string()
+    };
+    let runtime_dir = Path::new(&runtime_dir);
+    runtime_dir.join("swww.socket")
+}

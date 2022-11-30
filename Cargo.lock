@@ -158,6 +158,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "daemon"
+version = "0.1.0"
+dependencies = [
+ "keyframe",
+ "log",
+ "rand",
+ "simplelog",
+ "smithay-client-toolkit",
+ "utils",
+]
+
+[[package]]
 name = "difflib"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -772,6 +784,7 @@ dependencies = [
  "serde",
  "simplelog",
  "smithay-client-toolkit",
+ "utils",
 ]
 
 [[package]]
@@ -875,6 +888,17 @@ name = "unicode-ident"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ceab39d59e4c9499d4e5a8ee0e2735b891bb7308ac83dfb4e80cad195c9f6f3"
+
+[[package]]
+name = "utils"
+version = "0.1.0"
+dependencies = [
+ "bincode",
+ "lazy_static",
+ "lzzzz",
+ "rand",
+ "serde",
+]
 
 [[package]]
 name = "vec_map"

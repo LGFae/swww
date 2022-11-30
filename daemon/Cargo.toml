@@ -1,0 +1,15 @@
+[package]
+name = "daemon"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+smithay-client-toolkit = { version = "0.16", default-features = false, features = ["calloop"] }
+log = { version = "0.4", features = ["max_level_debug", "release_max_level_info"] }
+simplelog = "0.12"
+rand = "0.8"
+keyframe = "1.1.1"
+
+utils = { path = "../utils" }
