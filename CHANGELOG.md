@@ -1,5 +1,8 @@
 ### Unreleased
 
+
+### 0.6.0
+
 **BREAKING CHANGES**
 
   * `transition-speed` no longer exists. Now, speed is controlled through a

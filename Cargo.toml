@@ -1,6 +1,6 @@
 [package]
 name = "swww"
-version = "0.5.0"
+version = "0.6.0"
 authors = ["Leonardo Gibrowski Faé <leonardo.fae44@gmail.com>"]
 edition = "2021"
 
