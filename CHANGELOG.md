@@ -4,7 +4,11 @@
 
   * `transition-speed` no longer exists. Now, speed is controlled through a
   bezier curve (`transition-bezier`), and duration (`transition-duration`)
-  flags (note this also applies to the env var, SWWW_TRANSITION_SPEED).
+  flags (note this also applies to the env var, SWWW_TRANSITION_SPEED). A
+  warning was added when we detect the presence of the SWWW_TRANSITION_SPEED
+  environment variable. This warning will go away in the next release, it is
+  only there as a means of making sure everyone knows the variable has been
+  superseeded, and having it in your configs no longer does anything.
 
 Improvements:
 

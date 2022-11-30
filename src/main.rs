@@ -44,6 +44,16 @@ fn main() -> Result<(), String> {
         }
     }
 
+    if std::env::var("SWWW_TRANSITION_SPEED").is_ok() {
+        eprintln!(
+            "WARNING: the environment variable SWWW_TRANSITION_SPEED no longer does anything.\n\
+            What used to be 'speed' is now controlled by the flags '--transition-bezier' and\n\
+            '--transition-duration'. See swww img help for the full information.\n\
+\n\
+            This warning will go away in future versions of this program"
+        );
+    }
+
     let socket = connect_to_socket(5, 100)?;
     swww.send(&socket)?;
     match Answer::receive(socket)? {
