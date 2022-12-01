@@ -2,7 +2,7 @@
 ### Efficient animated wallpaper daemon for wayland, controlled at runtime
 
 ![animated gif demonstration](https://i.imgur.com/Leuh6wm.gif)
-![image transition demonstration](https://i.imgur.com/fMBFruY.gif)
+![image transition demonstration](https://i.imgur.com/NAWKiEW.gif)
 
 ## Dependencies
 
@@ -114,21 +114,22 @@ the 'example_scripts' folder. It can help you get started.
 
 ## Transitions
 
-#### Example top transition:
+#### Example wipe transition:
 
-![top transition demonstration](https://i.imgur.com/ULm6XWI.gif)
+> wipe transition with angle set to 30 deg
 
-The `left`, `right` and `bottom` transitions all work similarly.
+![top transition demonstration](https://i.imgur.com/ycrTPBP.gif)
+
+The `left`, `right`, `top` and `bottom` transitions all work similarly.
 
 #### Example outer transition
 
-![outer transition demonstration](https://i.imgur.com/o4pSyxW.gif)
+![outer transition demonstration](https://i.imgur.com/1w34rfW.gif)
 
 The `center` transition is the opposite: it starts from the center and goes 
 towards the edges.
 
-There is also `simple`, which simply fades into the new image, `any`, which is
-like `center` but starts at a random point, and `random`, which selects a
+There is also `simple`, which simply fades into the new image, `any`, which starts at a random point with either `center` of `outer` transitions, and `random`, which selects a
 transition effect at random.
 
 ## Troubleshooting
