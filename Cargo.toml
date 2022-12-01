@@ -1,5 +1,6 @@
 [workspace]
 members = ["daemon"]
+default-members = [".", "daemon"]
 
 [package]
 name = "swww"
