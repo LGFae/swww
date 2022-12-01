@@ -60,7 +60,9 @@ fn main() -> Result<(), String> {
 
     let mut request = make_request(&swww);
     let socket = connect_to_socket(5, 100)?;
+    let now = std::time::Instant::now();
     request.send(&socket)?;
+    println!("{}s", now.elapsed().as_secs_f64());
     match Answer::receive(socket)? {
         Answer::Err(msg) => return Err(msg),
         Answer::Info(info) => info.into_iter().for_each(|i| println!("{}", i)),
@@ -210,18 +212,18 @@ fn img_resize(
             return Err(e.to_string());
         }
 
-        image::RgbaImage::from_vec(width, height, dst.into_vec()).unwrap()
+        dst.into_vec()
     } else {
-        img
+        img.into_vec()
     };
 
     // The ARGB is 'little endian', so here we must  put the order
     // of bytes 'in reverse', so it needs to be BGRA.
-    for pixel in resized_img.pixels_mut() {
-        pixel.0.swap(0, 2);
+    for pixel in resized_img.chunks_exact_mut(4) {
+        pixel.swap(0, 2);
     }
 
-    Ok(resized_img.into_raw())
+    Ok(resized_img)
 }
 
 ///Behold: the most stupid function ever

@@ -3,7 +3,7 @@ use std::{
     fmt,
     os::unix::net::UnixStream,
     path::{Path, PathBuf},
-    time::Duration,
+    time::Duration, io::{BufWriter, BufReader},
 };
 
 use crate::comp_decomp::BitPack;
@@ -108,14 +108,16 @@ pub enum Request {
 
 impl Request {
     pub fn send(&mut self, stream: &UnixStream) -> Result<(), String> {
-        match bincode::serialize_into(stream, self) {
+        let writer = BufWriter::new(stream);
+        match bincode::serialize_into(writer, self) {
             Ok(()) => Ok(()),
             Err(e) => Err(format!("Failed to serialize request: {}", e)),
         }
     }
 
     pub fn receive(stream: &mut UnixStream) -> Result<Self, String> {
-        match bincode::deserialize_from(stream) {
+        let reader = BufReader::new(stream);
+        match bincode::deserialize_from(reader) {
             Ok(i) => Ok(i),
             Err(e) => Err(format!("Failed to deserialize request: {}", e)),
         }
