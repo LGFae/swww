@@ -23,8 +23,6 @@ strip = false
 smithay-client-toolkit = { version = "=0.16.0", default-features = false, features = ["calloop"] }
 image = { version = "=0.24.5", default-features = false, features = [ "gif", "jpeg", "png", "pnm",
 													 "tga", "tiff", "webp", "bmp", "farbfeld"]}
-log = { version = "=0.4.17", features = ["max_level_debug", "release_max_level_info"] }
-simplelog = "=0.12.0"
 fork = "=0.1.20"
 clap = { version = "=4.0.29", features = ["derive", "wrap_help", "env"] }
 lzzzz = "=1.0.4"

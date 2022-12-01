@@ -30,7 +30,7 @@ use std::{
 };
 
 use utils::{
-    communication::{get_socket_path, Answer, BgImg, BgInfo, Clear, Request},
+    communication::{get_socket_path, Answer, BgImg, BgInfo, Clear, Img, Request},
     comp_decomp::ReadiedPack,
 };
 
@@ -450,12 +450,34 @@ fn recv_socket_msg(
             loop_signal.stop();
             Answer::Ok
         }
-        Ok(Request::Img(img)) => proc.process(img.0, img.1),
+        Ok(Request::Img(img)) => {
+            let old_imgs = get_old_imgs(&mut bgs, &img.1);
+            if old_imgs.len() != img.1.len() {
+                Answer::Err("Daemon received request for outputs that don't exist".to_string())
+            } else {
+                proc.process(img.0, img.1, old_imgs)
+            }
+        }
         Ok(Request::Init { .. }) => Answer::Ok,
         Ok(Request::Query) => Answer::Info(bgs.iter().map(|bg| bg.info.clone()).collect()),
         Err(e) => Answer::Err(e),
     };
     answer.send(&stream)
+}
+
+fn get_old_imgs(
+    bgs: &mut RefMut<Vec<Bg>>,
+    imgs: &[(Img, Vec<String>)],
+) -> Vec<(Box<[u8]>, (u32, u32))> {
+    let mut v = Vec::with_capacity(imgs.len());
+
+    for (_, outputs) in imgs {
+        if let Some(bg) = bgs.iter_mut().find(|bg| bg.info.name == outputs[0]) {
+            v.push((bg.get_current_img().into(), bg.info.real_dim()))
+        }
+    }
+
+    v
 }
 
 fn handle_recv_img(bgs: &mut RefMut<Vec<Bg>>, msg: &(Vec<String>, ReadiedPack)) {
@@ -468,29 +490,10 @@ fn handle_recv_img(bgs: &mut RefMut<Vec<Bg>>, msg: &(Vec<String>, ReadiedPack)) 
         .for_each(|bg| bg.draw(img));
 }
 
-///Return only the outputs that actually exist
-///Also puts in all outputs if an empty string was offered
-fn get_real_outputs(bgs: &RefMut<Vec<Bg>>, outputs: &[String]) -> Vec<String> {
-    //An empty line means all outputs
-    if outputs.is_empty() {
-        bgs.iter().map(|bg| bg.info.name.clone()).collect()
-    } else {
-        outputs.iter()
-            .filter(|o| bgs.iter().any(|bg| *o == &bg.info.name))
-            .map(ToString::to_string)
-            .collect()
-    }
-}
-
 fn clear_outputs(bgs: &mut RefMut<Vec<Bg>>, clear: &Clear, proc: &mut Processor) -> Answer {
-    let outputs = get_real_outputs(bgs, &clear.outputs);
-    if outputs.is_empty() {
-        Answer::Err("None of the specified outputs exist!".to_string())
-    } else {
-        proc.stop_animations(&outputs);
-        bgs.iter_mut()
-            .filter(|bg| outputs.contains(&bg.info.name))
-            .for_each(|bg| bg.clear(clear.color));
-        Answer::Ok
-    }
+    proc.stop_animations(&clear.outputs);
+    bgs.iter_mut()
+        .filter(|bg| clear.outputs.contains(&bg.info.name))
+        .for_each(|bg| bg.clear(clear.color));
+    Answer::Ok
 }

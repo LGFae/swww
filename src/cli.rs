@@ -1,7 +1,6 @@
 //Note: this file only has basic declarations and some definitions in order to be possible to
 //import it in the build script, to automate shell completion
 use clap::Parser;
-use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 fn from_hex(hex: &str) -> Result<[u8; 3], String> {
@@ -37,7 +36,7 @@ fn from_hex(hex: &str) -> Result<[u8; 3], String> {
     Ok(color)
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Clone)]
 pub enum Filter {
     Nearest,
     Bilinear,
@@ -63,7 +62,7 @@ impl std::str::FromStr for Filter {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Clone)]
 pub enum TransitionType {
     Simple,
     Left,
@@ -101,7 +100,7 @@ impl std::str::FromStr for TransitionType {
     }
 }
 
-#[derive(Parser, Serialize, Deserialize)]
+#[derive(Parser)]
 #[command(version, name = "swww")]
 ///A Solution to your Wayland Wallpaper Woes
 ///
@@ -140,7 +139,7 @@ pub enum Swww {
     Query,
 }
 
-#[derive(Parser, Serialize, Deserialize)]
+#[derive(Parser)]
 pub struct Clear {
     /// Color to fill the screen with.
     ///
@@ -155,7 +154,7 @@ pub struct Clear {
     pub outputs: String,
 }
 
-#[derive(Parser, Serialize, Deserialize)]
+#[derive(Parser)]
 pub struct Img {
     /// Path to the image to display
     pub path: PathBuf,

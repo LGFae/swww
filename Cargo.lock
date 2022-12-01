@@ -158,18 +158,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "daemon"
-version = "0.1.0"
-dependencies = [
- "keyframe",
- "log",
- "rand",
- "simplelog",
- "smithay-client-toolkit",
- "utils",
-]
-
-[[package]]
 name = "difflib"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -770,18 +758,24 @@ name = "swww"
 version = "0.6.0"
 dependencies = [
  "assert_cmd",
- "bincode",
  "clap",
  "clap_complete",
  "fast_image_resize",
  "fork",
  "image",
- "keyframe",
- "lazy_static",
- "log",
  "lzzzz",
- "rand",
  "serde",
+ "smithay-client-toolkit",
+ "utils",
+]
+
+[[package]]
+name = "swww-daemon"
+version = "0.1.0"
+dependencies = [
+ "keyframe",
+ "log",
+ "rand",
  "simplelog",
  "smithay-client-toolkit",
  "utils",

@@ -9,7 +9,9 @@ use utils::{communication::TransitionType, comp_decomp::ReadiedPack};
 
 use super::send_frame;
 
-use keyframe::{functions::BezierCurve, keyframes, num_traits::Pow, AnimationSequence};
+use keyframe::{
+    functions::BezierCurve, keyframes, mint::Vector2, num_traits::Pow, AnimationSequence,
+};
 
 macro_rules! send_transition_frame {
     ($img:ident, $outputs:ident, $now:ident, $fps:ident, $sender:ident, $stop_recv:ident) => {
@@ -42,24 +44,27 @@ impl Transition {
     pub fn new(
         old_img: Box<[u8]>,
         dimensions: (u32, u32),
-        transition_type: TransitionType,
-        duration: f32,
-        step: u8,
-        fps: Duration,
-        angle: f64,
-        pos: (f32, f32),
-        bezier: BezierCurve,
+        transition: utils::communication::Transition,
     ) -> Self {
         Transition {
             old_img,
             dimensions,
-            transition_type,
-            duration,
-            step,
-            fps,
-            angle,
-            pos,
-            bezier,
+            transition_type: transition.transition_type,
+            duration: transition.duration,
+            step: transition.step,
+            fps: Duration::from_nanos(1_000_000_000 / transition.fps as u64),
+            angle: transition.angle,
+            pos: transition.pos,
+            bezier: BezierCurve::from(
+                Vector2 {
+                    x: transition.bezier.0,
+                    y: transition.bezier.1,
+                },
+                Vector2 {
+                    x: transition.bezier.2,
+                    y: transition.bezier.3,
+                },
+            ),
         }
     }
 
@@ -427,17 +432,17 @@ mod tests {
     }
 
     fn test_transition(old_img: Box<[u8]>, transition_type: TransitionType) -> Transition {
-        Transition::new(
+        Transition {
             old_img,
-            (100, 10),
             transition_type,
-            2.0,
-            100,
-            Duration::from_nanos(1),
-            0.0,
-            (0.0, 0.0),
-            BezierCurve::from(Vector2 { x: 1.0, y: 0.0 }, Vector2 { x: 0.0, y: 1.0 }),
-        )
+            dimensions: (100, 10),
+            duration: 2.0,
+            step: 100,
+            fps: Duration::from_nanos(1),
+            angle: 0.0,
+            pos: (0.0, 0.0),
+            bezier: BezierCurve::from(Vector2 { x: 1.0, y: 0.0 }, Vector2 { x: 0.0, y: 1.0 }),
+        }
     }
 
     fn dummy_outputs() -> Vec<String> {
