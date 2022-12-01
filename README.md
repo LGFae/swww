@@ -2,7 +2,7 @@
 ### Efficient animated wallpaper daemon for wayland, controlled at runtime
 
 ![animated gif demonstration](https://i.imgur.com/Leuh6wm.gif)
-![image transition demonstration](./assets/grow.gif)
+![image transition demonstration](../demos/assets/grow.gif)
 
 ## Dependencies
 
@@ -117,13 +117,13 @@ the [example_scripts](/example_scripts/) folder. It can help you get started.
 
 > wipe transition with angle set to 30 deg
 
-![top transition demonstration](./assets/wipe.gif)
+![top transition demonstration](../demos/assets/wipe.gif)
 
 The `left`, `right`, `top` and `bottom` transitions all work similarly.
 
 #### Example outer transition
 
-![outer transition demonstration](./assets/outer.gif)
+![outer transition demonstration](../demos/assets/outer.gif)
 
 The `center` transition is the opposite: it starts from the center and goes 
 towards the edges.
