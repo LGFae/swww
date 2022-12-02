@@ -444,7 +444,29 @@ fn recv_socket_msg(
 ) -> Result<(), String> {
     let request = Request::receive(&mut stream);
     let answer = match request {
-        Ok(Request::Animation(_)) => todo!("need to finish animation"),
+        Ok(Request::Animation(animations)) => {
+            let mut result = Answer::Ok;
+            for animation in &animations {
+                for output in &animation.1 {
+                    if !bgs.iter().any(|bg| &bg.info.name == output) {
+                        result = Answer::Err(format!("Output {} doesn't exit", output));
+                        break;
+                    }
+                }
+            }
+            if matches!(result, Answer::Err(_)) {
+                result
+            } else {
+                for animation in animations {
+                    let dim = bgs.iter().find(|bg| animation.1.contains(&bg.info.name)).unwrap().info.real_dim();
+                    let size = dim.0 as usize * dim.1 as usize;
+                    if let Answer::Err(e) = proc.animate(animation.0, animation.1, size) {
+                        result = Answer::Err(e);
+                    }
+                }
+                result
+            }
+        },
         Ok(Request::Clear(clear)) => clear_outputs(&mut bgs, &clear, proc),
         Ok(Request::Kill) => {
             loop_signal.stop();
@@ -455,7 +477,7 @@ fn recv_socket_msg(
             if old_imgs.len() != img.1.len() {
                 Answer::Err("Daemon received request for outputs that don't exist".to_string())
             } else {
-                proc.process(img.0, img.1, old_imgs)
+                proc.transition(img.0, img.1, old_imgs)
             }
         }
         Ok(Request::Init { .. }) => Answer::Ok,

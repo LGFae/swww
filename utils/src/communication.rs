@@ -62,7 +62,7 @@ pub struct Clear {
 
 #[derive(Serialize, Deserialize)]
 pub struct Animation {
-    animation: Box<[(BitPack, Duration)]>,
+    pub animation: Box<[(BitPack, Duration)]>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
