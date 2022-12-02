@@ -65,7 +65,7 @@ pub struct Animation {
     animation: Box<[(BitPack, Duration)]>,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum TransitionType {
     Simple,
     Left,
