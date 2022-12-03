@@ -1,13 +1,15 @@
 use clap::Parser;
 use fast_image_resize::{FilterType, PixelType, Resizer};
+use image::{codecs::gif::GifDecoder, AnimationDecoder};
 use std::{
-    num::NonZeroU32,
-    os::unix::net::UnixStream,
-    path::{Path, PathBuf},
-    time::Duration,
+    fs::File, io::BufReader, num::NonZeroU32, os::unix::net::UnixStream, path::PathBuf,
+    thread::JoinHandle, time::Duration,
 };
 
-use utils::communication::{self, get_socket_path, Answer, Request};
+use utils::{
+    communication::{self, get_socket_path, Animation, Answer, Request},
+    comp_decomp::BitPack,
+};
 mod cli;
 use cli::Swww;
 
@@ -60,9 +62,7 @@ fn main() -> Result<(), String> {
 
     let mut request = make_request(&swww);
     let socket = connect_to_socket(5, 100)?;
-    let now = std::time::Instant::now();
     request.send(&socket)?;
-    println!("{}s", now.elapsed().as_secs_f64());
     match Answer::receive(socket)? {
         Answer::Err(msg) => return Err(msg),
         Answer::Info(info) => info.into_iter().for_each(|i| println!("{}", i)),
@@ -95,7 +95,53 @@ fn make_request(args: &Swww) -> Request {
             color: c.color,
             outputs: c.outputs.split(' ').map(|s| s.to_string()).collect(),
         }),
-        Swww::Img(img) => Request::Img(make_img_request(img)),
+        Swww::Img(img) => {
+            let mut outputs: Vec<Vec<String>> = Vec::new();
+            let mut dims: Vec<(u32, u32)> = Vec::new();
+            let mut imgs: Vec<communication::BgImg> = Vec::new();
+
+            let socket = connect_to_socket(5, 100).unwrap();
+            Request::Query.send(&socket).unwrap();
+            let answer = Answer::receive(socket).unwrap();
+            match answer {
+                Answer::Info(infos) => {
+                    for info in infos {
+                        let mut should_add = true;
+                        for (i, (dim, img)) in dims.iter().zip(&imgs).enumerate() {
+                            if info.dim == *dim && info.img == *img {
+                                outputs[i].push(info.name.clone());
+                                should_add = false;
+                                break;
+                            }
+                        }
+
+                        if should_add {
+                            outputs.push(vec![info.name]);
+                            dims.push(info.dim);
+                            imgs.push(info.img);
+                        }
+                    }
+                }
+                _ => unreachable!(),
+            }
+
+            let imgbuf = image::io::Reader::open(&img.path).unwrap();
+            if imgbuf.format() == Some(image::ImageFormat::Gif) {
+                let animations = make_animation_request(img, &dims, &outputs);
+                let socket = connect_to_socket(5, 100).unwrap();
+                if let Err(msg) = Request::Img(make_img_request(img, &dims, &outputs)).send(&socket)
+                {
+                    eprintln!("{}", msg);
+                }
+                if let Err(msg) = Answer::receive(socket) {
+                    eprintln!("{}", msg);
+                }
+
+                Request::Animation(animations.join().unwrap())
+            } else {
+                Request::Img(make_img_request(img, &dims, &outputs))
+            }
+        }
         Swww::Init { .. } => Request::Init,
         Swww::Kill => Request::Kill,
         Swww::Query => Request::Query,
@@ -104,6 +150,8 @@ fn make_request(args: &Swww) -> Request {
 
 fn make_img_request(
     img: &cli::Img,
+    dims: &[(u32, u32)],
+    outputs: &[Vec<String>],
 ) -> (
     communication::Transition,
     Vec<(communication::Img, Vec<String>)>,
@@ -118,46 +166,72 @@ fn make_img_request(
         pos: img.transition_pos,
         bezier: img.transition_bezier,
     };
-    let socket = connect_to_socket(5, 100).unwrap();
-    Request::Query.send(&socket).unwrap();
-    let answer = Answer::receive(socket).unwrap();
-    match answer {
-        Answer::Info(infos) => {
-            let mut outputs: Vec<Vec<String>> = Vec::with_capacity(infos.len());
-            let mut dims: Vec<(u32, u32)> = Vec::with_capacity(infos.len());
-            let mut imgs: Vec<communication::BgImg> = Vec::with_capacity(infos.len());
-
-            for info in infos {
-                let mut should_add = true;
-                for (i, (dim, img)) in dims.iter().zip(&imgs).enumerate() {
-                    if info.dim == *dim && info.img == *img {
-                        outputs[i].push(info.name.clone());
-                        should_add = false;
-                        break;
-                    }
-                }
-
-                if should_add {
-                    outputs.push(vec![info.name]);
-                    dims.push(info.dim);
-                    imgs.push(info.img);
-                }
-            }
-
-            let mut unique_requests = Vec::with_capacity(dims.len());
-            for (dim, outputs) in dims.into_iter().zip(outputs) {
-                unique_requests.push((
-                    communication::Img {
-                        img: img_resize(img_raw.clone(), dim, make_filter(&img.filter)).unwrap(),
-                    },
-                    outputs,
-                ));
-            }
-
-            (transition, unique_requests)
-        }
-        _ => unreachable!(),
+    let mut unique_requests = Vec::with_capacity(dims.len());
+    for (dim, outputs) in dims.iter().zip(outputs) {
+        unique_requests.push((
+            communication::Img {
+                img: img_resize(img_raw.clone(), *dim, make_filter(&img.filter)).unwrap(),
+            },
+            outputs.to_owned(),
+        ));
     }
+
+    (transition, unique_requests)
+}
+
+fn make_animation_request(
+    img: &cli::Img,
+    dims: &[(u32, u32)],
+    outputs: &[Vec<String>],
+) -> JoinHandle<Vec<(Animation, Vec<String>)>> {
+    let dims = dims.to_owned();
+    let outputs = outputs.to_owned();
+    let filter = make_filter(&img.filter);
+    let imgpath = img.path.clone();
+    std::thread::spawn(move || {
+        let mut animations = Vec::with_capacity(dims.len());
+        for (dim, outputs) in dims.into_iter().zip(outputs) {
+            let imgbuf = image::io::Reader::open(&imgpath).unwrap().into_inner();
+            animations.push((
+                communication::Animation {
+                    animation: make_animation(GifDecoder::new(imgbuf).unwrap(), dim, filter)
+                        .into_boxed_slice(),
+                },
+                outputs.to_owned(),
+            ));
+        }
+        animations
+    })
+}
+
+fn make_animation(
+    gif: GifDecoder<BufReader<File>>,
+    dim: (u32, u32),
+    filter: FilterType,
+) -> Vec<(BitPack, Duration)> {
+    let mut compressed_frames = Vec::new();
+    let mut frames = gif.into_frames();
+
+    let first = frames.next().unwrap().unwrap();
+    let first_duration = first.delay().numer_denom_ms();
+    let first_duration = Duration::from_millis((first_duration.0 / first_duration.1).into());
+    let first_img = img_resize(first.into_buffer(), dim, filter).unwrap();
+
+    let mut canvas = first_img.clone();
+    while let Some(Ok(frame)) = frames.next() {
+        let (dur_num, dur_div) = frame.delay().numer_denom_ms();
+        let duration = Duration::from_millis((dur_num / dur_div).into());
+
+        // Unwrapping is fine because only the thread will panic in the worst case
+        // scenario, not the main loop
+        let img = img_resize(frame.into_buffer(), dim, filter).unwrap();
+
+        compressed_frames.push((BitPack::pack(&mut canvas, &img), duration));
+    }
+    //Add the first frame we got earlier:
+    compressed_frames.push((BitPack::pack(&mut canvas, &first_img), first_duration));
+
+    compressed_frames
 }
 
 fn make_filter(filter: &cli::Filter) -> fast_image_resize::FilterType {
@@ -245,7 +319,8 @@ fn convert_transition_type(a: &cli::TransitionType) -> communication::Transition
 
 fn spawn_daemon(no_daemon: bool) -> Result<(), String> {
     let mut cmd = "./target/debug/swww-daemon";
-    #[cfg(not(debug_assertions))] {
+    #[cfg(not(debug_assertions))]
+    {
         cmd = "./target/release/swww-daemon";
     }
     if no_daemon {

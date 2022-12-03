@@ -173,7 +173,9 @@ impl Bg {
             .pool
             .buffer(0, width, height, stride, wl_shm::Format::Xrgb8888);
         let canvas = self.pool.mmap();
-        img.unpack(canvas);
+        if !img.unpack(canvas){
+            error!("buf_len different from expected_buf_size");
+        }
         debug!("Decompressed img.");
 
         self.surface.attach(Some(&buffer), 0, 0);
@@ -459,7 +461,7 @@ fn recv_socket_msg(
             } else {
                 for animation in animations {
                     let dim = bgs.iter().find(|bg| animation.1.contains(&bg.info.name)).unwrap().info.real_dim();
-                    let size = dim.0 as usize * dim.1 as usize;
+                    let size = dim.0 as usize * dim.1 as usize * 4;
                     if let Answer::Err(e) = proc.animate(animation.0, animation.1, size) {
                         result = Answer::Err(e);
                     }

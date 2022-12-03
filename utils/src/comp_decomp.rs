@@ -16,7 +16,7 @@
 //!
 
 use lzzzz::lz4f;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 lazy_static::lazy_static! {
     static ref COMPRESSION_PREFERENCES: lz4f::Preferences = lz4f::PreferencesBuilder::new()
@@ -172,9 +172,14 @@ impl ReadiedPack {
         self.inner.is_empty()
     }
 
-    pub fn unpack(&self, buf: &mut [u8]) {
+    ///return whether unpacking was successfull. Note it can only fail if buf.len() !=
+    ///expected_buf_size
+    pub fn unpack(&self, buf: &mut [u8]) -> bool {
         if buf.len() == self.expected_buf_size {
             unpack_bytes(buf, &self.inner);
+            true
+        } else {
+            false
         }
     }
 }
