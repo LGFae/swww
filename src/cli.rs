@@ -1,5 +1,5 @@
-//Note: this file only has basic declarations and some definitions in order to be possible to
-//import it in the build script, to automate shell completion
+/// Note: this file only has basic declarations and some definitions in order to be possible to
+/// import it in the build script, to automate shell completion
 use clap::Parser;
 use std::path::PathBuf;
 
@@ -93,8 +93,8 @@ impl std::str::FromStr for TransitionType {
             "outer" => Ok(Self::Outer),
             "any" => Ok(Self::Any),
             "random" => Ok(Self::Random),
-            _ => Err("unrecognized transition type. Valid transitions are:\
-                     simple | left | right | top | bottom | wipe | grow | center | outer | random\
+            _ => Err("unrecognized transition type.\nValid transitions are:\n\
+                     \tsimple | left | right | top | bottom | wipe | grow | center | outer | random\n\
                      see swww img --help for more details"),
         }
     }
