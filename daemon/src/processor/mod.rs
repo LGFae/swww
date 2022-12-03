@@ -35,6 +35,7 @@ impl Processor {
     ) -> Answer {
         let mut answer = Answer::Ok;
         for ((old_img, dim), (new_img, mut outputs)) in old_imgs.into_iter().zip(requests) {
+            self.stop_animations(&outputs);
             let transition = transition.clone();
             let sender = self.frame_sender.clone();
             let (stopper, stop_recv) = mpsc::channel();
