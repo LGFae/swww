@@ -37,7 +37,7 @@ use utils::{
 mod processor;
 mod wayland;
 
-use processor::Processor;
+use processor::{Processor, ImgWithDim};
 
 #[derive(PartialEq, Copy, Clone)]
 enum RenderEvent {
@@ -173,7 +173,7 @@ impl Bg {
             .pool
             .buffer(0, width, height, stride, wl_shm::Format::Xrgb8888);
         let canvas = self.pool.mmap();
-        if !img.unpack(canvas){
+        if !img.unpack(canvas) {
             error!("buf_len different from expected_buf_size");
         }
         debug!("Decompressed img.");
@@ -460,7 +460,12 @@ fn recv_socket_msg(
                 result
             } else {
                 for animation in animations {
-                    let dim = bgs.iter().find(|bg| animation.1.contains(&bg.info.name)).unwrap().info.real_dim();
+                    let dim = bgs
+                        .iter()
+                        .find(|bg| animation.1.contains(&bg.info.name))
+                        .unwrap()
+                        .info
+                        .real_dim();
                     let size = dim.0 as usize * dim.1 as usize * 4;
                     if let Answer::Err(e) = proc.animate(animation.0, animation.1, size) {
                         result = Answer::Err(e);
@@ -468,7 +473,7 @@ fn recv_socket_msg(
                 }
                 result
             }
-        },
+        }
         Ok(Request::Clear(clear)) => clear_outputs(&mut bgs, &clear, proc),
         Ok(Request::Kill) => {
             loop_signal.stop();
@@ -479,7 +484,7 @@ fn recv_socket_msg(
             if old_imgs.len() != img.1.len() {
                 Answer::Err("Daemon received request for outputs that don't exist".to_string())
             } else {
-                proc.transition(img.0, img.1, old_imgs)
+                proc.transition(&img.0, img.1, old_imgs)
             }
         }
         Ok(Request::Init { .. }) => Answer::Ok,
@@ -492,12 +497,12 @@ fn recv_socket_msg(
 fn get_old_imgs(
     bgs: &mut RefMut<Vec<Bg>>,
     imgs: &[(Img, Vec<String>)],
-) -> Vec<(Box<[u8]>, (u32, u32))> {
+) -> Vec<ImgWithDim> {
     let mut v = Vec::with_capacity(imgs.len());
 
     for (_, outputs) in imgs {
         if let Some(bg) = bgs.iter_mut().find(|bg| bg.info.name == outputs[0]) {
-            v.push((bg.get_current_img().into(), bg.info.real_dim()))
+            v.push((bg.get_current_img().into(), bg.info.real_dim()));
         }
     }
 

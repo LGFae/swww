@@ -315,15 +315,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fork"
-version = "0.1.20"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9788ce090af4bf8d6e8f43d3f7d12305c787456387bd2d88856fcda3aa1f0dca"
-dependencies = [
- "libc",
-]
-
-[[package]]
 name = "futures-core"
 version = "0.3.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -989,7 +980,6 @@ dependencies = [
  "clap",
  "clap_complete",
  "fast_image_resize",
- "fork",
  "image",
  "utils",
 ]

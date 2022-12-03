@@ -7,7 +7,7 @@ use std::{
 };
 
 use utils::{
-    communication::{self, get_socket_path, Animation, Answer, Request},
+    communication::{self, get_socket_path, Animation, Answer, Request, AnimationRequest},
     comp_decomp::BitPack,
 };
 mod cli;
@@ -60,9 +60,9 @@ fn main() -> Result<(), String> {
         );
     }
 
-    let mut request = make_request(&swww);
+    let request = make_request(&swww);
     let socket = connect_to_socket(5, 100)?;
-    request.send(&socket)?;
+    request?.send(&socket)?;
     match Answer::receive(socket)? {
         Answer::Err(msg) => return Err(msg),
         Answer::Info(info) => info.into_iter().for_each(|i| println!("{}", i)),
@@ -89,12 +89,12 @@ fn main() -> Result<(), String> {
     Ok(())
 }
 
-fn make_request(args: &Swww) -> Request {
+fn make_request(args: &Swww) -> Result<Request, String> {
     match args {
-        Swww::Clear(c) => Request::Clear(communication::Clear {
+        Swww::Clear(c) => Ok(Request::Clear(communication::Clear {
             color: c.color,
             outputs: c.outputs.split(' ').map(|s| s.to_string()).collect(),
-        }),
+        })),
         Swww::Img(img) => {
             let mut outputs: Vec<Vec<String>> = Vec::new();
             let mut dims: Vec<(u32, u32)> = Vec::new();
@@ -137,14 +137,14 @@ fn make_request(args: &Swww) -> Request {
                     eprintln!("{}", msg);
                 }
 
-                Request::Animation(animations.join().unwrap())
+                Ok(Request::Animation(animations.join().unwrap()?))
             } else {
-                Request::Img(make_img_request(img, &dims, &outputs))
+                Ok(Request::Img(make_img_request(img, &dims, &outputs)))
             }
         }
-        Swww::Init { .. } => Request::Init,
-        Swww::Kill => Request::Kill,
-        Swww::Query => Request::Query,
+        Swww::Init { .. } => Ok(Request::Init),
+        Swww::Kill => Ok(Request::Kill),
+        Swww::Query => Ok(Request::Query),
     }
 }
 
@@ -183,7 +183,7 @@ fn make_animation_request(
     img: &cli::Img,
     dims: &[(u32, u32)],
     outputs: &[Vec<String>],
-) -> JoinHandle<Vec<(Animation, Vec<String>)>> {
+) -> JoinHandle<Result<AnimationRequest, String>> {
     let dims = dims.to_owned();
     let outputs = outputs.to_owned();
     let filter = make_filter(&img.filter);
@@ -194,13 +194,13 @@ fn make_animation_request(
             let imgbuf = image::io::Reader::open(&imgpath).unwrap().into_inner();
             animations.push((
                 communication::Animation {
-                    animation: make_animation(GifDecoder::new(imgbuf).unwrap(), dim, filter)
+                    animation: make_animation(GifDecoder::new(imgbuf).unwrap(), dim, filter)?
                         .into_boxed_slice(),
                 },
                 outputs.to_owned(),
             ));
         }
-        animations
+        Ok(animations)
     })
 }
 
@@ -208,7 +208,7 @@ fn make_animation(
     gif: GifDecoder<BufReader<File>>,
     dim: (u32, u32),
     filter: FilterType,
-) -> Vec<(BitPack, Duration)> {
+) -> Result<Vec<(BitPack, Duration)>, String> {
     let mut compressed_frames = Vec::new();
     let mut frames = gif.into_frames();
 
@@ -226,12 +226,12 @@ fn make_animation(
         // scenario, not the main loop
         let img = img_resize(frame.into_buffer(), dim, filter).unwrap();
 
-        compressed_frames.push((BitPack::pack(&mut canvas, &img), duration));
+        compressed_frames.push((BitPack::pack(&mut canvas, &img)?, duration));
     }
     //Add the first frame we got earlier:
-    compressed_frames.push((BitPack::pack(&mut canvas, &first_img), first_duration));
+    compressed_frames.push((BitPack::pack(&mut canvas, &first_img)?, first_duration));
 
-    compressed_frames
+    Ok(compressed_frames)
 }
 
 fn make_filter(filter: &cli::Filter) -> fast_image_resize::FilterType {
@@ -318,26 +318,17 @@ fn convert_transition_type(a: &cli::TransitionType) -> communication::Transition
 }
 
 fn spawn_daemon(no_daemon: bool) -> Result<(), String> {
-    let mut cmd = "./target/debug/swww-daemon";
-    #[cfg(not(debug_assertions))]
-    {
-        cmd = "./target/release/swww-daemon";
-    }
+    let cmd = "swww-daemon";
     if no_daemon {
-        std::process::Command::new(cmd).status().unwrap();
-        return Ok(());
-    }
-    match fork::fork() {
-        Ok(fork::Fork::Child) => match fork::daemon(false, false) {
-            Ok(fork::Fork::Child) => {
-                std::process::Command::new(cmd).spawn().unwrap();
-                Ok(())
-            }
-            Ok(fork::Fork::Parent(_)) => Ok(()),
-            Err(_) => Err("Couldn't daemonize process!".to_string()),
-        },
-        Ok(fork::Fork::Parent(_)) => Ok(()),
-        Err(_) => Err("Couldn't fork process!".to_string()),
+        match std::process::Command::new(cmd).status() {
+            Ok(_) => Ok(()),
+            Err(e) => Err(e.to_string()),
+        }
+    } else {
+        match std::process::Command::new(cmd).spawn() {
+            Ok(_) => Ok(()),
+            Err(e) => Err(e.to_string()),
+        }
     }
 }
 

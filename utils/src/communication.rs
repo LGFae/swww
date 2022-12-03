@@ -36,6 +36,7 @@ pub struct BgInfo {
 }
 
 impl BgInfo {
+    #[must_use]
     pub fn real_dim(&self) -> (u32, u32) {
         (
             self.dim.0 * self.scale_factor as u32,
@@ -96,14 +97,17 @@ pub struct Img {
     pub img: Vec<u8>,
 }
 
+pub type AnimationRequest = Vec<(Animation, Vec<String>)>;
+pub type ImageRequest = (Transition, Vec<(Img, Vec<String>)>);
+
 #[derive(Serialize, Deserialize)]
 pub enum Request {
-    Animation(Vec<(Animation, Vec<String>)>),
+    Animation(AnimationRequest),
     Clear(Clear),
     Init,
     Kill,
     Query,
-    Img((Transition, Vec<(Img, Vec<String>)>)),
+    Img(ImageRequest),
 }
 
 impl Request {
@@ -156,6 +160,7 @@ impl Answer {
     }
 }
 
+#[must_use]
 pub fn get_socket_path() -> PathBuf {
     let runtime_dir = if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
         dir

@@ -10,7 +10,9 @@ mod animations;
 use utils::comp_decomp::ReadiedPack;
 
 ///The default thread stack size of 2MiB is way too overkill for our purposes
-const TSTACK_SIZE: usize = 1 << 18; //256KiB
+const TSTACK_SIZE: usize = 1 << 17; //128KiB
+
+pub type ImgWithDim = (Box<[u8]>, (u32, u32));
 
 pub struct Processor {
     frame_sender: SyncSender<(Vec<String>, ReadiedPack)>,
@@ -27,9 +29,9 @@ impl Processor {
 
     pub fn transition(
         &mut self,
-        transition: utils::communication::Transition,
+        transition: &utils::communication::Transition,
         requests: Vec<(Img, Vec<String>)>,
-        old_imgs: Vec<(Box<[u8]>, (u32, u32))>,
+        old_imgs: Vec<ImgWithDim>,
     ) -> Answer {
         let mut answer = Answer::Ok;
         for ((old_img, dim), (new_img, mut outputs)) in old_imgs.into_iter().zip(requests) {

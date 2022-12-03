@@ -118,18 +118,23 @@ impl BitPack {
     /// Compresses a frame of animation by getting the difference between the previous and the
     /// current frame.
     /// IMPORTANT: this will change `prev` into `cur`, that's why it needs to be 'mut'
-    pub fn pack(prev: &mut [u8], cur: &[u8]) -> Self {
+    pub fn pack(prev: &mut [u8], cur: &[u8]) -> Result<Self, String> {
         let bit_pack = pack_bytes(prev, cur, |old, new, _| *old = *new);
         let mut v = Vec::with_capacity(bit_pack.len() / 2);
-        lzzzz::lz4f::compress_to_vec(&bit_pack, &mut v, &COMPRESSION_PREFERENCES).unwrap();
-        BitPack {
-            inner: v.into_boxed_slice(),
+        match lzzzz::lz4f::compress_to_vec(&bit_pack, &mut v, &COMPRESSION_PREFERENCES) {
+            Ok(_) => Ok(BitPack {
+                inner: v.into_boxed_slice(),
+            }),
+            Err(e) => Err(e.to_string()),
         }
     }
 
     /// Produces a `ReadiedPack`, which can be sent through a channel to be unpacked later
+    #[must_use]
     pub fn ready(&self, expected_buf_size: usize) -> ReadiedPack {
         let mut v = Vec::with_capacity(self.inner.len() * 3);
+        // Note: panics will never happen because BitPacked is *always* only produced with
+        // correct lz4 compression
         lz4f::decompress_to_vec(&self.inner, &mut v).unwrap();
         ReadiedPack {
             inner: v.into_boxed_slice(),
@@ -157,6 +162,7 @@ impl ReadiedPack {
     /// * Second -> new img byte. This stays constant
     /// * Third -> the pixel's position in the image. This can be used to make more complex
     ///   transition logic
+    #[must_use]
     pub fn new<F>(cur: &mut [u8], goal: &[u8], f: F) -> Self
     where
         F: FnMut(&mut [u8; 4], &[u8; 4], usize),
@@ -172,8 +178,8 @@ impl ReadiedPack {
         self.inner.is_empty()
     }
 
-    ///return whether unpacking was successfull. Note it can only fail if buf.len() !=
-    ///expected_buf_size
+    ///return whether unpacking was successfull. Note it can only fail if `buf.len() !=
+    ///expected_buf_size`
     pub fn unpack(&self, buf: &mut [u8]) -> bool {
         if buf.len() == self.expected_buf_size {
             unpack_bytes(buf, &self.inner);
@@ -248,7 +254,7 @@ mod tests {
     fn should_compress_and_decompress_to_same_info_small() {
         let frame1 = [1, 2, 3, 4, 5, 6, 7, 8];
         let frame2 = [1, 2, 3, 4, 8, 7, 6, 5];
-        let compressed = BitPack::pack(&mut frame1.clone(), &frame2);
+        let compressed = BitPack::pack(&mut frame1.clone(), &frame2).unwrap();
 
         let mut buf = frame1;
         let readied = compressed.ready(8);
@@ -279,12 +285,10 @@ mod tests {
             }
 
             let mut compressed = Vec::with_capacity(20);
-            compressed.push(BitPack::pack(
-                &mut original.last().unwrap().clone(),
-                &original[0],
-            ));
+            compressed
+                .push(BitPack::pack(&mut original.last().unwrap().clone(), &original[0]).unwrap());
             for i in 1..20 {
-                compressed.push(BitPack::pack(&mut original[i - 1].clone(), &original[i]));
+                compressed.push(BitPack::pack(&mut original[i - 1].clone(), &original[i]).unwrap());
             }
 
             let mut buf = original.last().unwrap().clone();
@@ -318,12 +322,10 @@ mod tests {
             }
 
             let mut compressed = Vec::with_capacity(20);
-            compressed.push(BitPack::pack(
-                &mut original.last().unwrap().clone(),
-                &original[0],
-            ));
+            compressed
+                .push(BitPack::pack(&mut original.last().unwrap().clone(), &original[0]).unwrap());
             for i in 1..20 {
-                compressed.push(BitPack::pack(&mut original[i - 1].clone(), &original[i]));
+                compressed.push(BitPack::pack(&mut original[i - 1].clone(), &original[i]).unwrap());
             }
 
             let mut buf = original.last().unwrap().clone();
