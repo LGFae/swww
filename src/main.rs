@@ -173,7 +173,7 @@ fn get_dimensions_and_outputs() -> Result<(Vec<(u32, u32)>, Vec<Vec<String>>), S
             }
             Ok((dims, outputs))
         }
-        Answer::Err(e) => Err(format!("failed to query daemon: {}", e)),
+        Answer::Err(e) => Err(format!("failed to query swww-daemon: {}", e)),
         _ => unreachable!(),
     }
 }
@@ -331,7 +331,7 @@ fn spawn_daemon(no_daemon: bool) -> Result<(), String> {
     if no_daemon {
         match std::process::Command::new(cmd).status() {
             Ok(_) => Ok(()),
-            Err(e) => Err(format!("error spawning daemon: {}", e)),
+            Err(e) => Err(format!("error spawning swww-daemon: {}", e)),
         }
     } else {
         match std::process::Command::new(cmd)
@@ -340,7 +340,7 @@ fn spawn_daemon(no_daemon: bool) -> Result<(), String> {
             .spawn()
         {
             Ok(_) => Ok(()),
-            Err(e) => Err(format!("error spawning daemon: {}", e)),
+            Err(e) => Err(format!("error spawning swww-daemon: {}", e)),
         }
     }
 }
@@ -368,7 +368,7 @@ fn connect_to_socket(tries: u8, interval: u64) -> Result<UnixStream, String> {
     }
     let error = error.unwrap();
     if error.kind() == std::io::ErrorKind::NotFound {
-        return Err("Socket file not found. Are you sure the daemon is running?".to_string());
+        return Err("Socket file not found. Are you sure swww-daemon is running?".to_string());
     }
 
     Err(format!("Failed to connect to socket: {}", error))
