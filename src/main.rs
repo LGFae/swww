@@ -3,7 +3,7 @@ use fast_image_resize::{FilterType, PixelType, Resizer};
 use image::{codecs::gif::GifDecoder, AnimationDecoder};
 use std::{
     fs::File, io::BufReader, num::NonZeroU32, os::unix::net::UnixStream, path::PathBuf,
-    thread::JoinHandle, time::Duration,
+    process::Stdio, thread::JoinHandle, time::Duration,
 };
 
 use utils::{
@@ -334,7 +334,11 @@ fn spawn_daemon(no_daemon: bool) -> Result<(), String> {
             Err(e) => Err(format!("error spawning daemon: {}", e)),
         }
     } else {
-        match std::process::Command::new(cmd).spawn() {
+        match std::process::Command::new(cmd)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+        {
             Ok(_) => Ok(()),
             Err(e) => Err(format!("error spawning daemon: {}", e)),
         }
