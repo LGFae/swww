@@ -17,12 +17,12 @@ macro_rules! send_transition_frame {
     ($img:ident, $outputs:ident, $now:ident, $fps:ident, $sender:ident, $stop_recv:ident) => {
         if $img.is_empty() {
             debug!("Transition has finished.");
-            return true;
+            return;
         }
         let timeout = $fps.saturating_sub($now.elapsed());
         if send_frame($img, $outputs, timeout, $sender, $stop_recv) {
             debug!("Transition was interrupted!");
-            return false;
+            return;
         }
     };
 }
@@ -74,7 +74,7 @@ impl Transition {
         outputs: &mut Vec<String>,
         sender: &SyncSender<(Vec<String>, ReadiedPack)>,
         stop_recv: &mpsc::Receiver<Vec<String>>,
-    ) -> bool {
+    ) {
         debug!("Starting transition");
         match self.transition_type {
             TransitionType::Simple => self.simple(new_img, outputs, sender, stop_recv),
@@ -97,7 +97,7 @@ impl Transition {
         outputs: &mut Vec<String>,
         sender: &SyncSender<(Vec<String>, ReadiedPack)>,
         stop_recv: &mpsc::Receiver<Vec<String>>,
-    ) -> bool {
+    ) {
         let r: u8 = rand::random();
         match r % 7 {
             0 => self.simple(new_img, outputs, sender, stop_recv),
@@ -127,7 +127,7 @@ impl Transition {
         outputs: &mut Vec<String>,
         sender: &SyncSender<(Vec<String>, ReadiedPack)>,
         stop_recv: &mpsc::Receiver<Vec<String>>,
-    ) -> bool {
+    ) {
         let fps = self.fps;
         let mut now = Instant::now();
         loop {
@@ -146,7 +146,7 @@ impl Transition {
         outputs: &mut Vec<String>,
         sender: &SyncSender<(Vec<String>, ReadiedPack)>,
         stop_recv: &mpsc::Receiver<Vec<String>>,
-    ) -> bool {
+    ) {
         let fps = self.fps;
         let width = self.dimensions.0;
         let height = self.dimensions.1;
@@ -210,7 +210,7 @@ impl Transition {
         outputs: &mut Vec<String>,
         sender: &SyncSender<(Vec<String>, ReadiedPack)>,
         stop_recv: &mpsc::Receiver<Vec<String>>,
-    ) -> bool {
+    ) {
         let fps = self.fps;
         let (width, height) = (self.dimensions.0 as f32, self.dimensions.1 as f32);
         let (center_x, center_y) = self.pos;
@@ -263,7 +263,7 @@ impl Transition {
         outputs: &mut Vec<String>,
         sender: &SyncSender<(Vec<String>, ReadiedPack)>,
         stop_recv: &mpsc::Receiver<Vec<String>>,
-    ) -> bool {
+    ) {
         let fps = self.fps;
         let (width, height) = (self.dimensions.0 as f32, self.dimensions.1 as f32);
         let (center_x, center_y) = self.pos;
@@ -319,7 +319,7 @@ impl Transition {
         outputs: &mut Vec<String>,
         sender: &SyncSender<(Vec<String>, ReadiedPack)>,
         stop_recv: &mpsc::Receiver<Vec<String>>,
-    ) -> bool {
+    ) {
         self.pos = (
             (rand::random::<u32>() % self.dimensions.0) as f32,
             (rand::random::<u32>() % self.dimensions.1) as f32,
@@ -337,7 +337,7 @@ impl Transition {
         outputs: &mut Vec<String>,
         sender: &SyncSender<(Vec<String>, ReadiedPack)>,
         stop_recv: &mpsc::Receiver<Vec<String>>,
-    ) -> bool {
+    ) {
         self.pos = (
             (self.dimensions.0 / 2) as f32,
             (self.dimensions.1 / 2) as f32,
@@ -351,7 +351,7 @@ impl Transition {
         outputs: &mut Vec<String>,
         sender: &SyncSender<(Vec<String>, ReadiedPack)>,
         stop_recv: &mpsc::Receiver<Vec<String>>,
-    ) -> bool {
+    ) {
         self.angle = 0.0;
         self.wipe(new_img, outputs, sender, stop_recv)
     }
@@ -362,7 +362,7 @@ impl Transition {
         outputs: &mut Vec<String>,
         sender: &SyncSender<(Vec<String>, ReadiedPack)>,
         stop_recv: &mpsc::Receiver<Vec<String>>,
-    ) -> bool {
+    ) {
         self.angle = 180.0;
         self.wipe(new_img, outputs, sender, stop_recv)
     }
@@ -373,7 +373,7 @@ impl Transition {
         outputs: &mut Vec<String>,
         sender: &SyncSender<(Vec<String>, ReadiedPack)>,
         stop_recv: &mpsc::Receiver<Vec<String>>,
-    ) -> bool {
+    ) {
         self.angle = 90.0;
         self.wipe(new_img, outputs, sender, stop_recv)
     }
@@ -384,7 +384,7 @@ impl Transition {
         outputs: &mut Vec<String>,
         sender: &SyncSender<(Vec<String>, ReadiedPack)>,
         stop_recv: &mpsc::Receiver<Vec<String>>,
-    ) -> bool {
+    ) {
         self.angle = 270.0;
         self.wipe(new_img, outputs, sender, stop_recv)
     }
@@ -479,7 +479,7 @@ mod tests {
                 i.unpack(&mut transition_img);
             }
 
-            assert!(handle.join().unwrap_or_else(|_| panic!("{:?}", transition)));
+            assert!(handle.join().is_ok());
             for (tpix, npix) in transition_img.chunks_exact(4).zip(new_img.chunks_exact(4)) {
                 assert_eq!(
                     tpix[0..3],
