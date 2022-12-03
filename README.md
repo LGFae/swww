@@ -2,14 +2,14 @@
 ### Efficient animated wallpaper daemon for wayland, controlled at runtime
 
 ![animated gif demonstration](https://i.imgur.com/Leuh6wm.gif)
-![image transition demonstration](https://i.imgur.com/fMBFruY.gif)
+![image transition demonstration](../demos/assets/grow.gif)
 
 ## Dependencies
 
  - a compositor that implements:
    * wlr-layer-shell
    * xdg-output
- - lz4 (for compressing frames when animating)
+ - [lz4](https://github.com/lz4/lz4) (for compressing frames when animating)
 
 ## Build
 
@@ -48,21 +48,20 @@ autocompletion scripts for bash, zsh, fish and elvish are offered in the
 
 ## Why
 
-There are two main reasons that compelled me to make this, the first, that
-[oguri](https://github.com/vilhalmer/oguri) hasn't updated in over a year as I
-am writting this (02 Feb 2022), despite there being serious problems with
-excess of memory use while displaying certain gifs (see
-[this](https://github.com/vilhalmer/oguri/issues/38),for example). The best
-alternative I've found for oguri was
-[mpvpaper](https://github.com/GhostNaN/mpvpaper), but if felt like quite the
-overkill for my purposes.
+There are two main reasons that compelled me to make this: the first is that
+[`oguri`](https://github.com/vilhalmer/oguri) is unmaintained and archived,
+despite there being serious problems with excess of memory use while displaying
+certain gifs (see [this](https://github.com/vilhalmer/oguri/issues/38), for
+example). The best alternative I've found for `oguri` was
+[`mpvpaper`](https://github.com/GhostNaN/mpvpaper), but if felt overkill for my
+purposes.
 
 Comparing to `oguri`, `swww` uses less cpu power to animate once it has cached
 all the frames in the animation. It should also be **significantly** more
 memory efficient.
 
 The second is that, to my knowledge, there is no wallpaper daemon for wayland
-that allows you to change the wallpaper at runtime. That is, is order to, for
+that allows you to change the wallpaper at runtime. That is, in order to, for
 example, cycle through the images of a directory, you'd have to kill the daemon
 and restart it. Not only does it make simple shell scripts a pain to write, it
 makes switching from one image to the next to happen very abruptly.
@@ -98,7 +97,7 @@ If you would like to know the valid values for *\<outputs\>*, you can query the
 daemon. This will also tell you what the current image being displayed is, as
 well as the dimensions detected for the outputs. If you need more detailed
 information, I would recommend using
-[wlr-randr](https://sr.ht/~emersion/wlr-randr/).
+[`wlr-randr`](https://sr.ht/~emersion/wlr-randr/).
 ```
 swww query
 ```
@@ -106,29 +105,30 @@ Finally, to stop the daemon, kill it:
 ```
 swww kill
 ```
-For a more complete description, run *swww --help* or *swww \<subcommand\>
---help*.
+For a more complete description, run `swww --help` or `swww <subcommand>
+--help`.
 
 Finally, to get a feel for what you can do with some shell scripting, check out
-the 'example_scripts' folder. It can help you get started.
+the [example_scripts](/example_scripts/) folder. It can help you get started.
 
 ## Transitions
 
-#### Example top transition:
+#### Example wipe transition:
 
-![top transition demonstration](https://i.imgur.com/ULm6XWI.gif)
+> wipe transition with angle set to 30 deg
 
-The `left`, `right` and `bottom` transitions all work similarly.
+![top transition demonstration](../demos/assets/wipe.gif)
+
+The `left`, `right`, `top` and `bottom` transitions all work similarly.
 
 #### Example outer transition
 
-![outer transition demonstration](https://i.imgur.com/o4pSyxW.gif)
+![outer transition demonstration](../demos/assets/outer.gif)
 
 The `center` transition is the opposite: it starts from the center and goes 
 towards the edges.
 
-There is also `simple`, which simply fades into the new image, `any`, which is
-like `center` but starts at a random point, and `random`, which selects a
+There is also `simple`, which simply fades into the new image, `any`, which starts at a random point with either `center` of `outer` transitions, and `random`, which selects a
 transition effect at random.
 
 ## Troubleshooting
@@ -137,10 +137,10 @@ transition effect at random.
 
 `swww` will use a non-insignificant amount of cpu power while caching the
 images. This will be specially noticeable if the images need to be resized
-before being displayed. So, if you have a very large `gif`, I would recommend
+before being displayed. So, if you have a very large gif, I would recommend
 resizing it **before** sending it to `swww`. That would make the caching phase
 much faster, and thus ultimately reduce power consumption. I can personally
-recommend [gifsicle](https://github.com/kohler/gifsicle) for this purpose.
+recommend [`gifsicle`](https://github.com/kohler/gifsicle) for this purpose.
 
 ## About new features
 
@@ -148,7 +148,7 @@ Broadly speaking, **NEW FEATURES WILL NOT BE ADDED, UNLESS THEY ARE EGREGIOUSLY
 SIMPLE**. I made `swww` with the specific usecase of making shell scripts in
 mind. So, for example, stuff like timed wallpapers, or a setup that loads a
 different image at different times of the day, and so on, should all be done by
-combining `swww` with other programs (see the 'example_scripts' for some
+combining `swww` with other programs (see the [example_scripts](/example_scripts/) for some
 examples).
 
 If you really want some new feature within `swww` itself, I would recommend
@@ -162,12 +162,12 @@ at the [awesome-wayland repository list of wallpaper programs
 ](https://github.com/natpen/awesome-wayland#wallpaper). I can personally
 recommend:
 
- - [wbg](https://codeberg.org/dnkl/wbg) - probably the simplest of them all.
+ - [`wbg`](https://codeberg.org/dnkl/wbg) - probably the simplest of them all.
  Strongly recommend if you just care about setting a single png as your
  permanent wallpaper on something like a laptop.
- - [swaybg](https://github.com/swaywm/swaybg) - made by the wlroots gods
+ - [`swaybg`](https://github.com/swaywm/swaybg) - made by the wlroots gods
  themselves.
- - [mpvpaper](https://github.com/GhostNaN/mpvpaper) - if you want to display
+ - [`mpvpaper`](https://github.com/GhostNaN/mpvpaper) - if you want to display
  videos as your wallpapers. This is also what I used for gifs before making
  `swww`.
 
