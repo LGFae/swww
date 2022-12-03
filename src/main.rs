@@ -7,7 +7,7 @@ use std::{
 };
 
 use utils::{
-    communication::{self, get_socket_path, Animation, Answer, Request, AnimationRequest},
+    communication::{self, get_socket_path, AnimationRequest, Answer, Request},
     comp_decomp::BitPack,
 };
 mod cli;
@@ -50,19 +50,9 @@ fn main() -> Result<(), String> {
         }
     }
 
-    if std::env::var("SWWW_TRANSITION_SPEED").is_ok() {
-        eprintln!(
-            "WARNING: the environment variable SWWW_TRANSITION_SPEED no longer does anything.\n\
-            What used to be 'speed' is now controlled by the flags '--transition-bezier' and\n\
-            '--transition-duration'. See swww img help for the full information.\n\
-\n\
-            This warning will go away in future versions of this program"
-        );
-    }
-
-    let request = make_request(&swww);
+    let mut request = make_request(&swww)?;
     let socket = connect_to_socket(5, 100)?;
-    request?.send(&socket)?;
+    request.send(&socket)?;
     match Answer::receive(socket)? {
         Answer::Err(msg) => return Err(msg),
         Answer::Info(info) => info.into_iter().for_each(|i| println!("{}", i)),
@@ -96,50 +86,28 @@ fn make_request(args: &Swww) -> Result<Request, String> {
             outputs: c.outputs.split(' ').map(|s| s.to_string()).collect(),
         })),
         Swww::Img(img) => {
-            let mut outputs: Vec<Vec<String>> = Vec::new();
-            let mut dims: Vec<(u32, u32)> = Vec::new();
-            let mut imgs: Vec<communication::BgImg> = Vec::new();
-
-            let socket = connect_to_socket(5, 100).unwrap();
-            Request::Query.send(&socket).unwrap();
-            let answer = Answer::receive(socket).unwrap();
-            match answer {
-                Answer::Info(infos) => {
-                    for info in infos {
-                        let mut should_add = true;
-                        for (i, (dim, img)) in dims.iter().zip(&imgs).enumerate() {
-                            if info.dim == *dim && info.img == *img {
-                                outputs[i].push(info.name.clone());
-                                should_add = false;
-                                break;
-                            }
-                        }
-
-                        if should_add {
-                            outputs.push(vec![info.name]);
-                            dims.push(info.dim);
-                            imgs.push(info.img);
-                        }
-                    }
-                }
-                _ => unreachable!(),
-            }
-
-            let imgbuf = image::io::Reader::open(&img.path).unwrap();
-            if imgbuf.format() == Some(image::ImageFormat::Gif) {
+            let (dims, outputs) = get_dimensions_and_outputs()?;
+            let imgbuf = match image::io::Reader::open(&img.path) {
+                Ok(img) => img,
+                Err(e) => return Err(format!("failed to open image: {}", e)),
+            };
+            let is_gif = imgbuf.format() == Some(image::ImageFormat::Gif);
+            let img_raw = match imgbuf.decode() {
+                Ok(img) => img.into_rgba8(),
+                Err(e) => return Err(format!("failed to decode image: {}", e)),
+            };
+            let img_request = make_img_request(img, img_raw, &dims, &outputs)?;
+            if is_gif {
                 let animations = make_animation_request(img, &dims, &outputs);
-                let socket = connect_to_socket(5, 100).unwrap();
-                if let Err(msg) = Request::Img(make_img_request(img, &dims, &outputs)).send(&socket)
-                {
-                    eprintln!("{}", msg);
+                let socket = connect_to_socket(5, 100)?;
+                Request::Img(img_request).send(&socket)?;
+                Answer::receive(socket)?;
+                match animations.join() {
+                    Ok(result) => Ok(Request::Animation(result?)),
+                    Err(e) => Err(format!("failed to join animations thread: {:?}", e)),
                 }
-                if let Err(msg) = Answer::receive(socket) {
-                    eprintln!("{}", msg);
-                }
-
-                Ok(Request::Animation(animations.join().unwrap()?))
             } else {
-                Ok(Request::Img(make_img_request(img, &dims, &outputs)))
+                Ok(Request::Img(img_request))
             }
         }
         Swww::Init { .. } => Ok(Request::Init),
@@ -150,13 +118,10 @@ fn make_request(args: &Swww) -> Result<Request, String> {
 
 fn make_img_request(
     img: &cli::Img,
+    img_raw: image::RgbaImage,
     dims: &[(u32, u32)],
     outputs: &[Vec<String>],
-) -> (
-    communication::Transition,
-    Vec<(communication::Img, Vec<String>)>,
-) {
-    let img_raw = image::open(&img.path).unwrap().into_rgba8();
+) -> Result<communication::ImageRequest, String> {
     let transition = communication::Transition {
         transition_type: convert_transition_type(&img.transition_type),
         duration: img.transition_duration,
@@ -170,13 +135,47 @@ fn make_img_request(
     for (dim, outputs) in dims.iter().zip(outputs) {
         unique_requests.push((
             communication::Img {
-                img: img_resize(img_raw.clone(), *dim, make_filter(&img.filter)).unwrap(),
+                img: img_resize(img_raw.clone(), *dim, make_filter(&img.filter))?,
             },
             outputs.to_owned(),
         ));
     }
 
-    (transition, unique_requests)
+    Ok((transition, unique_requests))
+}
+
+#[allow(clippy::type_complexity)]
+fn get_dimensions_and_outputs() -> Result<(Vec<(u32, u32)>, Vec<Vec<String>>), String> {
+    let mut outputs: Vec<Vec<String>> = Vec::new();
+    let mut dims: Vec<(u32, u32)> = Vec::new();
+    let mut imgs: Vec<communication::BgImg> = Vec::new();
+
+    let socket = connect_to_socket(5, 100)?;
+    Request::Query.send(&socket)?;
+    let answer = Answer::receive(socket)?;
+    match answer {
+        Answer::Info(infos) => {
+            for info in infos {
+                let mut should_add = true;
+                for (i, (dim, img)) in dims.iter().zip(&imgs).enumerate() {
+                    if info.dim == *dim && info.img == *img {
+                        outputs[i].push(info.name.clone());
+                        should_add = false;
+                        break;
+                    }
+                }
+
+                if should_add {
+                    outputs.push(vec![info.name]);
+                    dims.push(info.dim);
+                    imgs.push(info.img);
+                }
+            }
+            Ok((dims, outputs))
+        }
+        Answer::Err(e) => Err(format!("failed to query daemon: {}", e)),
+        _ => unreachable!(),
+    }
 }
 
 fn make_animation_request(
@@ -191,11 +190,17 @@ fn make_animation_request(
     std::thread::spawn(move || {
         let mut animations = Vec::with_capacity(dims.len());
         for (dim, outputs) in dims.into_iter().zip(outputs) {
-            let imgbuf = image::io::Reader::open(&imgpath).unwrap().into_inner();
+            let imgbuf = match image::io::Reader::open(&imgpath) {
+                Ok(img) => img.into_inner(),
+                Err(e) => return Err(format!("error openning image during animation: {}", e)),
+            };
+            let gif = match GifDecoder::new(imgbuf) {
+                Ok(gif) => gif,
+                Err(e) => return Err(format!("failed to decode gif during animation: {}", e)),
+            };
             animations.push((
                 communication::Animation {
-                    animation: make_animation(GifDecoder::new(imgbuf).unwrap(), dim, filter)?
-                        .into_boxed_slice(),
+                    animation: make_animation(gif, dim, filter)?.into_boxed_slice(),
                 },
                 outputs.to_owned(),
             ));
@@ -212,10 +217,11 @@ fn make_animation(
     let mut compressed_frames = Vec::new();
     let mut frames = gif.into_frames();
 
+    // The first frame should always exist
     let first = frames.next().unwrap().unwrap();
     let first_duration = first.delay().numer_denom_ms();
     let first_duration = Duration::from_millis((first_duration.0 / first_duration.1).into());
-    let first_img = img_resize(first.into_buffer(), dim, filter).unwrap();
+    let first_img = img_resize(first.into_buffer(), dim, filter)?;
 
     let mut canvas = first_img.clone();
     while let Some(Ok(frame)) = frames.next() {
@@ -224,7 +230,7 @@ fn make_animation(
 
         // Unwrapping is fine because only the thread will panic in the worst case
         // scenario, not the main loop
-        let img = img_resize(frame.into_buffer(), dim, filter).unwrap();
+        let img = img_resize(frame.into_buffer(), dim, filter)?;
 
         compressed_frames.push((BitPack::pack(&mut canvas, &img)?, duration));
     }
@@ -300,7 +306,10 @@ fn img_resize(
     Ok(resized_img)
 }
 
-///Behold: the most stupid function ever
+/// This is an unfortunate function that needs to exist right now because only things in the
+/// communication module are serializable.
+///
+/// TODO: Do the conversion between the aliases here, not in the daemon
 fn convert_transition_type(a: &cli::TransitionType) -> communication::TransitionType {
     match a {
         cli::TransitionType::Simple => communication::TransitionType::Simple,
@@ -322,12 +331,12 @@ fn spawn_daemon(no_daemon: bool) -> Result<(), String> {
     if no_daemon {
         match std::process::Command::new(cmd).status() {
             Ok(_) => Ok(()),
-            Err(e) => Err(e.to_string()),
+            Err(e) => Err(format!("error spawning daemon: {}", e)),
         }
     } else {
         match std::process::Command::new(cmd).spawn() {
             Ok(_) => Ok(()),
-            Err(e) => Err(e.to_string()),
+            Err(e) => Err(format!("error spawning daemon: {}", e)),
         }
     }
 }

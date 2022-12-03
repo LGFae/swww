@@ -37,7 +37,7 @@ use utils::{
 mod processor;
 mod wayland;
 
-use processor::{Processor, ImgWithDim};
+use processor::{ImgWithDim, Processor};
 
 #[derive(PartialEq, Copy, Clone)]
 enum RenderEvent {
@@ -199,13 +199,13 @@ impl Drop for Bg {
     }
 }
 
-pub fn main() {
+fn main() -> Result<(), String> {
     make_logger();
 
-    let listener = make_socket();
+    let listener = make_socket()?;
     debug!(
         "Made socket in {:?} and initalized logger. Starting daemon...",
-        listener.local_addr().unwrap()
+        listener.local_addr().unwrap() //this should aways work if the socket connected correctly
     );
 
     let (env, display, queue) = wayland::make_wayland_environment();
@@ -236,23 +236,20 @@ pub fn main() {
         env.listen_for_outputs(move |output, info, _| output_handler(output, info));
 
     //NOTE: we can't move display into the function because it causes a segfault
-    if let Err(e) = main_loop(&bgs, queue, &display, listener) {
-        error!("{}", e);
-    } else {
-        info!("Finished running event loop.");
-    }
+    main_loop(&bgs, queue, &display, listener)?;
+    info!("Finished running event loop.");
 
     let socket_addr = get_socket_path();
     if let Err(e) = fs::remove_file(&socket_addr) {
-        error!(
+        return Err(format!(
             "Failed to remove socket at {:?} after closing unexpectedly: {}",
             socket_addr, e
-        );
-    } else {
-        info!("Removed socket at {:?}", socket_addr);
+        ));
     }
+    info!("Removed socket at {:?}", socket_addr);
 
     info!("Goodbye!");
+    Ok(())
 }
 
 fn make_logger() {
@@ -308,17 +305,26 @@ fn create_backgrounds(
     }
 }
 
-fn make_socket() -> UnixListener {
+fn make_socket() -> Result<UnixListener, String> {
     let socket_addr = get_socket_path();
-    let runtime_dir = socket_addr
-        .parent()
-        .expect("couldn't find a valid runtime directory");
+    let runtime_dir = match socket_addr.parent() {
+        Some(path) => path,
+        None => return Err("couldn't find a valid runtime directory".to_owned()),
+    };
 
     if !runtime_dir.exists() {
-        fs::create_dir(runtime_dir).expect("Failed to create runtime dir...");
+        match fs::create_dir(runtime_dir) {
+            Ok(()) => (),
+            Err(e) => return Err(format!("failed to create runtime dir: {}", e)),
+        }
     }
 
-    UnixListener::bind(socket_addr).expect("Couldn't bind socket")
+    let listener = match UnixListener::bind(socket_addr) {
+        Ok(address) => address,
+        Err(e) => return Err(format!("couldn't bind socket: {}", e)),
+    };
+
+    Ok(listener)
 }
 
 fn register_signals(handle: &LoopHandle<LoopSignal>) -> Result<(), String> {
@@ -355,7 +361,9 @@ fn register_socket<'a>(
     processor: &'a Rc<RefCell<Processor>>,
     listener: UnixListener,
 ) -> Result<(), String> {
-    listener.set_nonblocking(true).unwrap();
+    if let Err(e) = listener.set_nonblocking(true) {
+        return Err(format!("failed to set nonblocking mode for socket: {}", e));
+    };
     if let Err(e) = handle.insert_source(
         calloop::generic::Generic::new(listener, calloop::Interest::READ, calloop::Mode::Level),
         |_, listener, loop_signal| {
@@ -460,12 +468,12 @@ fn recv_socket_msg(
                 result
             } else {
                 for animation in animations {
-                    let dim = bgs
-                        .iter()
-                        .find(|bg| animation.1.contains(&bg.info.name))
-                        .unwrap()
-                        .info
-                        .real_dim();
+                    let bg = bgs.iter().find(|bg| animation.1.contains(&bg.info.name));
+                    if bg.is_none() {
+                        continue;
+                    }
+                    //unwraping is fine because we test it above
+                    let dim = bg.unwrap().info.real_dim();
                     let size = dim.0 as usize * dim.1 as usize * 4;
                     if let Answer::Err(e) = proc.animate(animation.0, animation.1, size) {
                         result = Answer::Err(e);
@@ -494,10 +502,7 @@ fn recv_socket_msg(
     answer.send(&stream)
 }
 
-fn get_old_imgs(
-    bgs: &mut RefMut<Vec<Bg>>,
-    imgs: &[(Img, Vec<String>)],
-) -> Vec<ImgWithDim> {
+fn get_old_imgs(bgs: &mut RefMut<Vec<Bg>>, imgs: &[(Img, Vec<String>)]) -> Vec<ImgWithDim> {
     let mut v = Vec::with_capacity(imgs.len());
 
     for (_, outputs) in imgs {
