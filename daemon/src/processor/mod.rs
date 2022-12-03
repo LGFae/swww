@@ -2,6 +2,7 @@ use log::debug;
 
 use smithay_client_toolkit::reexports::calloop::channel::SyncSender;
 
+use std::sync::{Arc, RwLock};
 use std::{sync::mpsc, thread, time::Duration};
 
 use utils::communication::{Answer, Img};
@@ -17,12 +18,14 @@ pub type ImgWithDim = (Box<[u8]>, (u32, u32));
 pub struct Processor {
     frame_sender: SyncSender<(Vec<String>, ReadiedPack)>,
     anim_stoppers: Vec<mpsc::Sender<Vec<String>>>,
+    on_going_transitions: Arc<RwLock<Vec<String>>>,
 }
 
 impl Processor {
     pub fn new(frame_sender: SyncSender<(Vec<String>, ReadiedPack)>) -> Self {
         Self {
             anim_stoppers: Vec::new(),
+            on_going_transitions: Arc::new(RwLock::new(Vec::new())),
             frame_sender,
         }
     }
@@ -40,16 +43,25 @@ impl Processor {
             let sender = self.frame_sender.clone();
             let (stopper, stop_recv) = mpsc::channel();
             self.anim_stoppers.push(stopper);
+            let on_going_transitions = Arc::clone(&self.on_going_transitions);
             if let Err(e) = thread::Builder::new()
                 .name("transition".to_string()) //Name our threads  for better log messages
                 .stack_size(TSTACK_SIZE) //the default of 2MB is way too overkill for this
                 .spawn(move || {
+                    on_going_transitions
+                        .write()
+                        .unwrap()
+                        .extend_from_slice(&outputs);
                     animations::Transition::new(old_img, dim, transition).execute(
                         &new_img.img,
                         &mut outputs,
                         &sender,
                         &stop_recv,
                     );
+                    on_going_transitions
+                        .write()
+                        .unwrap()
+                        .retain(|output| !outputs.contains(output));
                 })
             {
                 answer = Answer::Err(format!("failed to spawn transition thread: {}", e));
@@ -69,11 +81,16 @@ impl Processor {
 
         let sender = self.frame_sender.clone();
         let (stopper, stop_recv) = mpsc::channel();
+        let on_going_transitions = Arc::clone(&self.on_going_transitions);
+
         self.anim_stoppers.push(stopper);
         if let Err(e) = thread::Builder::new()
             .name("animation".to_string()) //Name our threads  for better log messages
             .stack_size(TSTACK_SIZE) //the default of 2MB is way too overkill for this
             .spawn(move || {
+                while on_going_transitions.read().unwrap().iter().any(|output| outputs.contains(output)) {
+                    std::thread::yield_now();
+                }
                 let mut now = std::time::Instant::now();
                 for (frame, duration) in animation.animation.iter().cycle() {
                     let frame = frame.ready(output_size);
@@ -93,6 +110,10 @@ impl Processor {
     }
 
     pub fn stop_animations(&mut self, to_stop: &[String]) {
+        self.on_going_transitions
+            .write()
+            .unwrap()
+            .retain(|output| !to_stop.contains(output));
         self.anim_stoppers
             .retain(|a| a.send(to_stop.to_vec()).is_ok());
     }

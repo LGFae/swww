@@ -1,4 +1,4 @@
-IMPORTANT: update examples in the readme (our transition effects look much nicer now!)
+--outputs argument no longer works!!!
 
 When changing the scale, the image does not resize automatically
 

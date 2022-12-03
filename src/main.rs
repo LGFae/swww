@@ -145,6 +145,7 @@ fn make_img_request(
 }
 
 #[allow(clippy::type_complexity)]
+//TODO: only get outputs that were requested with the --outputs flag
 fn get_dimensions_and_outputs() -> Result<(Vec<(u32, u32)>, Vec<Vec<String>>), String> {
     let mut outputs: Vec<Vec<String>> = Vec::new();
     let mut dims: Vec<(u32, u32)> = Vec::new();
