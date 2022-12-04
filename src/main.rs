@@ -133,15 +133,7 @@ fn make_img_request(
     dims: &[(u32, u32)],
     outputs: &[Vec<String>],
 ) -> Result<communication::ImageRequest, String> {
-    let transition = communication::Transition {
-        transition_type: convert_transition_type(&img.transition_type),
-        duration: img.transition_duration,
-        step: img.transition_step,
-        fps: img.transition_fps,
-        angle: img.transition_angle,
-        pos: img.transition_pos,
-        bezier: img.transition_bezier,
-    };
+    let transition = make_transition(img);
     let mut unique_requests = Vec::with_capacity(dims.len());
     for (dim, outputs) in dims.iter().zip(outputs) {
         unique_requests.push((
@@ -326,23 +318,63 @@ fn img_resize(
     Ok(resized_img)
 }
 
-/// This is an unfortunate function that needs to exist right now because only things in the
-/// communication module are serializable.
-///
-/// TODO: Do the conversion between the aliases here, not in the daemon
-fn convert_transition_type(a: &cli::TransitionType) -> communication::TransitionType {
-    match a {
+fn make_transition(img: &cli::Img) -> communication::Transition {
+    let mut angle = img.transition_angle;
+    let mut pos = img.transition_pos;
+    let transition_type = match img.transition_type {
         cli::TransitionType::Simple => communication::TransitionType::Simple,
-        cli::TransitionType::Left => communication::TransitionType::Left,
-        cli::TransitionType::Right => communication::TransitionType::Right,
-        cli::TransitionType::Top => communication::TransitionType::Top,
-        cli::TransitionType::Bottom => communication::TransitionType::Bottom,
-        cli::TransitionType::Center => communication::TransitionType::Center,
-        cli::TransitionType::Outer => communication::TransitionType::Outer,
-        cli::TransitionType::Any => communication::TransitionType::Any,
-        cli::TransitionType::Random => communication::TransitionType::Random,
         cli::TransitionType::Wipe => communication::TransitionType::Wipe,
+        cli::TransitionType::Outer => communication::TransitionType::Outer,
         cli::TransitionType::Grow => communication::TransitionType::Grow,
+        cli::TransitionType::Right => {
+            angle = 0.0;
+            communication::TransitionType::Wipe
+        }
+        cli::TransitionType::Top => {
+            angle = 90.0;
+            communication::TransitionType::Wipe
+        }
+        cli::TransitionType::Left => {
+            angle = 180.0;
+            communication::TransitionType::Wipe
+        }
+        cli::TransitionType::Bottom => {
+            angle = 270.0;
+            communication::TransitionType::Wipe
+        }
+        cli::TransitionType::Center => {
+            pos = (0.5, 0.5);
+            communication::TransitionType::Grow
+        }
+        cli::TransitionType::Any => {
+            pos = (rand::random::<f32>(), rand::random::<f32>());
+            if rand::random::<u8>() % 2 == 0 {
+                communication::TransitionType::Grow
+            } else {
+                communication::TransitionType::Outer
+            }
+        }
+        cli::TransitionType::Random => {
+            pos = (rand::random::<f32>(), rand::random::<f32>());
+            angle = rand::random();
+            match rand::random::<u8>() % 4 {
+                0 => communication::TransitionType::Simple,
+                1 => communication::TransitionType::Wipe,
+                2 => communication::TransitionType::Outer,
+                3 => communication::TransitionType::Grow,
+                _ => unreachable!(),
+            }
+        }
+    };
+
+    communication::Transition {
+        duration: img.transition_duration,
+        step: img.transition_step,
+        fps: img.transition_fps,
+        bezier: img.transition_bezier,
+        angle,
+        pos,
+        transition_type,
     }
 }
 
@@ -413,10 +445,8 @@ fn is_daemon_running() -> Result<bool, String> {
             if let Ok(cmd) = std::fs::read_to_string(entry_path) {
                 let mut args = cmd.split(&[' ', '\0']);
                 if let Some(arg0) = args.next() {
-                    if arg0.ends_with("swww") {
-                        if let Some("init") = args.next() {
-                            return Ok(true);
-                        }
+                    if arg0.ends_with("swww-daemon") {
+                        return Ok(true);
                     }
                 }
             }

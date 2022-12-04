@@ -69,14 +69,7 @@ pub struct Animation {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum TransitionType {
     Simple,
-    Left,
-    Right,
-    Top,
-    Bottom,
-    Center,
     Outer,
-    Any,
-    Random,
     Wipe,
     Grow,
 }

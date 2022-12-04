@@ -78,39 +78,9 @@ impl Transition {
         debug!("Starting transition");
         match self.transition_type {
             TransitionType::Simple => self.simple(new_img, outputs, sender, stop_recv),
-            TransitionType::Left => self.left(new_img, outputs, sender, stop_recv),
-            TransitionType::Right => self.right(new_img, outputs, sender, stop_recv),
-            TransitionType::Top => self.top(new_img, outputs, sender, stop_recv),
-            TransitionType::Bottom => self.bottom(new_img, outputs, sender, stop_recv),
-            TransitionType::Random => self.random(new_img, outputs, sender, stop_recv),
             TransitionType::Wipe => self.wipe(new_img, outputs, sender, stop_recv),
             TransitionType::Grow => self.grow(new_img, outputs, sender, stop_recv),
             TransitionType::Outer => self.outer(new_img, outputs, sender, stop_recv),
-            TransitionType::Center => self.center(new_img, outputs, sender, stop_recv),
-            TransitionType::Any => self.any(new_img, outputs, sender, stop_recv),
-        }
-    }
-
-    fn random(
-        mut self,
-        new_img: &[u8],
-        outputs: &mut Vec<String>,
-        sender: &SyncSender<(Vec<String>, ReadiedPack)>,
-        stop_recv: &mpsc::Receiver<Vec<String>>,
-    ) {
-        let r: u8 = rand::random();
-        match r % 7 {
-            0 => self.simple(new_img, outputs, sender, stop_recv),
-            1 => self.left(new_img, outputs, sender, stop_recv),
-            2 => self.right(new_img, outputs, sender, stop_recv),
-            3 => self.top(new_img, outputs, sender, stop_recv),
-            4 => self.bottom(new_img, outputs, sender, stop_recv),
-            5 => {
-                self.angle = rand::random::<f64>() % 360.0;
-                self.wipe(new_img, outputs, sender, stop_recv)
-            }
-            6 => self.any(new_img, outputs, sender, stop_recv),
-            _ => unreachable!(),
         }
     }
 
@@ -310,84 +280,6 @@ impl Transition {
         }
         self.simple(new_img, outputs, sender, stop_recv)
     }
-
-    // aliases
-
-    fn any(
-        mut self,
-        new_img: &[u8],
-        outputs: &mut Vec<String>,
-        sender: &SyncSender<(Vec<String>, ReadiedPack)>,
-        stop_recv: &mpsc::Receiver<Vec<String>>,
-    ) {
-        self.pos = (
-            (rand::random::<u32>() % self.dimensions.0) as f32,
-            (rand::random::<u32>() % self.dimensions.1) as f32,
-        );
-        match rand::random::<u8>() % 2 {
-            0 => self.grow(new_img, outputs, sender, stop_recv),
-            1 => self.outer(new_img, outputs, sender, stop_recv),
-            _ => unreachable!(),
-        }
-    }
-
-    fn center(
-        mut self,
-        new_img: &[u8],
-        outputs: &mut Vec<String>,
-        sender: &SyncSender<(Vec<String>, ReadiedPack)>,
-        stop_recv: &mpsc::Receiver<Vec<String>>,
-    ) {
-        self.pos = (
-            (self.dimensions.0 / 2) as f32,
-            (self.dimensions.1 / 2) as f32,
-        );
-        self.grow(new_img, outputs, sender, stop_recv)
-    }
-
-    fn right(
-        mut self,
-        new_img: &[u8],
-        outputs: &mut Vec<String>,
-        sender: &SyncSender<(Vec<String>, ReadiedPack)>,
-        stop_recv: &mpsc::Receiver<Vec<String>>,
-    ) {
-        self.angle = 0.0;
-        self.wipe(new_img, outputs, sender, stop_recv)
-    }
-
-    fn left(
-        mut self,
-        new_img: &[u8],
-        outputs: &mut Vec<String>,
-        sender: &SyncSender<(Vec<String>, ReadiedPack)>,
-        stop_recv: &mpsc::Receiver<Vec<String>>,
-    ) {
-        self.angle = 180.0;
-        self.wipe(new_img, outputs, sender, stop_recv)
-    }
-
-    fn top(
-        mut self,
-        new_img: &[u8],
-        outputs: &mut Vec<String>,
-        sender: &SyncSender<(Vec<String>, ReadiedPack)>,
-        stop_recv: &mpsc::Receiver<Vec<String>>,
-    ) {
-        self.angle = 90.0;
-        self.wipe(new_img, outputs, sender, stop_recv)
-    }
-
-    fn bottom(
-        mut self,
-        new_img: &[u8],
-        outputs: &mut Vec<String>,
-        sender: &SyncSender<(Vec<String>, ReadiedPack)>,
-        stop_recv: &mpsc::Receiver<Vec<String>>,
-    ) {
-        self.angle = 270.0;
-        self.wipe(new_img, outputs, sender, stop_recv)
-    }
 }
 
 fn change_cols(step: u8, old: &mut [u8; 4], new: [u8; 4]) {
@@ -454,14 +346,9 @@ mod tests {
         use TransitionType as TT;
         let transitions = [
             TT::Simple,
-            TT::Left,
-            TT::Right,
-            TT::Bottom,
-            TT::Top,
-            TT::Center,
+            TT::Wipe,
             TT::Outer,
-            TT::Any,
-            TT::Random,
+            TT::Grow,
         ];
         for transition in transitions {
             let ((fr_send, fr_recv), (_stop_send, stop_recv)) = make_senders_and_receivers();
