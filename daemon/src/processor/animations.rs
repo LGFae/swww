@@ -183,7 +183,7 @@ impl Transition {
     ) {
         let fps = self.fps;
         let (width, height) = (self.dimensions.0 as f32, self.dimensions.1 as f32);
-        let (center_x, center_y) = self.pos;
+        let (center_x, center_y) = (width * self.pos.0, height * self.pos.1);
         let mut dist_center: f32 = 0.0;
         let dist_end: f32 = {
             let mut x = center_x;
@@ -236,7 +236,7 @@ impl Transition {
     ) {
         let fps = self.fps;
         let (width, height) = (self.dimensions.0 as f32, self.dimensions.1 as f32);
-        let (center_x, center_y) = self.pos;
+        let (center_x, center_y) = (width * self.pos.0, height * self.pos.1);
         let mut dist_center = {
             let mut x = center_x;
             let mut y = center_y;
