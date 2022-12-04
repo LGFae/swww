@@ -83,10 +83,21 @@ fn make_request(args: &Swww) -> Result<Request, String> {
     match args {
         Swww::Clear(c) => Ok(Request::Clear(communication::Clear {
             color: c.color,
-            outputs: c.outputs.split(' ').map(|s| s.to_string()).collect(),
+            outputs: c
+                .outputs
+                .split(' ')
+                .map(|s| s.to_string())
+                .filter(|s| !s.is_empty())
+                .collect(),
         })),
         Swww::Img(img) => {
-            let (dims, outputs) = get_dimensions_and_outputs()?;
+            let requested_outputs = img
+                .outputs
+                .split(' ')
+                .map(|s| s.to_owned())
+                .filter(|s| !s.is_empty())
+                .collect();
+            let (dims, outputs) = get_dimensions_and_outputs(requested_outputs)?;
             let imgbuf = match image::io::Reader::open(&img.path) {
                 Ok(img) => img,
                 Err(e) => return Err(format!("failed to open image: {}", e)),
@@ -145,8 +156,9 @@ fn make_img_request(
 }
 
 #[allow(clippy::type_complexity)]
-//TODO: only get outputs that were requested with the --outputs flag
-fn get_dimensions_and_outputs() -> Result<(Vec<(u32, u32)>, Vec<Vec<String>>), String> {
+fn get_dimensions_and_outputs(
+    requested_outputs: Vec<String>,
+) -> Result<(Vec<(u32, u32)>, Vec<Vec<String>>), String> {
     let mut outputs: Vec<Vec<String>> = Vec::new();
     let mut dims: Vec<(u32, u32)> = Vec::new();
     let mut imgs: Vec<communication::BgImg> = Vec::new();
@@ -157,6 +169,9 @@ fn get_dimensions_and_outputs() -> Result<(Vec<(u32, u32)>, Vec<Vec<String>>), S
     match answer {
         Answer::Info(infos) => {
             for info in infos {
+                if !requested_outputs.is_empty() && !requested_outputs.contains(&info.name) {
+                    continue;
+                }
                 let mut should_add = true;
                 for (i, (dim, img)) in dims.iter().zip(&imgs).enumerate() {
                     if info.dim == *dim && info.img == *img {
@@ -172,7 +187,11 @@ fn get_dimensions_and_outputs() -> Result<(Vec<(u32, u32)>, Vec<Vec<String>>), S
                     imgs.push(info.img);
                 }
             }
-            Ok((dims, outputs))
+            if outputs.is_empty() {
+                Err("none of the requested outputs are valid".to_owned())
+            } else {
+                Ok((dims, outputs))
+            }
         }
         Answer::Err(e) => Err(format!("failed to query swww-daemon: {}", e)),
         _ => unreachable!(),

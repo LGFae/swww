@@ -524,10 +524,15 @@ fn handle_recv_img(bgs: &mut RefMut<Vec<Bg>>, msg: &(Vec<String>, ReadiedPack)) 
         .for_each(|bg| bg.draw(img));
 }
 
+//TODO: error when no output was valid
 fn clear_outputs(bgs: &mut RefMut<Vec<Bg>>, clear: &Clear, proc: &mut Processor) -> Answer {
     proc.stop_animations(&clear.outputs);
-    bgs.iter_mut()
-        .filter(|bg| clear.outputs.contains(&bg.info.name))
-        .for_each(|bg| bg.clear(clear.color));
+    if clear.outputs.is_empty() {
+        bgs.iter_mut().for_each(|bg| bg.clear(clear.color));
+    } else {
+        bgs.iter_mut()
+            .filter(|bg| clear.outputs.contains(&bg.info.name))
+            .for_each(|bg| bg.clear(clear.color));
+    }
     Answer::Ok
 }
