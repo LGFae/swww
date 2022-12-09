@@ -7,7 +7,7 @@
 ## Dependencies
 
  - a compositor that implements:
-   * wlr-layer-shell
+   * wlr-layer-shell (typically wlroots based compositors)
    * xdg-output
  - [lz4](https://github.com/lz4/lz4) (for compressing frames when animating)
 
