@@ -83,20 +83,10 @@ fn make_request(args: &Swww) -> Result<Request, String> {
     match args {
         Swww::Clear(c) => Ok(Request::Clear(communication::Clear {
             color: c.color,
-            outputs: c
-                .outputs
-                .split(' ')
-                .map(|s| s.to_string())
-                .filter(|s| !s.is_empty())
-                .collect(),
+            outputs: split_cmdline_outputs(&c.outputs),
         })),
         Swww::Img(img) => {
-            let requested_outputs = img
-                .outputs
-                .split(' ')
-                .map(|s| s.to_owned())
-                .filter(|s| !s.is_empty())
-                .collect();
+            let requested_outputs = split_cmdline_outputs(&img.outputs);
             let (dims, outputs) = get_dimensions_and_outputs(requested_outputs)?;
             let imgbuf = match image::io::Reader::open(&img.path) {
                 Ok(img) => img,
@@ -125,6 +115,14 @@ fn make_request(args: &Swww) -> Result<Request, String> {
         Swww::Kill => Ok(Request::Kill),
         Swww::Query => Ok(Request::Query),
     }
+}
+
+fn split_cmdline_outputs(outputs: &str) -> Vec<String> {
+    outputs
+        .split(' ')
+        .map(|s| s.to_owned())
+        .filter(|s| !s.is_empty())
+        .collect()
 }
 
 fn make_img_request(
@@ -212,7 +210,7 @@ fn make_animation_request(
             };
             animations.push((
                 communication::Animation {
-                    animation: make_animation(gif, dim, filter)?.into_boxed_slice(),
+                    animation: compress_frames(gif, dim, filter)?.into_boxed_slice(),
                 },
                 outputs.to_owned(),
             ));
@@ -221,7 +219,7 @@ fn make_animation_request(
     })
 }
 
-fn make_animation(
+fn compress_frames(
     gif: GifDecoder<BufReader<File>>,
     dim: (u32, u32),
     filter: FilterType,
