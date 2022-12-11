@@ -25,8 +25,8 @@ To build, clone this repository and run:
 ```
 cargo build --release
 ```
-Then, put the binary at `target/release/swww` in your path. Optionally,
-autocompletion scripts for bash, zsh, fish and elvish are offered in the
+Then, put **both binaries** `target/release/swww` and `target/release/swww-daemon` in your 
+path. Optionally, autocompletion scripts for bash, zsh, fish and elvish are offered in the
 `completions` directory.
 
 ## Features
@@ -128,8 +128,9 @@ The `left`, `right`, `top` and `bottom` transitions all work similarly.
 The `center` transition is the opposite: it starts from the center and goes 
 towards the edges.
 
-There is also `simple`, which simply fades into the new image, `any`, which starts at a random point with either `center` of `outer` transitions, and `random`, which selects a
-transition effect at random.
+There is also `simple`, which simply fades into the new image, `any`, which 
+starts at a random point with either `center` of `outer` transitions, and `random`,
+which selects a transition effect at random.
 
 ## Troubleshooting
 
