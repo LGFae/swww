@@ -219,7 +219,7 @@ pub struct Img {
     ///
     ///Broadly speaking, this is mostly only visible during the 'simple' transition. The other
     ///transitions tend to change more with the 'transition-step' and 'transition-speed' options
-    #[arg(long, env = "SWWW_TRANSITION_STEP", default_value = "10")]
+    #[arg(long, env = "SWWW_TRANSITION_STEP", default_value = "90")]
     pub transition_step: u8,
 
     ///How long the transition takes to complete in seconds.
