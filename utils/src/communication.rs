@@ -1,9 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::{
     fmt,
+    io::{BufReader, BufWriter},
     os::unix::net::UnixStream,
     path::{Path, PathBuf},
-    time::Duration, io::{BufWriter, BufReader},
+    time::Duration,
 };
 
 use crate::comp_decomp::BitPack;
@@ -105,6 +106,13 @@ pub enum Request {
 
 impl Request {
     pub fn send(&mut self, stream: &UnixStream) -> Result<(), String> {
+        if let Request::Animation(vec) = self {
+            // don't send the animation request if we only have one frame
+            if vec.len() == 1 {
+                return Ok(());
+            }
+        }
+
         let writer = BufWriter::new(stream);
         match bincode::serialize_into(writer, self) {
             Ok(()) => Ok(()),
