@@ -224,6 +224,8 @@ fn make_animation_request(
     let outputs = outputs.to_owned();
     let filter = make_filter(&img.filter);
     let imgpath = img.path.clone();
+    let no_resize = img.no_resize;
+    let fill_color = img.fill_color;
     std::thread::spawn(move || {
         let mut animations = Vec::with_capacity(dims.len());
         for (dim, outputs) in dims.into_iter().zip(outputs) {
@@ -237,7 +239,8 @@ fn make_animation_request(
             };
             animations.push((
                 communication::Animation {
-                    animation: compress_frames(gif, dim, filter)?.into_boxed_slice(),
+                    animation: compress_frames(gif, dim, filter, no_resize, &fill_color)?
+                        .into_boxed_slice(),
                 },
                 outputs.to_owned(),
             ));
@@ -250,6 +253,8 @@ fn compress_frames(
     gif: GifDecoder<BufReader<File>>,
     dim: (u32, u32),
     filter: FilterType,
+    no_resize: bool,
+    color: &[u8; 3],
 ) -> Result<Vec<(BitPack, Duration)>, String> {
     let mut compressed_frames = Vec::new();
     let mut frames = gif.into_frames();
@@ -258,7 +263,11 @@ fn compress_frames(
     let first = frames.next().unwrap().unwrap();
     let first_duration = first.delay().numer_denom_ms();
     let first_duration = Duration::from_millis((first_duration.0 / first_duration.1).into());
-    let first_img = img_resize(first.into_buffer(), dim, filter)?;
+    let first_img = if no_resize {
+        img_pad(first.into_buffer(), dim, color)?
+    } else {
+        img_resize(first.into_buffer(), dim, filter)?
+    };
 
     let mut canvas = first_img.clone();
     while let Some(Ok(frame)) = frames.next() {
@@ -267,7 +276,11 @@ fn compress_frames(
 
         // Unwrapping is fine because only the thread will panic in the worst case
         // scenario, not the main loop
-        let img = img_resize(frame.into_buffer(), dim, filter)?;
+        let img = if no_resize {
+            img_pad(frame.into_buffer(), dim, color)?
+        } else {
+            img_resize(frame.into_buffer(), dim, filter)?
+        };
 
         compressed_frames.push((BitPack::pack(&mut canvas, &img)?, duration));
     }
