@@ -159,7 +159,11 @@ fn make_img_request(
     for (dim, outputs) in dims.iter().zip(outputs) {
         unique_requests.push((
             communication::Img {
-                img: img_resize(img_raw.clone(), *dim, make_filter(&img.filter))?,
+                img: if img.no_resize {
+                    img_pad(img_raw.clone(), *dim, &img.fill_color)?
+                } else {
+                    img_resize(img_raw.clone(), *dim, make_filter(&img.filter))?
+                },
             },
             outputs.to_owned(),
         ));
@@ -281,6 +285,59 @@ fn make_filter(filter: &cli::Filter) -> fast_image_resize::FilterType {
         cli::Filter::Mitchell => fast_image_resize::FilterType::Mitchell,
         cli::Filter::Lanczos3 => fast_image_resize::FilterType::Lanczos3,
     }
+}
+
+fn img_pad(
+    mut img: image::RgbaImage,
+    dimensions: (u32, u32),
+    color: &[u8; 3],
+) -> Result<Vec<u8>, String> {
+    let (padded_w, padded_h) = dimensions;
+    let (padded_w, padded_h) = (padded_w as usize, padded_h as usize);
+    let mut padded = Vec::with_capacity(padded_w * padded_w * 4);
+
+    let img = image::imageops::crop(&mut img, 0, 0, dimensions.0, dimensions.1).to_image();
+    let (img_w, img_h) = img.dimensions();
+    let (img_w, img_h) = (img_w as usize, img_h as usize);
+    let raw_img = img.into_vec();
+
+    for _ in 0..(((padded_h - img_h) / 2) * padded_w) {
+        padded.push(color[2]);
+        padded.push(color[1]);
+        padded.push(color[0]);
+        padded.push(255);
+    }
+
+    for row in 0..img_h {
+        for _ in 0..(padded_w - img_w) / 2 {
+            padded.push(color[2]);
+            padded.push(color[1]);
+            padded.push(color[0]);
+            padded.push(255);
+        }
+
+        for pixel in raw_img[(row * img_w * 4)..((row + 1) * img_w * 4)].chunks_exact(4) {
+            padded.push(pixel[2]);
+            padded.push(pixel[1]);
+            padded.push(pixel[0]);
+            padded.push(pixel[3]);
+        }
+        for _ in 0..(padded_w - img_w) / 2 {
+            padded.push(color[2]);
+            padded.push(color[1]);
+            padded.push(color[0]);
+            padded.push(255);
+        }
+    }
+
+    while padded.len() < (padded_h * padded_w * 4) {
+        padded.push(color[2]);
+        padded.push(color[1]);
+        padded.push(color[0]);
+        padded.push(255);
+    }
+
+    Ok(padded)
 }
 
 fn img_resize(
