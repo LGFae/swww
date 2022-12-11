@@ -1,3 +1,7 @@
+[workspace]
+members = ["daemon"]
+default-members = [".", "daemon"]
+
 [package]
 name = "swww"
 version = "0.6.0"
@@ -17,26 +21,18 @@ debug = 1
 strip = false
 
 [dependencies]
-smithay-client-toolkit = { version = "=0.16.0", default-features = false, features = ["calloop"] }
-image = { version = "=0.24.5", default-features = false, features = [ "gif", "jpeg", "png", "pnm",
-													 "tga", "tiff", "webp", "bmp", "farbfeld"]}
-log = { version = "=0.4.17", features = ["max_level_debug", "release_max_level_info"] }
-simplelog = "=0.12.0"
-fork = "=0.1.20"
-clap = { version = "=4.0.29", features = ["derive", "wrap_help", "env"] }
-lzzzz = "=1.0.4"
-serde = { version = "=1.0.149", features = [ "derive" ] }
-bincode = "=1.3.3"
-lazy_static = "=1.4.0"
-fast_image_resize = "=2.3.0"
-rand = "=0.8.5"
-keyframe = "1.1.1"
+image = "0.24"
+fast_image_resize = "2.3"
+clap = { version = "4.0", features = ["derive", "wrap_help", "env"] }
+rand = "0.8"
+
+utils = { path = "utils" }
 
 [dev-dependencies]
 assert_cmd = "=2.0.7"
 
 [build-dependencies]
-clap = { version = "=4.0.29", features = ["derive", "env"] }
+clap = { version = "4.0", features = ["derive", "env"] }
 clap_complete = "=4.0.6"
 serde =  { version = "=1.0.149", features = [ "derive" ] }
 

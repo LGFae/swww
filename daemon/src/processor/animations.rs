@@ -1,34 +1,28 @@
 use smithay_client_toolkit::reexports::calloop::channel::SyncSender;
 use std::{
-    fs::File,
-    io::BufReader,
     sync::mpsc,
     time::{Duration, Instant},
 };
 
-use fast_image_resize::FilterType;
-use image::{codecs::gif::GifDecoder, AnimationDecoder};
 use log::debug;
+use utils::{communication::TransitionType, comp_decomp::ReadiedPack};
 
-use crate::cli::TransitionType;
+use super::send_frame;
 
-use super::{
-    comp_decomp::{BitPack, ReadiedPack},
-    img_resize, send_frame,
+use keyframe::{
+    functions::BezierCurve, keyframes, mint::Vector2, num_traits::Pow, AnimationSequence,
 };
-
-use keyframe::{functions::BezierCurve, keyframes, num_traits::Pow, AnimationSequence};
 
 macro_rules! send_transition_frame {
     ($img:ident, $outputs:ident, $now:ident, $fps:ident, $sender:ident, $stop_recv:ident) => {
         if $img.is_empty() {
             debug!("Transition has finished.");
-            return true;
+            return;
         }
         let timeout = $fps.saturating_sub($now.elapsed());
         if send_frame($img, $outputs, timeout, $sender, $stop_recv) {
             debug!("Transition was interrupted!");
-            return false;
+            return;
         }
     };
 }
@@ -50,24 +44,27 @@ impl Transition {
     pub fn new(
         old_img: Box<[u8]>,
         dimensions: (u32, u32),
-        transition_type: TransitionType,
-        duration: f32,
-        step: u8,
-        fps: Duration,
-        angle: f64,
-        pos: (f32, f32),
-        bezier: BezierCurve,
+        transition: utils::communication::Transition,
     ) -> Self {
         Transition {
             old_img,
             dimensions,
-            transition_type,
-            duration,
-            step,
-            fps,
-            angle,
-            pos,
-            bezier,
+            transition_type: transition.transition_type,
+            duration: transition.duration,
+            step: transition.step,
+            fps: Duration::from_nanos(1_000_000_000 / transition.fps as u64),
+            angle: transition.angle,
+            pos: transition.pos,
+            bezier: BezierCurve::from(
+                Vector2 {
+                    x: transition.bezier.0,
+                    y: transition.bezier.1,
+                },
+                Vector2 {
+                    x: transition.bezier.2,
+                    y: transition.bezier.3,
+                },
+            ),
         }
     }
 
@@ -77,43 +74,13 @@ impl Transition {
         outputs: &mut Vec<String>,
         sender: &SyncSender<(Vec<String>, ReadiedPack)>,
         stop_recv: &mpsc::Receiver<Vec<String>>,
-    ) -> bool {
+    ) {
         debug!("Starting transition");
         match self.transition_type {
             TransitionType::Simple => self.simple(new_img, outputs, sender, stop_recv),
-            TransitionType::Left => self.left(new_img, outputs, sender, stop_recv),
-            TransitionType::Right => self.right(new_img, outputs, sender, stop_recv),
-            TransitionType::Top => self.top(new_img, outputs, sender, stop_recv),
-            TransitionType::Bottom => self.bottom(new_img, outputs, sender, stop_recv),
-            TransitionType::Random => self.random(new_img, outputs, sender, stop_recv),
             TransitionType::Wipe => self.wipe(new_img, outputs, sender, stop_recv),
             TransitionType::Grow => self.grow(new_img, outputs, sender, stop_recv),
             TransitionType::Outer => self.outer(new_img, outputs, sender, stop_recv),
-            TransitionType::Center => self.center(new_img, outputs, sender, stop_recv),
-            TransitionType::Any => self.any(new_img, outputs, sender, stop_recv),
-        }
-    }
-
-    fn random(
-        mut self,
-        new_img: &[u8],
-        outputs: &mut Vec<String>,
-        sender: &SyncSender<(Vec<String>, ReadiedPack)>,
-        stop_recv: &mpsc::Receiver<Vec<String>>,
-    ) -> bool {
-        let r: u8 = rand::random();
-        match r % 7 {
-            0 => self.simple(new_img, outputs, sender, stop_recv),
-            1 => self.left(new_img, outputs, sender, stop_recv),
-            2 => self.right(new_img, outputs, sender, stop_recv),
-            3 => self.top(new_img, outputs, sender, stop_recv),
-            4 => self.bottom(new_img, outputs, sender, stop_recv),
-            5 => {
-                self.angle = rand::random::<f64>() % 360.0;
-                self.wipe(new_img, outputs, sender, stop_recv)
-            }
-            6 => self.any(new_img, outputs, sender, stop_recv),
-            _ => unreachable!(),
         }
     }
 
@@ -130,7 +97,7 @@ impl Transition {
         outputs: &mut Vec<String>,
         sender: &SyncSender<(Vec<String>, ReadiedPack)>,
         stop_recv: &mpsc::Receiver<Vec<String>>,
-    ) -> bool {
+    ) {
         let fps = self.fps;
         let mut now = Instant::now();
         loop {
@@ -149,7 +116,7 @@ impl Transition {
         outputs: &mut Vec<String>,
         sender: &SyncSender<(Vec<String>, ReadiedPack)>,
         stop_recv: &mpsc::Receiver<Vec<String>>,
-    ) -> bool {
+    ) {
         let fps = self.fps;
         let width = self.dimensions.0;
         let height = self.dimensions.1;
@@ -213,10 +180,10 @@ impl Transition {
         outputs: &mut Vec<String>,
         sender: &SyncSender<(Vec<String>, ReadiedPack)>,
         stop_recv: &mpsc::Receiver<Vec<String>>,
-    ) -> bool {
+    ) {
         let fps = self.fps;
         let (width, height) = (self.dimensions.0 as f32, self.dimensions.1 as f32);
-        let (center_x, center_y) = self.pos;
+        let (center_x, center_y) = (width * self.pos.0, height * self.pos.1);
         let mut dist_center: f32 = 0.0;
         let dist_end: f32 = {
             let mut x = center_x;
@@ -266,10 +233,10 @@ impl Transition {
         outputs: &mut Vec<String>,
         sender: &SyncSender<(Vec<String>, ReadiedPack)>,
         stop_recv: &mpsc::Receiver<Vec<String>>,
-    ) -> bool {
+    ) {
         let fps = self.fps;
         let (width, height) = (self.dimensions.0 as f32, self.dimensions.1 as f32);
-        let (center_x, center_y) = self.pos;
+        let (center_x, center_y) = (width * self.pos.0, height * self.pos.1);
         let mut dist_center = {
             let mut x = center_x;
             let mut y = center_y;
@@ -313,84 +280,6 @@ impl Transition {
         }
         self.simple(new_img, outputs, sender, stop_recv)
     }
-
-    // aliases
-
-    fn any(
-        mut self,
-        new_img: &[u8],
-        outputs: &mut Vec<String>,
-        sender: &SyncSender<(Vec<String>, ReadiedPack)>,
-        stop_recv: &mpsc::Receiver<Vec<String>>,
-    ) -> bool {
-        self.pos = (
-            (rand::random::<u32>() % self.dimensions.0) as f32,
-            (rand::random::<u32>() % self.dimensions.1) as f32,
-        );
-        match rand::random::<u8>() % 2 {
-            0 => self.grow(new_img, outputs, sender, stop_recv),
-            1 => self.outer(new_img, outputs, sender, stop_recv),
-            _ => unreachable!(),
-        }
-    }
-
-    fn center(
-        mut self,
-        new_img: &[u8],
-        outputs: &mut Vec<String>,
-        sender: &SyncSender<(Vec<String>, ReadiedPack)>,
-        stop_recv: &mpsc::Receiver<Vec<String>>,
-    ) -> bool {
-        self.pos = (
-            (self.dimensions.0 / 2) as f32,
-            (self.dimensions.1 / 2) as f32,
-        );
-        self.grow(new_img, outputs, sender, stop_recv)
-    }
-
-    fn right(
-        mut self,
-        new_img: &[u8],
-        outputs: &mut Vec<String>,
-        sender: &SyncSender<(Vec<String>, ReadiedPack)>,
-        stop_recv: &mpsc::Receiver<Vec<String>>,
-    ) -> bool {
-        self.angle = 0.0;
-        self.wipe(new_img, outputs, sender, stop_recv)
-    }
-
-    fn left(
-        mut self,
-        new_img: &[u8],
-        outputs: &mut Vec<String>,
-        sender: &SyncSender<(Vec<String>, ReadiedPack)>,
-        stop_recv: &mpsc::Receiver<Vec<String>>,
-    ) -> bool {
-        self.angle = 180.0;
-        self.wipe(new_img, outputs, sender, stop_recv)
-    }
-
-    fn top(
-        mut self,
-        new_img: &[u8],
-        outputs: &mut Vec<String>,
-        sender: &SyncSender<(Vec<String>, ReadiedPack)>,
-        stop_recv: &mpsc::Receiver<Vec<String>>,
-    ) -> bool {
-        self.angle = 90.0;
-        self.wipe(new_img, outputs, sender, stop_recv)
-    }
-
-    fn bottom(
-        mut self,
-        new_img: &[u8],
-        outputs: &mut Vec<String>,
-        sender: &SyncSender<(Vec<String>, ReadiedPack)>,
-        stop_recv: &mpsc::Receiver<Vec<String>>,
-    ) -> bool {
-        self.angle = 270.0;
-        self.wipe(new_img, outputs, sender, stop_recv)
-    }
 }
 
 fn change_cols(step: u8, old: &mut [u8; 4], new: [u8; 4]) {
@@ -402,50 +291,6 @@ fn change_cols(step: u8, old: &mut [u8; 4], new: [u8; 4]) {
         } else {
             *old_col += step;
         }
-    }
-}
-
-pub struct GifProcessor {
-    gif: GifDecoder<BufReader<File>>,
-    dimensions: (u32, u32),
-    filter: FilterType,
-}
-
-impl GifProcessor {
-    pub fn new(
-        gif: GifDecoder<BufReader<File>>,
-        dimensions: (u32, u32),
-        filter: FilterType,
-    ) -> Self {
-        GifProcessor {
-            gif,
-            dimensions,
-            filter,
-        }
-    }
-    pub fn process(self, first_frame: &[u8], fr_sender: &mpsc::Sender<(BitPack, Duration)>) {
-        let mut frames = self.gif.into_frames();
-
-        //The first frame should always exist
-        let dur_first_frame = frames.next().unwrap().unwrap().delay().numer_denom_ms();
-        let dur_first_frame = Duration::from_millis((dur_first_frame.0 / dur_first_frame.1).into());
-
-        let canvas = &mut first_frame.to_owned();
-        while let Some(Ok(frame)) = frames.next() {
-            let (dur_num, dur_div) = frame.delay().numer_denom_ms();
-            let duration = Duration::from_millis((dur_num / dur_div).into());
-
-            // Unwrapping is fine because only the thread will panic in the worst case
-            // scenario, not the main loop
-            let img = img_resize(frame.into_buffer(), self.dimensions, self.filter).unwrap();
-
-            let pack = BitPack::pack(canvas, &img);
-            if fr_sender.send((pack, duration)).is_err() {
-                return;
-            };
-        }
-        //Add the first frame we got earlier:
-        let _ = fr_sender.send((BitPack::pack(canvas, first_frame), dur_first_frame));
     }
 }
 
@@ -479,17 +324,17 @@ mod tests {
     }
 
     fn test_transition(old_img: Box<[u8]>, transition_type: TransitionType) -> Transition {
-        Transition::new(
+        Transition {
             old_img,
-            (100, 10),
             transition_type,
-            2.0,
-            100,
-            Duration::from_nanos(1),
-            0.0,
-            (0.0, 0.0),
-            BezierCurve::from(Vector2 { x: 1.0, y: 0.0 }, Vector2 { x: 0.0, y: 1.0 }),
-        )
+            dimensions: (100, 10),
+            duration: 2.0,
+            step: 100,
+            fps: Duration::from_nanos(1),
+            angle: 0.0,
+            pos: (0.0, 0.0),
+            bezier: BezierCurve::from(Vector2 { x: 1.0, y: 0.0 }, Vector2 { x: 0.0, y: 1.0 }),
+        }
     }
 
     fn dummy_outputs() -> Vec<String> {
@@ -501,14 +346,9 @@ mod tests {
         use TransitionType as TT;
         let transitions = [
             TT::Simple,
-            TT::Left,
-            TT::Right,
-            TT::Bottom,
-            TT::Top,
-            TT::Center,
+            TT::Wipe,
             TT::Outer,
-            TT::Any,
-            TT::Random,
+            TT::Grow,
         ];
         for transition in transitions {
             let ((fr_send, fr_recv), (_stop_send, stop_recv)) = make_senders_and_receivers();
@@ -526,7 +366,7 @@ mod tests {
                 i.unpack(&mut transition_img);
             }
 
-            assert!(handle.join().unwrap_or_else(|_| panic!("{:?}", transition)));
+            assert!(handle.join().is_ok());
             for (tpix, npix) in transition_img.chunks_exact(4).zip(new_img.chunks_exact(4)) {
                 assert_eq!(
                     tpix[0..3],

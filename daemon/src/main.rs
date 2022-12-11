@@ -1,5 +1,4 @@
 use log::{debug, error, info, warn};
-use serde::{Deserialize, Serialize};
 use simplelog::{ColorChoice, LevelFilter, TermLogger, TerminalMode, ThreadLogMode};
 
 use smithay_client_toolkit::{
@@ -25,70 +24,25 @@ use smithay_client_toolkit::{
 
 use std::{
     cell::{Cell, RefCell, RefMut},
-    fmt, fs,
+    fs,
     os::unix::net::{UnixListener, UnixStream},
-    path::PathBuf,
     rc::Rc,
 };
 
-use crate::cli::{Clear, Img, Swww};
-use crate::Answer;
+use utils::{
+    communication::{get_socket_path, Answer, BgImg, BgInfo, Clear, Img, Request},
+    comp_decomp::ReadiedPack,
+};
 
 mod processor;
 mod wayland;
 
-use processor::{comp_decomp::ReadiedPack, Processor, ProcessorRequest};
+use processor::{ImgWithDim, Processor};
 
 #[derive(PartialEq, Copy, Clone)]
 enum RenderEvent {
     Configure { width: u32, height: u32 },
     Closed,
-}
-
-#[derive(PartialEq, Clone, Serialize, Deserialize)]
-enum BgImg {
-    Color([u8; 3]),
-    Img(PathBuf),
-}
-
-impl fmt::Display for BgImg {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            BgImg::Color(color) => write!(f, "color: {}{}{}", color[0], color[1], color[2]),
-            BgImg::Img(p) => write!(
-                f,
-                "image: {:#?}",
-                p.file_name().unwrap_or_else(|| std::ffi::OsStr::new("?"))
-            ),
-        }
-    }
-}
-
-#[derive(Clone, Serialize, Deserialize)]
-pub struct BgInfo {
-    name: String,
-    dim: (u32, u32),
-    scale_factor: i32,
-    img: BgImg,
-}
-
-impl BgInfo {
-    fn real_dim(&self) -> (u32, u32) {
-        (
-            self.dim.0 * self.scale_factor as u32,
-            self.dim.1 * self.scale_factor as u32,
-        )
-    }
-}
-
-impl fmt::Display for BgInfo {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}: {}x{}, scale: {}, currently displaying: {}",
-            self.name, self.dim.0, self.dim.1, self.scale_factor, self.img
-        )
-    }
 }
 
 struct Bg {
@@ -219,7 +173,9 @@ impl Bg {
             .pool
             .buffer(0, width, height, stride, wl_shm::Format::Xrgb8888);
         let canvas = self.pool.mmap();
-        img.unpack(canvas);
+        if !img.unpack(canvas) {
+            error!("buf_len different from expected_buf_size");
+        }
         debug!("Decompressed img.");
 
         self.surface.attach(Some(&buffer), 0, 0);
@@ -243,13 +199,13 @@ impl Drop for Bg {
     }
 }
 
-pub fn main() {
+fn main() -> Result<(), String> {
     make_logger();
 
-    let listener = make_socket();
+    let listener = make_socket()?;
     debug!(
         "Made socket in {:?} and initalized logger. Starting daemon...",
-        listener.local_addr().unwrap()
+        listener.local_addr().unwrap() //this should aways work if the socket connected correctly
     );
 
     let (env, display, queue) = wayland::make_wayland_environment();
@@ -280,23 +236,20 @@ pub fn main() {
         env.listen_for_outputs(move |output, info, _| output_handler(output, info));
 
     //NOTE: we can't move display into the function because it causes a segfault
-    if let Err(e) = main_loop(&bgs, queue, &display, listener) {
-        error!("{}", e);
-    } else {
-        info!("Finished running event loop.");
-    }
+    main_loop(&bgs, queue, &display, listener)?;
+    info!("Finished running event loop.");
 
-    let socket_addr = crate::communication::get_socket_path();
+    let socket_addr = get_socket_path();
     if let Err(e) = fs::remove_file(&socket_addr) {
-        error!(
+        return Err(format!(
             "Failed to remove socket at {:?} after closing unexpectedly: {}",
             socket_addr, e
-        );
-    } else {
-        info!("Removed socket at {:?}", socket_addr);
+        ));
     }
+    info!("Removed socket at {:?}", socket_addr);
 
     info!("Goodbye!");
+    Ok(())
 }
 
 fn make_logger() {
@@ -352,17 +305,26 @@ fn create_backgrounds(
     }
 }
 
-fn make_socket() -> UnixListener {
-    let socket_addr = crate::communication::get_socket_path();
-    let runtime_dir = socket_addr
-        .parent()
-        .expect("couldn't find a valid runtime directory");
+fn make_socket() -> Result<UnixListener, String> {
+    let socket_addr = get_socket_path();
+    let runtime_dir = match socket_addr.parent() {
+        Some(path) => path,
+        None => return Err("couldn't find a valid runtime directory".to_owned()),
+    };
 
     if !runtime_dir.exists() {
-        fs::create_dir(runtime_dir).expect("Failed to create runtime dir...");
+        match fs::create_dir(runtime_dir) {
+            Ok(()) => (),
+            Err(e) => return Err(format!("failed to create runtime dir: {}", e)),
+        }
     }
 
-    UnixListener::bind(socket_addr).expect("Couldn't bind socket")
+    let listener = match UnixListener::bind(socket_addr) {
+        Ok(address) => address,
+        Err(e) => return Err(format!("couldn't bind socket: {}", e)),
+    };
+
+    Ok(listener)
 }
 
 fn register_signals(handle: &LoopHandle<LoopSignal>) -> Result<(), String> {
@@ -399,7 +361,9 @@ fn register_socket<'a>(
     processor: &'a Rc<RefCell<Processor>>,
     listener: UnixListener,
 ) -> Result<(), String> {
-    listener.set_nonblocking(true).unwrap();
+    if let Err(e) = listener.set_nonblocking(true) {
+        return Err(format!("failed to set nonblocking mode for socket: {}", e));
+    };
     if let Err(e) = handle.insert_source(
         calloop::generic::Generic::new(listener, calloop::Interest::READ, calloop::Mode::Level),
         |_, listener, loop_signal| {
@@ -488,36 +452,66 @@ fn recv_socket_msg(
     loop_signal: &calloop::LoopSignal,
     proc: &mut Processor,
 ) -> Result<(), String> {
-    let request = Swww::receive(&mut stream);
+    let request = Request::receive(&mut stream);
     let answer = match request {
-        Ok(Swww::Clear(clear)) => clear_outputs(&mut bgs, &clear, proc),
-        Ok(Swww::Kill) => {
+        Ok(Request::Animation(animations)) => {
+            let mut result = Answer::Ok;
+            for animation in &animations {
+                for output in &animation.1 {
+                    if !bgs.iter().any(|bg| &bg.info.name == output) {
+                        result = Answer::Err(format!("Output {} doesn't exit", output));
+                        break;
+                    }
+                }
+            }
+            if matches!(result, Answer::Err(_)) {
+                result
+            } else {
+                for animation in animations {
+                    let bg = bgs.iter().find(|bg| animation.1.contains(&bg.info.name));
+                    if bg.is_none() {
+                        continue;
+                    }
+                    //unwraping is fine because we test it above
+                    let dim = bg.unwrap().info.real_dim();
+                    let size = dim.0 as usize * dim.1 as usize * 4;
+                    if let Answer::Err(e) = proc.animate(animation.0, animation.1, size) {
+                        result = Answer::Err(e);
+                    }
+                }
+                result
+            }
+        }
+        Ok(Request::Clear(clear)) => clear_outputs(&mut bgs, &clear, proc),
+        Ok(Request::Kill) => {
             loop_signal.stop();
             Answer::Ok
         }
-        Ok(Swww::Img(img)) => send_processor_request(proc, &mut bgs, &img),
-        Ok(Swww::Init { .. }) => Answer::Ok,
-        Ok(Swww::Query) => Answer::Info(bgs.iter().map(|bg| bg.info.clone()).collect()),
+        Ok(Request::Img(img)) => {
+            let old_imgs = get_old_imgs(&mut bgs, &img.1);
+            if old_imgs.len() != img.1.len() {
+                Answer::Err("Daemon received request for outputs that don't exist".to_string())
+            } else {
+                proc.transition(&img.0, img.1, old_imgs)
+            }
+        }
+        Ok(Request::Init { .. }) => Answer::Ok,
+        Ok(Request::Query) => Answer::Info(bgs.iter().map(|bg| bg.info.clone()).collect()),
         Err(e) => Answer::Err(e),
     };
     answer.send(&stream)
 }
 
-fn send_processor_request(proc: &mut Processor, bgs: &mut RefMut<Vec<Bg>>, img: &Img) -> Answer {
-    let requests = make_processor_requests(bgs, img);
-    if requests.is_empty() {
-        error!("None of the outputs sent were valid.");
-        Answer::Err("none of the outputs sent are valid.".to_string())
-    } else {
-        let answer = proc.process(requests);
-        if let Answer::Ok = answer {
-            let outputs = get_real_outputs(bgs, &img.outputs);
-            bgs.iter_mut()
-                .filter(|bg| outputs.iter().any(|o| o == &bg.info.name))
-                .for_each(|bg| bg.info.img = BgImg::Img(img.path.clone()));
+fn get_old_imgs(bgs: &mut RefMut<Vec<Bg>>, imgs: &[(Img, Vec<String>)]) -> Vec<ImgWithDim> {
+    let mut v = Vec::with_capacity(imgs.len());
+
+    for (_, outputs) in imgs {
+        if let Some(bg) = bgs.iter_mut().find(|bg| bg.info.name == outputs[0]) {
+            v.push((bg.get_current_img().into(), bg.info.real_dim()));
         }
-        answer
     }
+
+    v
 }
 
 fn handle_recv_img(bgs: &mut RefMut<Vec<Bg>>, msg: &(Vec<String>, ReadiedPack)) {
@@ -530,50 +524,15 @@ fn handle_recv_img(bgs: &mut RefMut<Vec<Bg>>, msg: &(Vec<String>, ReadiedPack)) 
         .for_each(|bg| bg.draw(img));
 }
 
-///Returns one request per output with same dimensions and current image
-fn make_processor_requests(bgs: &mut RefMut<Vec<Bg>>, img: &Img) -> Vec<ProcessorRequest> {
-    let outputs = get_real_outputs(bgs, &img.outputs);
-    let mut groups: Vec<(ProcessorRequest, &BgImg)> = Vec::with_capacity(outputs.len());
-    bgs.iter_mut()
-        .filter(|bg| outputs.contains(&bg.info.name))
-        .for_each(|bg| {
-            if let Some(i) = groups
-                .iter()
-                .position(|g| bg.info.real_dim() == g.0.dim() && bg.info.img == *g.1)
-            {
-                groups[i].0.add_output(&bg.info.name);
-            } else {
-                let old_img = Box::from(bg.get_current_img());
-                groups.push((ProcessorRequest::new(&bg.info, old_img, img), &bg.info.img));
-            }
-        });
-    groups.into_iter().map(|g| g.0).collect()
-}
-
-///Return only the outputs that actually exist
-///Also puts in all outputs if an empty string was offered
-fn get_real_outputs(bgs: &RefMut<Vec<Bg>>, outputs: &str) -> Vec<String> {
-    //An empty line means all outputs
-    if outputs.is_empty() {
-        bgs.iter().map(|bg| bg.info.name.clone()).collect()
-    } else {
-        outputs
-            .split(',')
-            .filter(|o| bgs.iter().any(|bg| o == &bg.info.name))
-            .map(ToString::to_string)
-            .collect()
-    }
-}
-
+//TODO: error when no output was valid
 fn clear_outputs(bgs: &mut RefMut<Vec<Bg>>, clear: &Clear, proc: &mut Processor) -> Answer {
-    let outputs = get_real_outputs(bgs, &clear.outputs);
-    if outputs.is_empty() {
-        Answer::Err("None of the specified outputs exist!".to_string())
+    proc.stop_animations(&clear.outputs);
+    if clear.outputs.is_empty() {
+        bgs.iter_mut().for_each(|bg| bg.clear(clear.color));
     } else {
-        proc.stop_animations(&outputs);
         bgs.iter_mut()
-            .filter(|bg| outputs.contains(&bg.info.name))
+            .filter(|bg| clear.outputs.contains(&bg.info.name))
             .for_each(|bg| bg.clear(clear.color));
-        Answer::Ok
     }
+    Answer::Ok
 }
