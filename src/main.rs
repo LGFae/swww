@@ -1,9 +1,15 @@
 use clap::Parser;
 use fast_image_resize::{FilterType, PixelType, Resizer};
-use image::{codecs::gif::GifDecoder, AnimationDecoder};
+use image::{codecs::gif::GifDecoder, AnimationDecoder, RgbaImage};
 use std::{
-    fs::File, io::BufReader, num::NonZeroU32, os::unix::net::UnixStream, path::PathBuf,
-    process::Stdio, thread::JoinHandle, time::Duration,
+    fs::File,
+    io::{stdin, BufReader, Read},
+    num::NonZeroU32,
+    os::unix::net::UnixStream,
+    path::{Path, PathBuf},
+    process::Stdio,
+    thread::JoinHandle,
+    time::Duration,
 };
 
 use utils::{
@@ -88,15 +94,7 @@ fn make_request(args: &Swww) -> Result<Request, String> {
         Swww::Img(img) => {
             let requested_outputs = split_cmdline_outputs(&img.outputs);
             let (dims, outputs) = get_dimensions_and_outputs(requested_outputs)?;
-            let imgbuf = match image::io::Reader::open(&img.path) {
-                Ok(img) => img,
-                Err(e) => return Err(format!("failed to open image: {}", e)),
-            };
-            let is_gif = imgbuf.format() == Some(image::ImageFormat::Gif);
-            let img_raw = match imgbuf.decode() {
-                Ok(img) => img.into_rgba8(),
-                Err(e) => return Err(format!("failed to decode image: {}", e)),
-            };
+            let (img_raw, is_gif) = read_img(&img.path)?;
             let img_request = make_img_request(img, img_raw, &dims, &outputs)?;
             if is_gif {
                 let animations = make_animation_request(img, &dims, &outputs);
@@ -123,6 +121,31 @@ fn split_cmdline_outputs(outputs: &str) -> Vec<String> {
         .map(|s| s.to_owned())
         .filter(|s| !s.is_empty())
         .collect()
+}
+
+fn read_img(path: &Path) -> Result<(RgbaImage, bool), String> {
+    if let Some("-") = path.to_str() {
+        let mut reader = BufReader::new(stdin());
+        let mut buffer = Vec::new();
+        if let Err(e) = reader.read_to_end(&mut buffer) {
+            return Err(format!("failed to read stdin: {}", e));
+        }
+
+        return match image::load_from_memory(&buffer) {
+            Ok(img) => Ok((img.into_rgba8(), false)),
+            Err(e) => return Err(format!("failed load image from memory: {}", e)),
+        };
+    }
+
+    let imgbuf = match image::io::Reader::open(path) {
+        Ok(img) => img,
+        Err(e) => return Err(format!("failed to open image: {}", e)),
+    };
+    let is_gif = imgbuf.format() == Some(image::ImageFormat::Gif);
+    match imgbuf.decode() {
+        Ok(img) => Ok((img.into_rgba8(), is_gif)),
+        Err(e) => Err(format!("failed to decode image: {}", e)),
+    }
 }
 
 fn make_img_request(

@@ -114,6 +114,8 @@ pub enum Swww {
     Clear(Clear),
 
     /// Send an image (or animated gif) for the daemon to display.
+    ///
+    /// Use `-` to read from stdin
     Img(Img),
 
     /// Initialize the daemon.
