@@ -106,13 +106,6 @@ pub enum Request {
 
 impl Request {
     pub fn send(&mut self, stream: &UnixStream) -> Result<(), String> {
-        if let Request::Animation(vec) = self {
-            // don't send the animation request if we only have one frame
-            if vec.len() == 1 {
-                return Ok(());
-            }
-        }
-
         let writer = BufWriter::new(stream);
         match bincode::serialize_into(writer, self) {
             Ok(()) => Ok(()),

@@ -92,6 +92,10 @@ impl Processor {
                     std::thread::yield_now();
                 }
                 let mut now = std::time::Instant::now();
+                /* We only need to animate if we have > 1 frame */
+                if animation.animation.len() == 1 {
+                    return;
+                }
                 for (frame, duration) in animation.animation.iter().cycle() {
                     let frame = frame.ready(output_size);
                     let timeout = duration.saturating_sub(now.elapsed());
