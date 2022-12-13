@@ -347,6 +347,7 @@ fn make_transition(img: &cli::Img) -> communication::Transition {
         cli::TransitionType::Wipe => communication::TransitionType::Wipe,
         cli::TransitionType::Outer => communication::TransitionType::Outer,
         cli::TransitionType::Grow => communication::TransitionType::Grow,
+        cli::TransitionType::Math => communication::TransitionType::Math,
         cli::TransitionType::Right => {
             angle = 0.0;
             communication::TransitionType::Wipe

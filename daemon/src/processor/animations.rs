@@ -81,6 +81,7 @@ impl Transition {
             TransitionType::Wipe => self.wipe(new_img, outputs, sender, stop_recv),
             TransitionType::Grow => self.grow(new_img, outputs, sender, stop_recv),
             TransitionType::Outer => self.outer(new_img, outputs, sender, stop_recv),
+            TransitionType::Math => self.math(new_img, outputs, sender, stop_recv),
         }
     }
 
@@ -108,6 +109,69 @@ impl Transition {
             send_transition_frame!(transition_img, outputs, now, fps, sender, stop_recv);
             now = Instant::now();
         }
+    }
+
+    fn math(
+        mut self,
+        new_img: &[u8],
+        outputs: &mut Vec<String>,
+        sender: &SyncSender<(Vec<String>, ReadiedPack)>,
+        stop_recv: &mpsc::Receiver<Vec<String>>,
+    ) {
+        let fps = self.fps;
+        let width = self.dimensions.0;
+        let height = self.dimensions.1;
+        let mut now = Instant::now();
+        let center = (width / 2, height / 2);
+        let screen_diag = ((width.pow(2) + height.pow(2)) as f64).sqrt();
+
+        let circle_radius = screen_diag / 2.0;
+        let max_offset = screen_diag;
+
+        let angle = self.angle.to_radians();
+
+        let mut offset = -circle_radius;
+
+        // line formula: (x-h)*a + (y-k)*b + C = r^2
+        // https://www.desmos.com/calculator/vpvzk12yar
+        //
+        // checks if a pixel is to the left or right of the line
+        let is_low = |pix_x: f64, pix_y: f64, offset: f64| {
+            let h = center.0 as f64;
+            let k = center.1 as f64;
+            let x = pix_x - center.0 as f64;
+            let y = pix_y - center.1 as f64;
+            let f = h-h*angle.cos() + x*angle.cos() - k * angle.sin() + y*angle.sin();
+            let rhs = f.sin() + circle_radius - offset;
+            let lhs = k-k*angle.cos() + y*angle.cos() + h*angle.sin() - x*angle.sin() - k;
+            lhs >= rhs
+        };
+
+        let (mut seq, start) = self.bezier_seq(0.0, max_offset as f32);
+
+        let step = self.step;
+
+        loop {
+            let transition_img =
+                ReadiedPack::new(&mut self.old_img, new_img, |old_pix, new_pix, i| {
+                    let width = width as usize;
+                    let height = height as usize;
+                    let pix_x = i % width;
+                    let pix_y = height - i / width;
+                    if is_low(pix_x as f64, pix_y as f64, offset) {
+                        change_cols(step, old_pix, *new_pix);
+                    }
+                });
+            send_transition_frame!(transition_img, outputs, now, fps, sender, stop_recv);
+            now = Instant::now();
+
+            offset = seq.now() as f64;
+            seq.advance_to(start.elapsed().as_secs_f64());
+            if start.elapsed().as_secs_f64() >= seq.duration() {
+                break;
+            }
+        }
+        self.simple(new_img, outputs, sender, stop_recv)
     }
 
     fn wipe(

@@ -73,6 +73,7 @@ pub enum TransitionType {
     Outer,
     Wipe,
     Grow,
+    Math,
 }
 
 #[derive(Serialize, Deserialize, Clone)]

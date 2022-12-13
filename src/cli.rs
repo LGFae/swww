@@ -74,6 +74,7 @@ pub enum TransitionType {
     Any,
     Random,
     Wipe,
+    Math,
     Grow,
 }
 
@@ -92,9 +93,10 @@ impl std::str::FromStr for TransitionType {
             "center" => Ok(Self::Center),
             "outer" => Ok(Self::Outer),
             "any" => Ok(Self::Any),
+            "math" => Ok(Self::Math),
             "random" => Ok(Self::Random),
             _ => Err("unrecognized transition type.\nValid transitions are:\n\
-                     \tsimple | left | right | top | bottom | wipe | grow | center | outer | random\n\
+                     \tsimple | left | right | top | bottom | wipe | grow | center | outer | random | math\n\
                      see swww img --help for more details"),
         }
     }
