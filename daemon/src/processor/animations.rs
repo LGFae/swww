@@ -126,28 +126,24 @@ impl Transition {
         let screen_diag = ((width.pow(2) + height.pow(2)) as f64).sqrt();
 
         let circle_radius = screen_diag / 2.0;
-        let max_offset = screen_diag;
+        let max_offset = 2.0 * circle_radius;
 
         let angle = self.angle.to_radians();
 
-        let mut offset = -circle_radius;
+        let mut offset = 0.0;
 
         // line formula: (x-h)*a + (y-k)*b + C = r^2
         // https://www.desmos.com/calculator/vpvzk12yar
         //
         // checks if a pixel is to the left or right of the line
-        let is_low = |pix_x: f64, pix_y: f64, offset: f64| {
+        
+        let is_low = |x: f64, y: f64, offset: f64| {
             let h = center.0 as f64;
             let k = center.1 as f64;
-            let x = pix_x - center.0 as f64;
-            let y = pix_y - center.1 as f64;
-            let f = h-h*angle.cos() + x*angle.cos() - k * angle.sin() + y*angle.sin();
-            let rhs = f.sin() + circle_radius - offset;
-            let lhs = k-k*angle.cos() + y*angle.cos() + h*angle.sin() - x*angle.sin() - k;
-            lhs >= rhs
+            y*angle.cos() - k*angle.cos() + h*angle.sin() - x*angle.sin() >= (h - h*angle.cos() + x*angle.cos() - k*angle.sin() + y*angle.sin()).sin() + circle_radius - offset
         };
 
-        let (mut seq, start) = self.bezier_seq(0.0, max_offset as f32);
+        let (mut seq, start) = self.bezier_seq(offset as f32, max_offset as f32);
 
         let step = self.step;
 
@@ -171,7 +167,6 @@ impl Transition {
                 break;
             }
         }
-        self.simple(new_img, outputs, sender, stop_recv)
     }
 
     fn wipe(
