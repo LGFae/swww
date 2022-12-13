@@ -10,6 +10,7 @@ smithay-client-toolkit = { version = "0.16", default-features = false, features 
 log = { version = "0.4", features = ["max_level_debug", "release_max_level_info"] }
 simplelog = "0.12"
 keyframe = "1.1.1"
+meval = "0.2"
 
 utils = { path = "../utils" }
 

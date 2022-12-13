@@ -37,6 +37,7 @@ pub struct Transition {
     angle: f64,
     pos: (f32, f32),
     bezier: BezierCurve,
+    scale: (f32, f32),
 }
 
 /// All transitions return whether or not they completed
@@ -65,6 +66,7 @@ impl Transition {
                     y: transition.bezier.3,
                 },
             ),
+            scale: transition.scale
         }
     }
 
@@ -81,7 +83,7 @@ impl Transition {
             TransitionType::Wipe => self.wipe(new_img, outputs, sender, stop_recv),
             TransitionType::Grow => self.grow(new_img, outputs, sender, stop_recv),
             TransitionType::Outer => self.outer(new_img, outputs, sender, stop_recv),
-            TransitionType::Math => self.math(new_img, outputs, sender, stop_recv),
+            TransitionType::Wave => self.wave(new_img, outputs, sender, stop_recv),
         }
     }
 
@@ -111,7 +113,7 @@ impl Transition {
         }
     }
 
-    fn math(
+    fn wave(
         mut self,
         new_img: &[u8],
         outputs: &mut Vec<String>,
@@ -125,23 +127,42 @@ impl Transition {
         let center = (width / 2, height / 2);
         let screen_diag = ((width.pow(2) + height.pow(2)) as f64).sqrt();
 
-        let circle_radius = screen_diag / 2.0;
-        let max_offset = 2.0 * circle_radius;
-
         let angle = self.angle.to_radians();
+        let (scale_x,scale_y) = (self.scale.0 as f64, self.scale.1 as f64);
 
-        let mut offset = 0.0;
+        let circle_radius = screen_diag / 2.0;
+        
 
-        // line formula: (x-h)*a + (y-k)*b + C = r^2
-        // https://www.desmos.com/calculator/vpvzk12yar
+        let f = |x:f64| {
+            (x/scale_x).sin()*scale_y 
+        };
+
+        // graph: https://www.desmos.com/calculator/wunde042es
         //
         // checks if a pixel is to the left or right of the line
-        
         let is_low = |x: f64, y: f64, offset: f64| {
             let h = center.0 as f64;
             let k = center.1 as f64;
-            y*angle.cos() - k*angle.cos() + h*angle.sin() - x*angle.sin() >= (h - h*angle.cos() + x*angle.cos() - k*angle.sin() + y*angle.sin()).sin() + circle_radius - offset
+
+            let lhs = y*angle.cos() - k*angle.cos() + h*angle.sin() - x*angle.sin();
+            let rhs = f(h - h*angle.cos() + x*angle.cos() - k*angle.sin() + y*angle.sin()) + circle_radius - offset;
+            lhs >= rhs
         };
+
+        // find the offset to start the transition at
+        let mut offset = {
+            let mut offset = 0.0;
+            for x in 0..width {
+                for y in 0..height {
+                    if is_low(x as f64, y as f64, offset) {
+                        offset += 1.0;
+                        break;
+                    }
+                }
+            }
+            offset
+        };
+        let max_offset = 2.0 * circle_radius - offset;
 
         let (mut seq, start) = self.bezier_seq(offset as f32, max_offset as f32);
 
@@ -167,6 +188,7 @@ impl Transition {
                 break;
             }
         }
+        self.simple(new_img, outputs, sender, stop_recv)
     }
 
     fn wipe(
@@ -393,6 +415,7 @@ mod tests {
             angle: 0.0,
             pos: (0.0, 0.0),
             bezier: BezierCurve::from(Vector2 { x: 1.0, y: 0.0 }, Vector2 { x: 0.0, y: 1.0 }),
+            scale: (20.0,20.0)
         }
     }
 
