@@ -263,7 +263,6 @@ pub struct Img {
     #[arg(long, env = "SWWW_TRANSITION_BEZIER", default_value = ".54,0,.34,.99", value_parser = parse_bezier)]
     pub transition_bezier: (f32, f32, f32, f32),
 
-
     ///currently only used for 'wave' transition to control the width and height of each wave
     #[arg(long, env = "SWWW_TRANSITION_SCALE", default_value = "20,20", value_parser = parse_scale)]
     pub transition_scale: (f32, f32),
