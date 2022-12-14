@@ -138,11 +138,11 @@ impl Transition {
         //
         // checks if a pixel is to the left or right of the line
         let is_low = |x: f64, y: f64, offset: f64| {
-            let h = center.0 as f64;
-            let k = center.1 as f64;
-
-            let lhs = y * angle.cos() - k * angle.cos() + h * angle.sin() - x * angle.sin();
-            let rhs = f(h - h * angle.cos() + x * angle.cos() - k * angle.sin() + y * angle.sin())
+            let x = x - center.0 as f64;
+            let y = y - center.1 as f64;
+            
+            let lhs = y * angle.cos() - x * angle.sin();
+            let rhs = f(x * angle.cos() + y * angle.sin())
                 + circle_radius
                 - offset;
             lhs >= rhs
