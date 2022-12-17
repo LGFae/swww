@@ -1,3 +1,5 @@
+Use clap ValueEnum for our enums. Also use arggroup to deny invalid arguments
+
 When changing the scale, the image does not resize automatically
 
 Fully automated, complete testing, for every option

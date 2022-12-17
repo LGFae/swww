@@ -167,6 +167,12 @@ pub struct Img {
     #[arg(short, long, default_value = "")]
     pub outputs: String,
 
+    #[arg(long)]
+    pub no_resize: bool,
+
+    #[arg(value_parser = from_hex, long, default_value = "000000")]
+    pub fill_color: [u8; 3],
+
     ///Filter to use when scaling images (run swww img --help to see options).
     ///
     ///Note that image scaling can sometimes significantly increase RAM usage. If you want to use
