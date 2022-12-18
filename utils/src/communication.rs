@@ -85,7 +85,7 @@ pub struct Transition {
     pub angle: f64,
     pub pos: (f32, f32),
     pub bezier: (f32, f32, f32, f32),
-    pub scale: (f32, f32),
+    pub wave: (f32, f32),
 }
 
 #[derive(Serialize, Deserialize)]

@@ -264,11 +264,11 @@ pub struct Img {
     pub transition_bezier: (f32, f32, f32, f32),
 
     ///currently only used for 'wave' transition to control the width and height of each wave
-    #[arg(long, env = "SWWW_TRANSITION_SCALE", default_value = "20,20", value_parser = parse_scale)]
-    pub transition_scale: (f32, f32),
+    #[arg(long, env = "SWWW_TRANSITION_WAVE", default_value = "20,20", value_parser = parse_wave)]
+    pub transition_wave: (f32, f32),
 }
 
-fn parse_scale(raw: &str) -> Result<(f32, f32), String> {
+fn parse_wave(raw: &str) -> Result<(f32, f32), String> {
     let mut iter = raw.split(',');
     let mut parse = || {
         iter.next()

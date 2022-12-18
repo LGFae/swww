@@ -37,7 +37,7 @@ pub struct Transition {
     angle: f64,
     pos: (f32, f32),
     bezier: BezierCurve,
-    scale: (f32, f32),
+    wave: (f32, f32),
 }
 
 /// All transitions return whether or not they completed
@@ -66,7 +66,7 @@ impl Transition {
                     y: transition.bezier.3,
                 },
             ),
-            scale: transition.scale,
+            wave: transition.wave,
         }
     }
 
@@ -128,7 +128,7 @@ impl Transition {
         let screen_diag = ((width.pow(2) + height.pow(2)) as f64).sqrt();
 
         let angle = self.angle.to_radians();
-        let (scale_x, scale_y) = (self.scale.0 as f64, self.scale.1 as f64);
+        let (scale_x, scale_y) = (self.wave.0 as f64, self.wave.1 as f64);
 
         let circle_radius = screen_diag / 2.0;
 
@@ -414,7 +414,7 @@ mod tests {
             angle: 0.0,
             pos: (0.0, 0.0),
             bezier: BezierCurve::from(Vector2 { x: 1.0, y: 0.0 }, Vector2 { x: 0.0, y: 1.0 }),
-            scale: (20.0, 20.0),
+            wave: (20.0, 20.0),
         }
     }
 

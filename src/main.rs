@@ -397,7 +397,7 @@ fn make_transition(img: &cli::Img) -> communication::Transition {
         angle,
         pos,
         transition_type,
-        scale: img.transition_scale,
+        wave: img.transition_wave,
     }
 }
 
