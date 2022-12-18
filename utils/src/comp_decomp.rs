@@ -182,7 +182,9 @@ impl ReadiedPack {
     ///expected_buf_size`
     pub fn unpack(&self, buf: &mut [u8]) -> bool {
         if buf.len() == self.expected_buf_size {
-            unpack_bytes(buf, &self.inner);
+            if !self.inner.is_empty() {
+                unpack_bytes(buf, &self.inner);
+            }
             true
         } else {
             false
