@@ -25,7 +25,6 @@ image = "0.24"
 fast_image_resize = "2.3"
 clap = { version = "4.0", features = ["derive", "wrap_help", "env"] }
 rand = "0.8"
-meval = "0.2"
 utils = { path = "utils" }
 
 [dev-dependencies]
