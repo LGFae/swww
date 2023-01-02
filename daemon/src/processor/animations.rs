@@ -425,7 +425,7 @@ mod tests {
     #[test]
     fn transitions_should_end_with_equal_vectors() {
         use TransitionType as TT;
-        let transitions = [TT::Simple, TT::Wipe, TT::Outer, TT::Grow];
+        let transitions = [TT::Simple, TT::Wipe, TT::Outer, TT::Grow, TT::Wave];
         for transition in transitions {
             let ((fr_send, fr_recv), (_stop_send, stop_recv)) = make_senders_and_receivers();
             let (old_img, new_img) = make_test_boxes();
