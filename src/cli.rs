@@ -96,7 +96,7 @@ impl std::str::FromStr for TransitionType {
             "wave" => Ok(Self::Wave),
             "random" => Ok(Self::Random),
             _ => Err("unrecognized transition type.\nValid transitions are:\n\
-                     \tsimple | left | right | top | bottom | wipe | grow | center | outer | random | math\n\
+                     \tsimple | left | right | top | bottom | wipe | grow | center | outer | random | wave\n\
                      see swww img --help for more details"),
         }
     }
