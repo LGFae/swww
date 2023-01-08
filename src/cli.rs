@@ -326,11 +326,11 @@ fn parse_coords(raw: &str) -> Result<(f32, f32, bool, bool), String> {
         y = coords[1];
     }
 
-    let parsed_x:f32;
-    let parsed_y:f32;
+    let parsed_x: f32;
+    let parsed_y: f32;
 
-    let mut screencord_x:bool = false;
-    let mut screencord_y:bool = false;
+    let mut screencord_x: bool = false;
+    let mut screencord_y: bool = false;
 
     //parse x coord
     if x.contains('.') {
@@ -350,7 +350,6 @@ fn parse_coords(raw: &str) -> Result<(f32, f32, bool, bool), String> {
             Err(_) => return Err(format!("Invalid x screen coord: {}", x)),
         } as f32;
     }
-    
 
     //parse y coord
     if y.contains('.') {
@@ -370,7 +369,7 @@ fn parse_coords(raw: &str) -> Result<(f32, f32, bool, bool), String> {
             Err(_) => return Err(format!("Invalid y screen coord: {}", y)),
         } as f32;
     }
-    
+
     Ok((parsed_x, parsed_y, screencord_x, screencord_y))
 }
 

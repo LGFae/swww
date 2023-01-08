@@ -55,22 +55,24 @@ impl Transition {
             fps: Duration::from_nanos(1_000_000_000 / transition.fps as u64),
             angle: transition.angle,
             pos: {
-                let x: f32;
-                let y: f32;
 
-                if transition.pos.2 {
-                    x = transition.pos.0;
-                } else {
-                    x = transition.pos.0*dimensions.0 as f32;
-                }
+                let x = {
+                    if transition.pos.2 {
+                        transition.pos.0
+                    } else {
+                        transition.pos.0 * dimensions.0 as f32
+                    }
+                };
 
-                if transition.pos.3 {
-                    y = dimensions.1 as f32 - transition.pos.1;
-                } else {
-                    y = (1.0 - transition.pos.1)*dimensions.1 as f32;
-                }
+                let y = {
+                    if transition.pos.3 {
+                        dimensions.1 as f32 - transition.pos.1
+                    } else {
+                        (1.0 - transition.pos.1) * dimensions.1 as f32
+                    }
+                };
 
-                (x as u32,y as u32)
+                (x as u32, y as u32)
             },
             bezier: BezierCurve::from(
                 Vector2 {
@@ -361,12 +363,7 @@ mod tests {
     #[test]
     fn transitions_should_end_with_equal_vectors() {
         use TransitionType as TT;
-        let transitions = [
-            TT::Simple,
-            TT::Wipe,
-            TT::Outer,
-            TT::Grow,
-        ];
+        let transitions = [TT::Simple, TT::Wipe, TT::Outer, TT::Grow];
         for transition in transitions {
             let ((fr_send, fr_recv), (_stop_send, stop_recv)) = make_senders_and_receivers();
             let (old_img, new_img) = make_test_boxes();

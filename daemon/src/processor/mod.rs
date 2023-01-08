@@ -88,7 +88,12 @@ impl Processor {
             .name("animation".to_string()) //Name our threads  for better log messages
             .stack_size(TSTACK_SIZE) //the default of 2MB is way too overkill for this
             .spawn(move || {
-                while on_going_transitions.read().unwrap().iter().any(|output| outputs.contains(output)) {
+                while on_going_transitions
+                    .read()
+                    .unwrap()
+                    .iter()
+                    .any(|output| outputs.contains(output))
+                {
                     std::thread::yield_now();
                 }
                 let mut now = std::time::Instant::now();
