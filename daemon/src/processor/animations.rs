@@ -65,9 +65,9 @@ impl Transition {
                 }
 
                 if transition.pos.3 {
-                    y = transition.pos.1;
+                    y = dimensions.1 as f32 - transition.pos.1;
                 } else {
-                    y = transition.pos.1*dimensions.1 as f32;
+                    y = (1.0 - transition.pos.1)*dimensions.1 as f32;
                 }
 
                 (x as u32,y as u32)
