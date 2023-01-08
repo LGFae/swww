@@ -370,8 +370,7 @@ fn parse_coords(raw: &str) -> Result<(f32, f32, bool, bool), String> {
             Err(_) => return Err(format!("Invalid y screen coord: {}", y)),
         } as f32;
     }
-
-    println!("parsed coords: ({},{},{},{})", parsed_x, parsed_y, screencord_x, screencord_y);
+    
     Ok((parsed_x, parsed_y, screencord_x, screencord_y))
 }
 
