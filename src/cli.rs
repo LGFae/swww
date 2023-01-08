@@ -253,7 +253,9 @@ pub struct Img {
 
     ///This is only used for the 'grow','outer' transitions. It controls the center of circle (default is 'center').
     ///
-    ///position values are in the format 'x,y' where x and y are in the range [0,1.0] and represent the percentage of screen dimension
+    ///position values are in the format 'x,y' where x and y are floats and in the range [0.0,1.0] and represent the percentage of screen dimension
+    ///
+    ///if the values are not floats then they represent the pixel position on the screen eg: '200,400'
     ///
     ///the value can also be an alias which will set the position accordingly):
     /// 'center' | 'top' | 'left' | 'right' | 'bottom' | 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
