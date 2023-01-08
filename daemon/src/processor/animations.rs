@@ -35,7 +35,7 @@ pub struct Transition {
     step: u8,
     fps: Duration,
     angle: f64,
-    pos: (f32, f32),
+    pos: (u32, u32),
     bezier: BezierCurve,
 }
 
@@ -54,7 +54,24 @@ impl Transition {
             step: transition.step,
             fps: Duration::from_nanos(1_000_000_000 / transition.fps as u64),
             angle: transition.angle,
-            pos: transition.pos,
+            pos: {
+                let x: f32;
+                let y: f32;
+
+                if transition.pos.2 {
+                    x = transition.pos.0;
+                } else {
+                    x = transition.pos.0*dimensions.0 as f32;
+                }
+
+                if transition.pos.3 {
+                    y = transition.pos.1;
+                } else {
+                    y = transition.pos.1*dimensions.1 as f32;
+                }
+
+                (x as u32,y as u32)
+            },
             bezier: BezierCurve::from(
                 Vector2 {
                     x: transition.bezier.0,
@@ -183,7 +200,7 @@ impl Transition {
     ) {
         let fps = self.fps;
         let (width, height) = (self.dimensions.0 as f32, self.dimensions.1 as f32);
-        let (center_x, center_y) = (width * self.pos.0, height * self.pos.1);
+        let (center_x, center_y) = (self.pos.0 as f32, self.pos.1 as f32);
         let mut dist_center: f32 = 0.0;
         let dist_end: f32 = {
             let mut x = center_x;
@@ -236,7 +253,7 @@ impl Transition {
     ) {
         let fps = self.fps;
         let (width, height) = (self.dimensions.0 as f32, self.dimensions.1 as f32);
-        let (center_x, center_y) = (width * self.pos.0, height * self.pos.1);
+        let (center_x, center_y) = (self.pos.0 as f32, self.pos.1 as f32);
         let mut dist_center = {
             let mut x = center_x;
             let mut y = center_y;
@@ -332,7 +349,7 @@ mod tests {
             step: 100,
             fps: Duration::from_nanos(1),
             angle: 0.0,
-            pos: (0.0, 0.0),
+            pos: (0, 0),
             bezier: BezierCurve::from(Vector2 { x: 1.0, y: 0.0 }, Vector2 { x: 0.0, y: 1.0 }),
         }
     }

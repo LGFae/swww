@@ -434,11 +434,11 @@ fn make_transition(img: &cli::Img) -> communication::Transition {
             communication::TransitionType::Wipe
         }
         cli::TransitionType::Center => {
-            pos = (0.5, 0.5);
+            pos = (0.5, 0.5, false, false);
             communication::TransitionType::Grow
         }
         cli::TransitionType::Any => {
-            pos = (rand::random::<f32>(), rand::random::<f32>());
+            pos = (rand::random::<f32>(), rand::random::<f32>(), false, false);
             if rand::random::<u8>() % 2 == 0 {
                 communication::TransitionType::Grow
             } else {
@@ -446,7 +446,7 @@ fn make_transition(img: &cli::Img) -> communication::Transition {
             }
         }
         cli::TransitionType::Random => {
-            pos = (rand::random::<f32>(), rand::random::<f32>());
+            pos = (rand::random::<f32>(), rand::random::<f32>(), false, false);
             angle = rand::random();
             match rand::random::<u8>() % 4 {
                 0 => communication::TransitionType::Simple,

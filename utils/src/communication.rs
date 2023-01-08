@@ -82,7 +82,7 @@ pub struct Transition {
     pub step: u8,
     pub fps: u8,
     pub angle: f64,
-    pub pos: (f32, f32),
+    pub pos: (f32, f32, bool, bool),
     pub bezier: (f32, f32, f32, f32),
 }
 

@@ -258,7 +258,7 @@ pub struct Img {
     ///the value can also be an alias which will set the position accordingly):
     /// 'center' | 'top' | 'left' | 'right' | 'bottom' | 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
     #[arg(long, env = "SWWW_TRANSITION_POS", default_value = "center", value_parser = parse_coords)]
-    pub transition_pos: (f32, f32),
+    pub transition_pos: (f32, f32, bool, bool),
 
     ///bezier curve to use for the transition
     ///https://cubic-bezier.com is a good website to get these values from
@@ -284,47 +284,38 @@ fn parse_bezier(raw: &str) -> Result<(f32, f32, f32, f32), String> {
 }
 
 // parses percentages and numbers in format of "<coord1>,<coord2>"
-fn parse_coords(raw: &str) -> Result<(f32, f32), String> {
+fn parse_coords(raw: &str) -> Result<(f32, f32, bool, bool), String> {
     let coords = raw.split(',').map(|s| s.trim()).collect::<Vec<&str>>();
     let x: &str;
     let y: &str;
     if coords.len() != 2 {
         match coords[0] {
             "center" => {
-                x = "0.5";
-                y = "0.5";
+                return Ok((0.5, 0.5, false, false));
             }
             "top" => {
-                x = "0.5";
-                y = "1.0";
+                return Ok((0.5, 1.0, false, false));
             }
             "bottom" => {
-                x = "0.5";
-                y = "0";
+                return Ok((0.5, 0.0, false, false));
             }
             "left" => {
-                x = "0";
-                y = "0.5";
+                return Ok((0.0, 0.5, false, false));
             }
             "right" => {
-                x = "1.0";
-                y = "0.5";
+                return Ok((1.0, 0.5, false, false));
             }
             "top-left" => {
-                x = "0";
-                y = "1.0";
+                return Ok((0.0, 1.0, false, false));
             }
             "top-right" => {
-                x = "1.0";
-                y = "1.0";
+                return Ok((1.0, 1.0, false, false));
             }
             "bottom-left" => {
-                x = "0";
-                y = "0";
+                return Ok((0.0, 0.0, false, false));
             }
             "bottom-right" => {
-                x = "1.0%";
-                y = "0";
+                return Ok((1.0, 0.0, false, false));
             }
             _ => return Err(format!("Invalid position keyword: {}", raw)),
         }
@@ -333,29 +324,52 @@ fn parse_coords(raw: &str) -> Result<(f32, f32), String> {
         y = coords[1];
     }
 
+    let parsed_x:f32;
+    let parsed_y:f32;
+
+    let mut screencord_x:bool = false;
+    let mut screencord_y:bool = false;
+
     //parse x coord
-    let parsed_x = match x.parse::<f32>() {
-        Ok(x) => {
-            if !(0.0..=1.0).contains(&x) {
-                return Err(format!("x coord not in range [0,1.0]: {}", x));
+    if x.contains('.') {
+        parsed_x = match x.parse::<f32>() {
+            Ok(x) => {
+                if !(0.0..=1.0).contains(&x) {
+                    return Err(format!("x coord not in range [0,1.0]: {}", x));
+                }
+                x
             }
-            x
-        }
-        Err(_) => return Err(format!("Invalid x coord: {}", x)),
-    };
+            Err(_) => return Err(format!("Invalid x coord: {}", x)),
+        };
+    } else {
+        screencord_x = true;
+        parsed_x = match x.parse::<u32>() {
+            Ok(x) => x,
+            Err(_) => return Err(format!("Invalid x screen coord: {}", x)),
+        } as f32;
+    }
+    
 
     //parse y coord
-    let parsed_y = match y.parse::<f32>() {
-        Ok(y) => {
-            if !(0.0..=1.0).contains(&y) {
-                return Err(format!("y coord not in range [0,1.0]: {}", y));
+    if y.contains('.') {
+        parsed_y = match y.parse::<f32>() {
+            Ok(y) => {
+                if !(0.0..=1.0).contains(&y) {
+                    return Err(format!("y coord not in range [0,1.0]: {}", y));
+                }
+                y
             }
-            y
-        }
-        Err(_) => return Err(format!("Invalid y coord: {}", y)),
-    };
+            Err(_) => return Err(format!("Invalid y coord: {}", y)),
+        };
+    } else {
+        screencord_y = false;
+        parsed_y = match y.parse::<u32>() {
+            Ok(y) => y,
+            Err(_) => return Err(format!("Invalid y screen coord: {}", y)),
+        } as f32;
+    }
 
-    Ok((parsed_x, parsed_y))
+    Ok((parsed_x, parsed_y, screencord_x, screencord_y))
 }
 
 #[cfg(test)]
