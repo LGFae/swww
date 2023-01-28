@@ -190,8 +190,9 @@ fn get_dimensions_and_outputs(
                     continue;
                 }
                 let mut should_add = true;
+                let real_dim = (info.dim.0 * info.scale_factor as u32, info.dim.1 * info.scale_factor as u32);
                 for (i, (dim, img)) in dims.iter().zip(&imgs).enumerate() {
-                    if info.dim == *dim && info.img == *img {
+                    if real_dim == *dim && info.img == *img {
                         outputs[i].push(info.name.clone());
                         should_add = false;
                         break;
@@ -200,7 +201,7 @@ fn get_dimensions_and_outputs(
 
                 if should_add {
                     outputs.push(vec![info.name]);
-                    dims.push(info.dim);
+                    dims.push(real_dim);
                     imgs.push(info.img);
                 }
             }
