@@ -141,6 +141,12 @@ fn read_img(path: &Path) -> Result<(RgbaImage, bool), String> {
         Ok(img) => img,
         Err(e) => return Err(format!("failed to open image: {}", e)),
     };
+
+    let imgbuf = match imgbuf.with_guessed_format() {
+        Ok(img) => img,
+        Err(e) => return Err(format!("failed to detect the image's format: {}", e)),
+    };
+
     let is_gif = imgbuf.format() == Some(image::ImageFormat::Gif);
     match imgbuf.decode() {
         Ok(img) => Ok((img.into_rgba8(), is_gif)),
@@ -417,6 +423,7 @@ fn make_transition(img: &cli::Img) -> communication::Transition {
         cli::TransitionType::Wipe => communication::TransitionType::Wipe,
         cli::TransitionType::Outer => communication::TransitionType::Outer,
         cli::TransitionType::Grow => communication::TransitionType::Grow,
+        cli::TransitionType::Wave => communication::TransitionType::Wave,
         cli::TransitionType::Right => {
             angle = 0.0;
             communication::TransitionType::Wipe
@@ -466,6 +473,7 @@ fn make_transition(img: &cli::Img) -> communication::Transition {
         angle,
         pos,
         transition_type,
+        wave: img.transition_wave,
     }
 }
 

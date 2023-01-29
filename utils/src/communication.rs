@@ -73,6 +73,7 @@ pub enum TransitionType {
     Outer,
     Wipe,
     Grow,
+    Wave,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -84,6 +85,7 @@ pub struct Transition {
     pub angle: f64,
     pub pos: (f32, f32, bool, bool),
     pub bezier: (f32, f32, f32, f32),
+    pub wave: (f32, f32),
 }
 
 #[derive(Serialize, Deserialize)]

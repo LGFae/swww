@@ -74,6 +74,7 @@ pub enum TransitionType {
     Any,
     Random,
     Wipe,
+    Wave,
     Grow,
 }
 
@@ -92,9 +93,10 @@ impl std::str::FromStr for TransitionType {
             "center" => Ok(Self::Center),
             "outer" => Ok(Self::Outer),
             "any" => Ok(Self::Any),
+            "wave" => Ok(Self::Wave),
             "random" => Ok(Self::Random),
             _ => Err("unrecognized transition type.\nValid transitions are:\n\
-                     \tsimple | left | right | top | bottom | wipe | grow | center | outer | random\n\
+                     \tsimple | left | right | top | bottom | wipe | grow | center | outer | random | wave\n\
                      see swww img --help for more details"),
         }
     }
@@ -268,6 +270,22 @@ pub struct Img {
     ///eg: 0.0,0.0,1.0,1.0 for linear animation
     #[arg(long, env = "SWWW_TRANSITION_BEZIER", default_value = ".54,0,.34,.99", value_parser = parse_bezier)]
     pub transition_bezier: (f32, f32, f32, f32),
+
+    ///currently only used for 'wave' transition to control the width and height of each wave
+    #[arg(long, env = "SWWW_TRANSITION_WAVE", default_value = "20,20", value_parser = parse_wave)]
+    pub transition_wave: (f32, f32),
+}
+
+fn parse_wave(raw: &str) -> Result<(f32, f32), String> {
+    let mut iter = raw.split(',');
+    let mut parse = || {
+        iter.next()
+            .ok_or_else(|| "Not enough values".to_string())
+            .and_then(|s| s.parse::<f32>().map_err(|e| e.to_string()))
+    };
+
+    let parsed = (parse()?, parse()?);
+    Ok(parsed)
 }
 
 fn parse_bezier(raw: &str) -> Result<(f32, f32, f32, f32), String> {

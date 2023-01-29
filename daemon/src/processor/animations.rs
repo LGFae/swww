@@ -37,6 +37,7 @@ pub struct Transition {
     angle: f64,
     pos: (u32, u32),
     bezier: BezierCurve,
+    wave: (f32, f32),
 }
 
 /// All transitions return whether or not they completed
@@ -84,6 +85,7 @@ impl Transition {
                     y: transition.bezier.3,
                 },
             ),
+            wave: transition.wave,
         }
     }
 
@@ -100,6 +102,7 @@ impl Transition {
             TransitionType::Wipe => self.wipe(new_img, outputs, sender, stop_recv),
             TransitionType::Grow => self.grow(new_img, outputs, sender, stop_recv),
             TransitionType::Outer => self.outer(new_img, outputs, sender, stop_recv),
+            TransitionType::Wave => self.wave(new_img, outputs, sender, stop_recv),
         }
     }
 
@@ -127,6 +130,83 @@ impl Transition {
             send_transition_frame!(transition_img, outputs, now, fps, sender, stop_recv);
             now = Instant::now();
         }
+    }
+
+    fn wave(
+        mut self,
+        new_img: &[u8],
+        outputs: &mut Vec<String>,
+        sender: &SyncSender<(Vec<String>, ReadiedPack)>,
+        stop_recv: &mpsc::Receiver<Vec<String>>,
+    ) {
+        let fps = self.fps;
+        let width = self.dimensions.0;
+        let height = self.dimensions.1;
+        let mut now = Instant::now();
+        let center = (width / 2, height / 2);
+        let screen_diag = ((width.pow(2) + height.pow(2)) as f64).sqrt();
+
+        let angle = self.angle.to_radians();
+        let (scale_x, scale_y) = (self.wave.0 as f64, self.wave.1 as f64);
+
+        let circle_radius = screen_diag / 2.0;
+
+        let f = |x: f64| (x / scale_x).sin() * scale_y;
+
+        // graph: https://www.desmos.com/calculator/wunde042es
+        //
+        // checks if a pixel is to the left or right of the line
+        let is_low = |x: f64, y: f64, offset: f64| {
+            let x = x - center.0 as f64;
+            let y = y - center.1 as f64;
+            
+            let lhs = y * angle.cos() - x * angle.sin();
+            let rhs = f(x * angle.cos() + y * angle.sin())
+                + circle_radius
+                - offset;
+            lhs >= rhs
+        };
+
+        // find the offset to start the transition at
+        let mut offset = {
+            let mut offset = 0.0;
+            for x in 0..width {
+                for y in 0..height {
+                    if is_low(x as f64, y as f64, offset) {
+                        offset += 1.0;
+                        break;
+                    }
+                }
+            }
+            offset
+        };
+        let max_offset = 2.0 * circle_radius - offset;
+
+        let (mut seq, start) = self.bezier_seq(offset as f32, max_offset as f32);
+
+        let step = self.step;
+
+        loop {
+            let transition_img =
+                ReadiedPack::new(&mut self.old_img, new_img, |old_pix, new_pix, i| {
+                    let width = width as usize;
+                    let height = height as usize;
+                    let pix_x = i % width;
+                    let pix_y = height - i / width;
+                    if is_low(pix_x as f64, pix_y as f64, offset) {
+                        change_cols(step, old_pix, *new_pix);
+                    }
+                });
+            send_transition_frame!(transition_img, outputs, now, fps, sender, stop_recv);
+            now = Instant::now();
+
+            offset = seq.now() as f64;
+            seq.advance_to(start.elapsed().as_secs_f64());
+            if start.elapsed().as_secs_f64() >= seq.duration() {
+                break;
+            }
+        }
+        self.simple(new_img, outputs, sender, stop_recv)
     }
 
     fn wipe(
@@ -353,6 +433,7 @@ mod tests {
             angle: 0.0,
             pos: (0, 0),
             bezier: BezierCurve::from(Vector2 { x: 1.0, y: 0.0 }, Vector2 { x: 0.0, y: 1.0 }),
+            wave: (20.0, 20.0),
         }
     }
 
@@ -363,7 +444,7 @@ mod tests {
     #[test]
     fn transitions_should_end_with_equal_vectors() {
         use TransitionType as TT;
-        let transitions = [TT::Simple, TT::Wipe, TT::Outer, TT::Grow];
+        let transitions = [TT::Simple, TT::Wipe, TT::Outer, TT::Grow, TT::Wave];
         for transition in transitions {
             let ((fr_send, fr_recv), (_stop_send, stop_recv)) = make_senders_and_receivers();
             let (old_img, new_img) = make_test_boxes();
