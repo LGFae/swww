@@ -22,18 +22,18 @@ strip = false
 
 [dependencies]
 image = "0.24"
-fast_image_resize = "2.3"
-clap = { version = "4.0", features = ["derive", "wrap_help", "env"] }
+fast_image_resize = "2.4"
+clap = { version = "4.1", features = ["derive", "wrap_help", "env"] }
 rand = "0.8"
 utils = { path = "utils" }
 
 [dev-dependencies]
-assert_cmd = "=2.0.7"
+assert_cmd = "=2.0.8"
 
 [build-dependencies]
-clap = { version = "4.0", features = ["derive", "env"] }
-clap_complete = "=4.0.6"
-serde =  { version = "=1.0.149", features = [ "derive" ] }
+clap = { version = "4.1", features = ["derive", "env"] }
+clap_complete = "=4.1.1"
+serde =  { version = "=1.0.152", features = [ "derive" ] }
 
 [[test]]
 name = "integration_tests"
