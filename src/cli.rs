@@ -344,7 +344,7 @@ fn parse_coords(raw: &str) -> Result<(f32, f32), String> {
                 x = "1.0%";
                 y = "0";
             }
-            _ => return Err(format!("Invalid position keyword: {}", raw)),
+            _ => return Err(format!("Invalid position keyword: {raw}")),
         }
     } else {
         x = coords[0];
@@ -355,22 +355,22 @@ fn parse_coords(raw: &str) -> Result<(f32, f32), String> {
     let parsed_x = match x.parse::<f32>() {
         Ok(x) => {
             if !(0.0..=1.0).contains(&x) {
-                return Err(format!("x coord not in range [0,1.0]: {}", x));
+                return Err(format!("x coord not in range [0,1.0]: {x}"));
             }
             x
         }
-        Err(_) => return Err(format!("Invalid x coord: {}", x)),
+        Err(_) => return Err(format!("Invalid x coord: {x}")),
     };
 
     //parse y coord
     let parsed_y = match y.parse::<f32>() {
         Ok(y) => {
             if !(0.0..=1.0).contains(&y) {
-                return Err(format!("y coord not in range [0,1.0]: {}", y));
+                return Err(format!("y coord not in range [0,1.0]: {y}"));
             }
             y
         }
-        Err(_) => return Err(format!("Invalid y coord: {}", y)),
+        Err(_) => return Err(format!("Invalid y coord: {y}")),
     };
 
     Ok((parsed_x, parsed_y))

@@ -266,9 +266,7 @@ mod tests {
                 assert_eq!(
                     frame2[i * 4 + j],
                     buf[i * 4 + j],
-                    "\nframe2: {:?}, buf: {:?}\n",
-                    frame2,
-                    buf
+                    "\nframe2: {frame2:?}, buf: {buf:?}\n"
                 );
             }
         }

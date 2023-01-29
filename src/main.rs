@@ -31,7 +31,7 @@ fn main() -> Result<(), String> {
                         socket_path.to_string_lossy()
                     );
                     if let Err(e) = std::fs::remove_file(socket_path) {
-                        return Err(format!("failed to delete previous socket: {}", e));
+                        return Err(format!("failed to delete previous socket: {e}"));
                     }
                 }
             }
@@ -39,8 +39,8 @@ fn main() -> Result<(), String> {
                 return Err("There seems to already be another instance running...".to_string())
             }
             Err(e) => {
-                eprintln!("WARNING: failed to read '/proc' directory to determine whether the daemon is running: {}
-                          Falling back to trying to checking if the socket file exists...", e);
+                eprintln!("WARNING: failed to read '/proc' directory to determine whether the daemon is running: {e}
+                          Falling back to trying to checking if the socket file exists...");
                 let socket_path = get_socket_path();
                 if socket_path.exists() {
                     return Err(format!(
@@ -61,7 +61,7 @@ fn main() -> Result<(), String> {
     request.send(&socket)?;
     match Answer::receive(socket)? {
         Answer::Err(msg) => return Err(msg),
-        Answer::Info(info) => info.into_iter().for_each(|i| println!("{}", i)),
+        Answer::Info(info) => info.into_iter().for_each(|i| println!("{i}")),
         Answer::Ok => {
             if let Swww::Kill = swww {
                 #[cfg(debug_assertions)]
@@ -76,8 +76,7 @@ fn main() -> Result<(), String> {
                     std::thread::sleep(Duration::from_millis(100));
                 }
                 return Err(format!(
-                    "Could not confirm socket deletion at: {:?}",
-                    socket_path
+                    "Could not confirm socket deletion at: {socket_path:?}"
                 ));
             }
         }
@@ -103,7 +102,7 @@ fn make_request(args: &Swww) -> Result<Request, String> {
                 Answer::receive(socket)?;
                 match animations.join() {
                     Ok(result) => Ok(Request::Animation(result?)),
-                    Err(e) => Err(format!("failed to join animations thread: {:?}", e)),
+                    Err(e) => Err(format!("failed to join animations thread: {e:?}")),
                 }
             } else {
                 Ok(Request::Img(img_request))
@@ -128,29 +127,29 @@ fn read_img(path: &Path) -> Result<(RgbaImage, bool), String> {
         let mut reader = BufReader::new(stdin());
         let mut buffer = Vec::new();
         if let Err(e) = reader.read_to_end(&mut buffer) {
-            return Err(format!("failed to read stdin: {}", e));
+            return Err(format!("failed to read stdin: {e}"));
         }
 
         return match image::load_from_memory(&buffer) {
             Ok(img) => Ok((img.into_rgba8(), false)),
-            Err(e) => return Err(format!("failed load image from memory: {}", e)),
+            Err(e) => return Err(format!("failed load image from memory: {e}")),
         };
     }
 
     let imgbuf = match image::io::Reader::open(path) {
         Ok(img) => img,
-        Err(e) => return Err(format!("failed to open image: {}", e)),
+        Err(e) => return Err(format!("failed to open image: {e}")),
     };
 
     let imgbuf = match imgbuf.with_guessed_format() {
         Ok(img) => img,
-        Err(e) => return Err(format!("failed to detect the image's format: {}", e)),
+        Err(e) => return Err(format!("failed to detect the image's format: {e}")),
     };
 
     let is_gif = imgbuf.format() == Some(image::ImageFormat::Gif);
     match imgbuf.decode() {
         Ok(img) => Ok((img.into_rgba8(), is_gif)),
-        Err(e) => Err(format!("failed to decode image: {}", e)),
+        Err(e) => Err(format!("failed to decode image: {e}")),
     }
 }
 
@@ -216,7 +215,7 @@ fn get_dimensions_and_outputs(
                 Ok((dims, outputs))
             }
         }
-        Answer::Err(e) => Err(format!("failed to query swww-daemon: {}", e)),
+        Answer::Err(e) => Err(format!("failed to query swww-daemon: {e}")),
         _ => unreachable!(),
     }
 }
@@ -237,11 +236,11 @@ fn make_animation_request(
         for (dim, outputs) in dims.into_iter().zip(outputs) {
             let imgbuf = match image::io::Reader::open(&imgpath) {
                 Ok(img) => img.into_inner(),
-                Err(e) => return Err(format!("error openning image during animation: {}", e)),
+                Err(e) => return Err(format!("error openning image during animation: {e}")),
             };
             let gif = match GifDecoder::new(imgbuf) {
                 Ok(gif) => gif,
-                Err(e) => return Err(format!("failed to decode gif during animation: {}", e)),
+                Err(e) => return Err(format!("failed to decode gif during animation: {e}")),
             };
             animations.push((
                 communication::Animation {
@@ -482,7 +481,7 @@ fn spawn_daemon(no_daemon: bool) -> Result<(), String> {
     if no_daemon {
         match std::process::Command::new(cmd).status() {
             Ok(_) => Ok(()),
-            Err(e) => Err(format!("error spawning swww-daemon: {}", e)),
+            Err(e) => Err(format!("error spawning swww-daemon: {e}")),
         }
     } else {
         match std::process::Command::new(cmd)
@@ -491,7 +490,7 @@ fn spawn_daemon(no_daemon: bool) -> Result<(), String> {
             .spawn()
         {
             Ok(_) => Ok(()),
-            Err(e) => Err(format!("error spawning swww-daemon: {}", e)),
+            Err(e) => Err(format!("error spawning swww-daemon: {e}")),
         }
     }
 }
@@ -509,7 +508,7 @@ fn connect_to_socket(tries: u8, interval: u64) -> Result<UnixStream, String> {
         match UnixStream::connect(&path) {
             Ok(socket) => {
                 if let Err(e) = socket.set_nonblocking(false) {
-                    return Err(format!("Failed to set blocking connection: {}", e));
+                    return Err(format!("Failed to set blocking connection: {e}"));
                 }
                 return Ok(socket);
             }
@@ -522,7 +521,7 @@ fn connect_to_socket(tries: u8, interval: u64) -> Result<UnixStream, String> {
         return Err("Socket file not found. Are you sure swww-daemon is running?".to_string());
     }
 
-    Err(format!("Failed to connect to socket: {}", error))
+    Err(format!("Failed to connect to socket: {error}"))
 }
 
 fn is_daemon_running() -> Result<bool, String> {

@@ -16,14 +16,12 @@ fn main() -> Result<(), Error> {
     for shell in shells {
         let comp_file = generate_to(shell, &mut app, APP_NAME, &outdir)?;
         println!(
-            "cargo:warning=generated shell completion file: {:?}",
-            comp_file
+            "cargo:warning=generated shell completion file: {comp_file:?}"
         );
     }
     if let Err(e) = std::process::Command::new("./fix_zsh_completion.sh").output() {
         println!(
-            "cargo:warning=FAILED TO RUN fix_zsh_completion.sh SCRIPT: {}",
-            e
+            "cargo:warning=FAILED TO RUN fix_zsh_completion.sh SCRIPT: {e}"
         );
     } else {
         println!("cargo:warning=ran fix_zsh_completion.sh script.");

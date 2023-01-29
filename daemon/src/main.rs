@@ -242,8 +242,7 @@ fn main() -> Result<(), String> {
     let socket_addr = get_socket_path();
     if let Err(e) = fs::remove_file(&socket_addr) {
         return Err(format!(
-            "Failed to remove socket at {:?} after closing unexpectedly: {}",
-            socket_addr, e
+            "Failed to remove socket at {socket_addr:?} after closing unexpectedly: {e}"
         ));
     }
     info!("Removed socket at {:?}", socket_addr);
@@ -315,13 +314,13 @@ fn make_socket() -> Result<UnixListener, String> {
     if !runtime_dir.exists() {
         match fs::create_dir(runtime_dir) {
             Ok(()) => (),
-            Err(e) => return Err(format!("failed to create runtime dir: {}", e)),
+            Err(e) => return Err(format!("failed to create runtime dir: {e}")),
         }
     }
 
     let listener = match UnixListener::bind(socket_addr) {
         Ok(address) => address,
-        Err(e) => return Err(format!("couldn't bind socket: {}", e)),
+        Err(e) => return Err(format!("couldn't bind socket: {e}")),
     };
 
     Ok(listener)
@@ -331,12 +330,12 @@ fn register_signals(handle: &LoopHandle<LoopSignal>) -> Result<(), String> {
     match signals::Signals::new(&[Signal::SIGINT, Signal::SIGQUIT, Signal::SIGTERM]) {
         Ok(signals) => {
             if let Err(e) = handle.insert_source(signals, |_, _, loop_signal| loop_signal.stop()) {
-                Err(format!("failed to insert signals source: {}", e))
+                Err(format!("failed to insert signals source: {e}"))
             } else {
                 Ok(())
             }
         }
-        Err(e) => Err(format!("failed to register signals to stop program: {}", e)),
+        Err(e) => Err(format!("failed to register signals to stop program: {e}")),
     }
 }
 
@@ -349,7 +348,7 @@ fn register_channel<'a>(
         channel::Event::Msg(msg) => handle_recv_img(&mut bgs.borrow_mut(), &msg),
         channel::Event::Closed => loop_signal.stop(),
     }) {
-        return Err(format! {"failed to register channel: {}", e});
+        return Err(format! {"failed to register channel: {e}"});
     }
     Ok(())
 }
@@ -362,7 +361,7 @@ fn register_socket<'a>(
     listener: UnixListener,
 ) -> Result<(), String> {
     if let Err(e) = listener.set_nonblocking(true) {
-        return Err(format!("failed to set nonblocking mode for socket: {}", e));
+        return Err(format!("failed to set nonblocking mode for socket: {e}"));
     };
     if let Err(e) = handle.insert_source(
         calloop::generic::Generic::new(listener, calloop::Interest::READ, calloop::Mode::Level),
@@ -387,7 +386,7 @@ fn register_socket<'a>(
             Ok(calloop::PostAction::Continue)
         },
     ) {
-        return Err(format! {"failed to register socket: {}", e});
+        return Err(format! {"failed to register socket: {e}"});
     }
     Ok(())
 }
@@ -440,7 +439,7 @@ fn main_loop(
             error!("Couldn't flush display: {}", e);
         }
     }) {
-        return Err(format!("Event loop closed unexpectedly: {}", e));
+        return Err(format!("Event loop closed unexpectedly: {e}"));
     }
 
     Ok(())
@@ -459,7 +458,7 @@ fn recv_socket_msg(
             for animation in &animations {
                 for output in &animation.1 {
                     if !bgs.iter().any(|bg| &bg.info.name == output) {
-                        result = Answer::Err(format!("Output {} doesn't exit", output));
+                        result = Answer::Err(format!("Output {output} doesn't exit"));
                         break;
                     }
                 }
