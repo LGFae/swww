@@ -1,6 +1,38 @@
 ### Unreleased
 
 
+### 0.7.0
+
+**BREAKING CHANGES**
+
+  * **ATTENTION, PACKAGE MAINTAINERS** - `swww` is now composed of two separate
+  binaries: `swww` and `swww-daemon`. **Both** must be installed on the user's
+  system in order for `swww` to work correctly. Doing this allowed for major
+  improvements in terms of overall memory usage, among other things (#52).
+
+Improvements:
+ 
+ * separate client and daemon (see above).
+ * we don't try to animate `gif` files that have only one frame
+ * we can read images from stdin (not this does not work for animated gifs; we
+ simply display the image's first frame) (#42)
+ * `--no-resize` option (pads the outer part of the image with `fill-color`)
+ (#37)
+ * new transition: `wave`, by @flick0
+ * reading image format properly (instead of using file extension) (#74)
+
+Fixes:
+  * fixed panic with on gif that had identical frames (#68)
+  * fixed panic with fractional-scaling (#73) (by @thedmm)
+
+Non-breaking Changes:
+ * @flick0 changed the default `transition-step`
+
+
+Internal:
+ * Many improvements to the README.md (@aouerfelli and @flick0)
+
+
 ### 0.6.0
 
 **BREAKING CHANGES**
