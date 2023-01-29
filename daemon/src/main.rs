@@ -504,9 +504,12 @@ fn recv_socket_msg(
 fn get_old_imgs(bgs: &mut RefMut<Vec<Bg>>, imgs: &[(Img, Vec<String>)]) -> Vec<ImgWithDim> {
     let mut v = Vec::with_capacity(imgs.len());
 
-    for (_, outputs) in imgs {
+    for (img, outputs) in imgs {
         if let Some(bg) = bgs.iter_mut().find(|bg| bg.info.name == outputs[0]) {
             v.push((bg.get_current_img().into(), bg.info.real_dim()));
+        }
+        for bg in bgs.iter_mut().filter(|bg| outputs.contains(&bg.info.name)) {
+            bg.info.img = BgImg::Img(img.path.clone());
         }
     }
 

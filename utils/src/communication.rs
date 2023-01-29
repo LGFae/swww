@@ -90,6 +90,7 @@ pub struct Transition {
 
 #[derive(Serialize, Deserialize)]
 pub struct Img {
+    pub path: PathBuf,
     pub img: Vec<u8>,
 }
 
