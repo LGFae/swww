@@ -1,5 +1,7 @@
 ### Unreleased
 
+Fixes:
+  * `swww query` not returing the image being displayed
 
 ### 0.7.0
 

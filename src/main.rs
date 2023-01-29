@@ -169,6 +169,10 @@ fn make_img_request(
                 } else {
                     img_resize(img_raw.clone(), *dim, make_filter(&img.filter))?
                 },
+                path: match img.path.canonicalize() {
+                    Ok(p) => p,
+                    Err(e) => return Err(format!("failed no canonicalize image path: {e}")),
+                },
             },
             outputs.to_owned(),
         ));
@@ -195,7 +199,10 @@ fn get_dimensions_and_outputs(
                     continue;
                 }
                 let mut should_add = true;
-                let real_dim = (info.dim.0 * info.scale_factor as u32, info.dim.1 * info.scale_factor as u32);
+                let real_dim = (
+                    info.dim.0 * info.scale_factor as u32,
+                    info.dim.1 * info.scale_factor as u32,
+                );
                 for (i, (dim, img)) in dims.iter().zip(&imgs).enumerate() {
                     if real_dim == *dim && info.img == *img {
                         outputs[i].push(info.name.clone());
