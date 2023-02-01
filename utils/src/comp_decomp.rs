@@ -181,7 +181,7 @@ impl ReadiedPack {
     ///return whether unpacking was successfull. Note it can only fail if `buf.len() !=
     ///expected_buf_size`
     pub fn unpack(&self, buf: &mut [u8]) -> bool {
-        if buf.len() == self.expected_buf_size {
+        if buf.len() >= self.expected_buf_size {
             if !self.inner.is_empty() {
                 unpack_bytes(buf, &self.inner);
             }
@@ -266,9 +266,7 @@ mod tests {
                 assert_eq!(
                     frame2[i * 4 + j],
                     buf[i * 4 + j],
-                    "\nframe2: {:?}, buf: {:?}\n",
-                    frame2,
-                    buf
+                    "\nframe2: {frame2:?}, buf: {buf:?}\n"
                 );
             }
         }

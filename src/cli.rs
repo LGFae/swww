@@ -337,7 +337,7 @@ fn parse_coords(raw: &str) -> Result<(f32, f32, bool, bool), String> {
             "bottom-right" => {
                 return Ok((1.0, 0.0, false, false));
             }
-            _ => return Err(format!("Invalid position keyword: {}", raw)),
+            _ => return Err(format!("Invalid position keyword: {raw}")),
         }
     } else {
         x = coords[0];

@@ -64,7 +64,7 @@ impl Processor {
                         .retain(|output| !outputs.contains(output));
                 })
             {
-                answer = Answer::Err(format!("failed to spawn transition thread: {}", e));
+                answer = Answer::Err(format!("failed to spawn transition thread: {e}"));
                 log::error!("failed to spawn 'transition' thread: {}", e);
             };
         }
@@ -111,8 +111,8 @@ impl Processor {
                 }
             })
         {
-            answer = Answer::Err(format!("failed to spawn animation thread: {}", e));
-            log::error!("failed to spawn 'animation' thread: {}", e);
+            answer = Answer::Err(format!("failed to spawn animation thread: {e}"));
+            log::error!("failed to spawn 'animation' thread: {e}");
         };
 
         answer

@@ -159,11 +159,9 @@ impl Transition {
         let is_low = |x: f64, y: f64, offset: f64| {
             let x = x - center.0 as f64;
             let y = y - center.1 as f64;
-            
+
             let lhs = y * angle.cos() - x * angle.sin();
-            let rhs = f(x * angle.cos() + y * angle.sin())
-                + circle_radius
-                - offset;
+            let rhs = f(x * angle.cos() + y * angle.sin()) + circle_radius - offset;
             lhs >= rhs
         };
 
@@ -466,8 +464,7 @@ mod tests {
                 assert_eq!(
                     tpix[0..3],
                     npix[0..3],
-                    "Transition {:?} did not end with correct new_img",
-                    transition
+                    "Transition {transition:?} did not end with correct new_img"
                 );
             }
         }

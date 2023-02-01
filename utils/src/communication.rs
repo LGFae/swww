@@ -90,6 +90,7 @@ pub struct Transition {
 
 #[derive(Serialize, Deserialize)]
 pub struct Img {
+    pub path: PathBuf,
     pub img: Vec<u8>,
 }
 
@@ -111,7 +112,7 @@ impl Request {
         let writer = BufWriter::new(stream);
         match bincode::serialize_into(writer, self) {
             Ok(()) => Ok(()),
-            Err(e) => Err(format!("Failed to serialize request: {}", e)),
+            Err(e) => Err(format!("Failed to serialize request: {e}")),
         }
     }
 
@@ -119,7 +120,7 @@ impl Request {
         let reader = BufReader::new(stream);
         match bincode::deserialize_from(reader) {
             Ok(i) => Ok(i),
-            Err(e) => Err(format!("Failed to deserialize request: {}", e)),
+            Err(e) => Err(format!("Failed to deserialize request: {e}")),
         }
     }
 }
@@ -135,7 +136,7 @@ impl Answer {
     pub fn send(&self, stream: &UnixStream) -> Result<(), String> {
         match bincode::serialize_into(stream, self) {
             Ok(()) => Ok(()),
-            Err(e) => Err(format!("Failed to send answer: {}", e)),
+            Err(e) => Err(format!("Failed to send answer: {e}")),
         }
     }
 
@@ -146,12 +147,12 @@ impl Answer {
         let timeout = Duration::from_secs(5);
 
         if let Err(e) = stream.set_read_timeout(Some(timeout)) {
-            return Err(format!("Failed to set read timeout: {}", e));
+            return Err(format!("Failed to set read timeout: {e}"));
         };
 
         match bincode::deserialize_from(stream) {
             Ok(i) => Ok(i),
-            Err(e) => Err(format!("Failed to receive answer: {}", e)),
+            Err(e) => Err(format!("Failed to receive answer: {e}")),
         }
     }
 }
