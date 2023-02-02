@@ -169,9 +169,15 @@ pub struct Img {
     #[arg(short, long, default_value = "")]
     pub outputs: String,
 
+    /// Do not resize the image
+    ///
+    /// If this is set, the image won't be resized, and will be centralized in the middle of the
+    /// screen instead. If it is smaller than the screen's size, it will be padded with the value
+    /// of `fill_color`, bellow.
     #[arg(long)]
     pub no_resize: bool,
 
+    /// Which color to fill the padding with when not resizing
     #[arg(value_parser = from_hex, long, default_value = "000000")]
     pub fill_color: [u8; 3],
 
