@@ -2,6 +2,9 @@
 
 Fixes:
   * `swww query` not returing the image being displayed
+  * document `--no_resize` and `--fill_color` options for `swww img`
+  * reading img from stdin (now with a proper integration test to make sure
+  it doesn't happen again) (#42)
 
 ### 0.7.0
 
