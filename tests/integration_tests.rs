@@ -128,7 +128,7 @@ fn sending_img_from_stdin() {
         .arg("img")
         .arg("-")
         .pipe_stdin("test_images/test1.jpg")
-        .expect("failed to pipw stdin")
+        .expect("failed to pipe stdin")
         .assert()
         .success();
 }
