@@ -9,7 +9,7 @@ use std::{
 
 use crate::comp_decomp::BitPack;
 
-#[derive(PartialEq, Clone, Serialize, Deserialize)]
+#[derive(PartialEq, Clone, Serialize, Deserialize,Debug)]
 pub enum Position {
     Pixel(f32,f32),
     Percent(f32,f32),
@@ -19,13 +19,13 @@ impl Position {
     pub fn to_pixel(&self, dim: (u32, u32)) -> (f32, f32) {
         match self {
             Position::Pixel(x, y) => (*x as f32, *y as f32),
-            Position::Percent(x, y) => (dim.0 as f32 * x / 100.0, dim.1 as f32 * y / 100.0),
+            Position::Percent(x, y) => (dim.0 as f32 * x, dim.1 as f32 * y),
         }
     }
 
     pub fn to_percent(&self, dim: (u32, u32)) -> (f32, f32) {
         match self {
-            Position::Pixel(x, y) => (100.0 * x / dim.0 as f32, 100.0 * y / dim.1 as f32),
+            Position::Pixel(x, y) => (x / dim.0 as f32, y / dim.1 as f32),
             Position::Percent(x, y) => (*x as f32, *y as f32),
         }
     }

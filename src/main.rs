@@ -425,11 +425,18 @@ fn img_resize(
 
 fn make_transition(img: &cli::Img) -> communication::Transition {
     let mut angle = img.transition_angle;
+
     
-    let mut pos = match img.screen_pos {
-        true => Position::Pixel(img.transition_pos.0, img.transition_pos.1),
-        false => Position::Percent(img.transition_pos.0, img.transition_pos.1),
+    let mut pos =  match img.transition_pos {
+        cli::CliPosition::Percent(x,y) => match img.screen_pos {
+                true => Position::Pixel(x,y),
+                false => Position::Percent(x,y),
+            },
+        cli::CliPosition::Pixel(x,y) => Position::Pixel(x,y),
     };
+    
+
+    println!("pos: {:?}", pos.to_pixel((1920,1080)));
     
     let transition_type = match img.transition_type {
         cli::TransitionType::Simple => communication::TransitionType::Simple,

@@ -102,6 +102,13 @@ impl std::str::FromStr for TransitionType {
     }
 }
 
+#[derive(Clone)]
+pub enum CliPosition {
+    Percent(f32, f32),
+    Pixel(f32, f32),
+    //Unknown(f32, f32),
+}
+
 #[derive(Parser)]
 #[command(version, name = "swww")]
 ///A Solution to your Wayland Wallpaper Woes
@@ -255,14 +262,14 @@ pub struct Img {
 
     ///This is only used for the 'grow','outer' transitions. It controls the center of circle (default is 'center').
     ///
-    ///position values are in the format 'x,y' where x and y are floats and in the range [0.0,1.0] and represent the percentage of screen dimension
+    ///position values are in the format 'x,y' where x and y are floats and in the range [0.0,1.0] and represent the Percent of screen dimension
     ///
     ///if the values are not floats then they represent the pixel position on the screen eg: '200,400'
     ///
     ///the value can also be an alias which will set the position accordingly):
     /// 'center' | 'top' | 'left' | 'right' | 'bottom' | 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
     #[arg(long, env = "SWWW_TRANSITION_POS", default_value = "center", value_parser = parse_coords)]
-    pub transition_pos: (f32, f32),
+    pub transition_pos: CliPosition,
 
     #[arg(long)]    
     pub screen_pos: bool,
@@ -307,92 +314,66 @@ fn parse_bezier(raw: &str) -> Result<(f32, f32, f32, f32), String> {
     Ok(parsed)
 }
 
-// parses percentages and numbers in format of "<coord1>,<coord2>"
-fn parse_coords(raw: &str) -> Result<(f32, f32, bool, bool), String> {
+// parses Percents and numbers in format of "<coord1>,<coord2>"
+fn parse_coords(raw: &str) -> Result<CliPosition, String> {
     let coords = raw.split(',').map(|s| s.trim()).collect::<Vec<&str>>();
-    let x: &str;
-    let y: &str;
     if coords.len() != 2 {
         match coords[0] {
             "center" => {
-                return Ok((0.5, 0.5, false, false));
+                return Ok(CliPosition::Percent(0.5, 0.5));
             }
             "top" => {
-                return Ok((0.5, 1.0, false, false));
+                return Ok(CliPosition::Percent(0.5, 1.0));
             }
             "bottom" => {
-                return Ok((0.5, 0.0, false, false));
+                return Ok(CliPosition::Percent(0.5, 0.0));
             }
             "left" => {
-                return Ok((0.0, 0.5, false, false));
+                return Ok(CliPosition::Percent(0.0, 0.5));
             }
             "right" => {
-                return Ok((1.0, 0.5, false, false));
+                return Ok(CliPosition::Percent(1.0, 0.5));
             }
             "top-left" => {
-                return Ok((0.0, 1.0, false, false));
+                return Ok(CliPosition::Percent(0.0, 1.0));
             }
             "top-right" => {
-                return Ok((1.0, 1.0, false, false));
+                return Ok(CliPosition::Percent(1.0, 1.0));
             }
             "bottom-left" => {
-                return Ok((0.0, 0.0, false, false));
+                return Ok(CliPosition::Percent(0.0, 0.0));
             }
             "bottom-right" => {
-                return Ok((1.0, 0.0, false, false));
+                return Ok(CliPosition::Percent(1.0, 0.0));
             }
             _ => return Err(format!("Invalid position keyword: {raw}")),
         }
-    } else {
-        x = coords[0];
-        y = coords[1];
     }
+    
+    let x = coords[0];
+    let y = coords[1];
 
-    let parsed_x: f32;
-    let parsed_y: f32;
-
-    let mut screencord_x: bool = false;
-    let mut screencord_y: bool = false;
-
-    //parse x coord
-    if x.contains('.') {
-        parsed_x = match x.parse::<f32>() {
-            Ok(x) => {
-                if !(0.0..=1.0).contains(&x) {
-                    return Err(format!("x coord not in range [0,1.0]: {}", x));
+    match (x.parse::<u32>(), y.parse::<u32>()) {
+        (Ok(x), Ok(y)) => {
+            return Ok(CliPosition::Pixel(x as f32, y as f32));
+        }
+        (Err(_),Err(_)) => {
+            match (x.parse::<f32>(), y.parse::<f32>()) {
+                (Ok(x), Ok(y)) => {
+                    if (0.0..1.0).contains(&x) && (0.0..1.0).contains(&y) {
+                        return Ok(CliPosition::Percent(x as f32, y as f32));
+                    }
+                    return Err(format!("Invalid position: {raw}, percentage values must be between 0 and 1"));
+                },
+                _ => {
+                    return Err(format!("Invalid position: {raw}, value must be numeric (float for percentage and int for pixel)"));
                 }
-                x
             }
-            Err(_) => return Err(format!("Invalid x coord: {}", x)),
-        };
-    } else {
-        screencord_x = true;
-        parsed_x = match x.parse::<u32>() {
-            Ok(x) => x,
-            Err(_) => return Err(format!("Invalid x screen coord: {}", x)),
-        } as f32;
+        }
+        _ => {
+            return Err(format!("Invalid position: {raw}, both values must be of the same type"));
+        }
     }
-
-    //parse y coord
-    if y.contains('.') {
-        parsed_y = match y.parse::<f32>() {
-            Ok(y) => {
-                if !(0.0..=1.0).contains(&y) {
-                    return Err(format!("y coord not in range [0,1.0]: {}", y));
-                }
-                y
-            }
-            Err(_) => return Err(format!("Invalid y coord: {}", y)),
-        };
-    } else {
-        screencord_y = true;
-        parsed_y = match y.parse::<u32>() {
-            Ok(y) => y,
-            Err(_) => return Err(format!("Invalid y screen coord: {}", y)),
-        } as f32;
-    }
-
-    Ok((parsed_x, parsed_y, screencord_x, screencord_y))
 }
 
 #[cfg(test)]
