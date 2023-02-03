@@ -262,7 +262,11 @@ pub struct Img {
     ///the value can also be an alias which will set the position accordingly):
     /// 'center' | 'top' | 'left' | 'right' | 'bottom' | 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
     #[arg(long, env = "SWWW_TRANSITION_POS", default_value = "center", value_parser = parse_coords)]
-    pub transition_pos: (f32, f32, bool, bool),
+    pub transition_pos: (f32, f32),
+
+    #[arg(long)]    
+    pub screen_pos: bool,
+
 
     ///bezier curve to use for the transition
     ///https://cubic-bezier.com is a good website to get these values from

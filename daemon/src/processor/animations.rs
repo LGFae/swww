@@ -5,12 +5,12 @@ use std::{
 };
 
 use log::debug;
-use utils::{communication::TransitionType, comp_decomp::ReadiedPack};
+use utils::{communication::{TransitionType,Position}, comp_decomp::ReadiedPack};
 
 use super::send_frame;
 
 use keyframe::{
-    functions::BezierCurve, keyframes, mint::Vector2, num_traits::Pow, AnimationSequence,
+    functions::BezierCurve, keyframes, num_traits::Pow , mint::Vector2, AnimationSequence,
 };
 
 macro_rules! send_transition_frame {
@@ -35,7 +35,7 @@ pub struct Transition {
     step: u8,
     fps: Duration,
     angle: f64,
-    pos: (u32, u32),
+    pos: Position,
     bezier: BezierCurve,
     wave: (f32, f32),
 }
@@ -55,26 +55,7 @@ impl Transition {
             step: transition.step,
             fps: Duration::from_nanos(1_000_000_000 / transition.fps as u64),
             angle: transition.angle,
-            pos: {
-
-                let x = {
-                    if transition.pos.2 {
-                        transition.pos.0
-                    } else {
-                        transition.pos.0 * dimensions.0 as f32
-                    }
-                };
-
-                let y = {
-                    if transition.pos.3 {
-                        dimensions.1 as f32 - transition.pos.1
-                    } else {
-                        (1.0 - transition.pos.1) * dimensions.1 as f32
-                    }
-                };
-
-                (x as u32, y as u32)
-            },
+            pos: transition.pos,
             bezier: BezierCurve::from(
                 Vector2 {
                     x: transition.bezier.0,
@@ -280,7 +261,7 @@ impl Transition {
     ) {
         let fps = self.fps;
         let (width, height) = (self.dimensions.0 as f32, self.dimensions.1 as f32);
-        let (center_x, center_y) = (self.pos.0 as f32, self.pos.1 as f32);
+        let (center_x, center_y) = self.pos.to_pixel(self.dimensions);
         let mut dist_center: f32 = 0.0;
         let dist_end: f32 = {
             let mut x = center_x;
@@ -333,7 +314,7 @@ impl Transition {
     ) {
         let fps = self.fps;
         let (width, height) = (self.dimensions.0 as f32, self.dimensions.1 as f32);
-        let (center_x, center_y) = (self.pos.0 as f32, self.pos.1 as f32);
+        let (center_x, center_y) = self.pos.to_pixel(self.dimensions);
         let mut dist_center = {
             let mut x = center_x;
             let mut y = center_y;
@@ -429,7 +410,7 @@ mod tests {
             step: 100,
             fps: Duration::from_nanos(1),
             angle: 0.0,
-            pos: (0, 0),
+            pos: Position::Percent(1.0, 1.0),
             bezier: BezierCurve::from(Vector2 { x: 1.0, y: 0.0 }, Vector2 { x: 0.0, y: 1.0 }),
             wave: (20.0, 20.0),
         }
