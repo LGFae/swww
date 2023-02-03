@@ -171,7 +171,13 @@ fn make_img_request(
                 },
                 path: match img.path.canonicalize() {
                     Ok(p) => p,
-                    Err(e) => return Err(format!("failed no canonicalize image path: {e}")),
+                    Err(e) => {
+                        if let Some("-") = img.path.to_str() {
+                            PathBuf::from("STDIN")
+                        } else {
+                            return Err(format!("failed no canonicalize image path: {e}"));
+                        }
+                    }
                 },
             },
             outputs.to_owned(),

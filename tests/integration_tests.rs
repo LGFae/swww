@@ -56,6 +56,7 @@ fn main() {
     sending_img_that_does_not_exist();
     sending_imgs_with_filter();
     sending_img_with_filter_that_does_not_exist();
+    sending_img_from_stdin();
     let output = query_outputs();
     sending_img_to_individual_monitors(&output);
     sending_img_to_monitor_that_does_not_exist();
@@ -121,6 +122,17 @@ fn sending_imgs_with_filter() {
             .success();
     }
 }
+
+fn sending_img_from_stdin() {
+    cmd()
+        .arg("img")
+        .arg("-")
+        .pipe_stdin("test_images/test1.jpg")
+        .expect("failed to pipw stdin")
+        .assert()
+        .success();
+}
+
 fn sending_img_with_filter_that_does_not_exist() {
     cmd()
         .arg("img")
