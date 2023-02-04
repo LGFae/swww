@@ -4,7 +4,7 @@ use std::{
     io::{BufReader, BufWriter},
     os::unix::net::UnixStream,
     path::{Path, PathBuf},
-    time::Duration,
+    time::Duration, fs::File,
 };
 
 use crate::comp_decomp::BitPack;
@@ -141,6 +141,16 @@ pub struct Img {
     pub img: Vec<u8>,
 }
 
+impl Img {
+    pub fn from_file(file: &File) -> Result<Self, String> {
+        let reader = BufReader::new(file);
+        match bincode::deserialize_from(reader) {
+            Ok(i) => Ok(i),
+            Err(e) => Err(format!("Failed to deserialize request: {e}")),
+        }
+    }
+}
+
 pub type AnimationRequest = Vec<(Animation, Vec<String>)>;
 pub type ImageRequest = (Transition, Vec<(Img, Vec<String>)>);
 
@@ -157,10 +167,37 @@ pub enum Request {
 impl Request {
     pub fn send(&self, stream: &UnixStream) -> Result<(), String> {
         let writer = BufWriter::new(stream);
-        match bincode::serialize_into(writer, self) {
-            Ok(()) => Ok(()),
-            Err(e) => Err(format!("Failed to serialize request: {e}")),
-        }
+        std::thread::scope(|s| {
+            let serializer = s.spawn(|| match bincode::serialize_into(writer, self) {
+                Ok(()) => Ok(()),
+                Err(e) => Err(format!("Failed to serialize request: {e}")),
+            });
+
+            match self {
+                Request::Animation(_anim) => (), // TODO
+                Request::Img((_, imgs)) => {
+                    if let Ok(mut cache_path) = get_cache_path() {
+                        s.spawn(move || {
+                            for (img, outputs) in imgs {
+                                for output in outputs {
+                                    cache_path.push(output);
+                                    let file = std::fs::File::create(&cache_path).unwrap();
+                                    let writer = BufWriter::new(file);
+                                    bincode::serialize_into(writer, img).unwrap();
+                                    cache_path.pop();
+                                }
+                            }
+                        });
+                    }
+                }
+                _ => (),
+            };
+
+            match serializer.join() {
+                Ok(result) => result,
+                Err(e) => Err(format!("{e:?}")),
+            }
+        })
     }
 
     pub fn receive(stream: &UnixStream) -> Result<Self, String> {
@@ -213,4 +250,23 @@ pub fn get_socket_path() -> PathBuf {
     };
     let runtime_dir = Path::new(&runtime_dir);
     runtime_dir.join("swww.socket")
+}
+
+pub fn get_cache_path() -> Result<PathBuf, String> {
+    let cache_dir = match std::env::var("XDG_CACHE_HOME") {
+        Ok(dir) => dir + "/swww",
+        Err(_) => match std::env::var("HOME") {
+            Ok(dir) => dir + ".cache/swww",
+            Err(_) => return Err("failed to read both XDG_CACHE_HOME and HOME env vars".to_owned()),
+        },
+    };
+
+    let cache_path = PathBuf::from(&cache_dir);
+    if !cache_path.exists() {
+        if let Err(e) = std::fs::create_dir(&cache_path) {
+            return Err(format!("failed to create cache_path: {e}"));
+        }
+    }
+
+    Ok(cache_path)
 }
