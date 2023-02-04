@@ -428,7 +428,7 @@ fn make_transition(img: &cli::Img) -> communication::Transition {
 
     let x = match img.transition_pos.x {
         cli::CliCoord::Percent(x) => {
-            if !(0.0..1.0).contains(&x) {
+            if !(0.0..=1.0).contains(&x) {
                 println!("Warning: x value not in range [0,1] position might be set outside screen: {}", x);
             }
             Coord::Percent(x)
@@ -438,7 +438,7 @@ fn make_transition(img: &cli::Img) -> communication::Transition {
 
     let y = match img.transition_pos.y {
         cli::CliCoord::Percent(y) => {
-            if !(0.0..1.0).contains(&y) {
+            if !(0.0..=1.0).contains(&y) {
                 println!("Warning: y value not in range [0,1] position might be set outside screen: {}", y);
             }
             Coord::Percent(y)

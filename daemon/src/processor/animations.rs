@@ -6,7 +6,7 @@ use std::{
 
 use log::debug;
 use utils::{
-    communication::{Position,Coord, TransitionType},
+    communication::{Position, TransitionType},
     comp_decomp::ReadiedPack,
 };
 
@@ -380,6 +380,7 @@ mod tests {
     use super::*;
     use keyframe::mint::Vector2;
     use smithay_client_toolkit::reexports::calloop::channel::{self, Channel, SyncSender};
+    use utils::communication::Coord;
 
     #[allow(clippy::type_complexity)]
     fn make_senders_and_receivers() -> (
