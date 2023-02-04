@@ -155,7 +155,7 @@ pub enum Request {
 }
 
 impl Request {
-    pub fn send(&mut self, stream: &UnixStream) -> Result<(), String> {
+    pub fn send(&self, stream: &UnixStream) -> Result<(), String> {
         let writer = BufWriter::new(stream);
         match bincode::serialize_into(writer, self) {
             Ok(()) => Ok(()),
@@ -163,7 +163,7 @@ impl Request {
         }
     }
 
-    pub fn receive(stream: &mut UnixStream) -> Result<Self, String> {
+    pub fn receive(stream: &UnixStream) -> Result<Self, String> {
         let reader = BufReader::new(stream);
         match bincode::deserialize_from(reader) {
             Ok(i) => Ok(i),

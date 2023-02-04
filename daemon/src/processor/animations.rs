@@ -206,7 +206,7 @@ impl Transition {
         let screen_diag = ((width.pow(2) + height.pow(2)) as f64).sqrt();
 
         let circle_radius = screen_diag / 2.0;
-        let max_offset = circle_radius.powf(2.0) * 2.0;
+        let max_offset = circle_radius.pow(2) * 2.0;
 
         let angle = self.angle.to_radians();
 
@@ -225,7 +225,7 @@ impl Transition {
             let x = pix_x - center.0 as f64;
             let y = pix_y - center.1 as f64;
             let res = x * a + y * b + offset;
-            res >= radius.powf(2.0)
+            res >= radius.pow(2)
         };
 
         let (mut seq, start) = self.bezier_seq(0.0, max_offset as f32);
@@ -275,7 +275,7 @@ impl Transition {
             if y < height / 2.0 {
                 y = height - 1.0 - y;
             }
-            ((x.pow(2) + y.pow(2)) as f32).sqrt()
+            f32::sqrt(x.pow(2) + y.pow(2))
         };
         let mut now = Instant::now();
 
@@ -289,7 +289,7 @@ impl Transition {
                     let pix_y = height - i / width;
                     let diff_x = pix_x.abs_diff(center_x as usize) as f32;
                     let diff_y = pix_y.abs_diff(center_y as usize) as f32;
-                    let pix_center_dist = (diff_x.powf(2.0) + diff_y.powf(2.0)).sqrt();
+                    let pix_center_dist = f32::sqrt(diff_x.pow(2) + diff_y.pow(2));
                     if pix_center_dist <= dist_center {
                         let step = self
                             .step
@@ -327,7 +327,7 @@ impl Transition {
             if y < height / 2.0 {
                 y = height - 1.0 - y;
             }
-            ((x.pow(2) + y.pow(2)) as f32).sqrt()
+            f32::sqrt(x.pow(2) + y.pow(2))
         };
         let mut now = Instant::now();
 
@@ -341,7 +341,7 @@ impl Transition {
                     let pix_y = height - i / width;
                     let diff_x = pix_x.abs_diff(center_x as usize) as f32;
                     let diff_y = pix_y.abs_diff(center_y as usize) as f32;
-                    let pix_center_dist = (diff_x.powf(2.0) + diff_y.powf(2.0)).sqrt();
+                    let pix_center_dist = f32::sqrt(diff_x.pow(2) + diff_y.pow(2));
                     if pix_center_dist >= dist_center {
                         let step = self
                             .step

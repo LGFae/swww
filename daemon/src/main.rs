@@ -447,11 +447,11 @@ fn main_loop(
 
 fn recv_socket_msg(
     mut bgs: RefMut<Vec<Bg>>,
-    mut stream: UnixStream,
+    stream: UnixStream,
     loop_signal: &calloop::LoopSignal,
     proc: &mut Processor,
 ) -> Result<(), String> {
-    let request = Request::receive(&mut stream);
+    let request = Request::receive(&stream);
     let answer = match request {
         Ok(Request::Animation(animations)) => {
             let mut result = Answer::Ok;
