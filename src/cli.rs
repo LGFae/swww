@@ -262,15 +262,15 @@ pub struct Img {
 
     ///This is only used for the 'grow','outer' transitions. It controls the center of circle (default is 'center').
     ///
-    ///position values are in the format 'x,y' where x and y are floats and in the range [0.0,1.0] and represent the Percent of screen dimension
-    ///
-    ///if the values are not floats then they represent the pixel position on the screen eg: '200,400'
+    ///position values can be given in both percentage values and pixel values:
+    ///  float values are interpretted as percentages and integer values as pixel values
+    ///  eg: 0.5,0.5 means 50% of the screen width and 50% of the screen height
+    ///      200,400 means 200 pixels from the left and 400 pixels from the bottom
     ///
     ///the value can also be an alias which will set the position accordingly):
     /// 'center' | 'top' | 'left' | 'right' | 'bottom' | 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
     #[arg(long, env = "SWWW_TRANSITION_POS", default_value = "center", value_parser=parse_coords)]
     pub transition_pos: CliPosition,
-
 
     ///bezier curve to use for the transition
     ///https://cubic-bezier.com is a good website to get these values from
@@ -346,7 +346,7 @@ fn parse_coords(raw: &str) -> Result<CliPosition, String> {
             _ => return Err(format!("Invalid position keyword: {raw}")),
         }
     }
-    
+
     let x = coords[0];
     let y = coords[1];
 
