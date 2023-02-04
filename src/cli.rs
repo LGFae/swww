@@ -103,10 +103,22 @@ impl std::str::FromStr for TransitionType {
 }
 
 #[derive(Clone)]
-pub enum CliPosition {
-    Percent(f32, f32),
-    Pixel(f32, f32),
+pub enum CliCoord {
+    Percent(f32),
+    Pixel(f32),
+}
+
+#[derive(Clone)]
+pub struct CliPosition {
+    pub x: CliCoord,
+    pub y: CliCoord,
     //Unknown(f32, f32),
+}
+
+impl CliPosition {
+    pub fn new(x: CliCoord, y: CliCoord) -> Self {
+        Self { x, y }
+    }
 }
 
 #[derive(Parser)]
@@ -317,31 +329,58 @@ fn parse_coords(raw: &str) -> Result<CliPosition, String> {
     if coords.len() != 2 {
         match coords[0] {
             "center" => {
-                return Ok(CliPosition::Percent(0.5, 0.5));
+                return Ok(CliPosition::new(
+                    CliCoord::Percent(0.5),
+                    CliCoord::Percent(0.5)
+                ));
             }
             "top" => {
-                return Ok(CliPosition::Percent(0.5, 1.0));
+                return Ok(CliPosition::new(
+                    CliCoord::Percent(0.5),
+                    CliCoord::Percent(1.0)
+                ));
             }
             "bottom" => {
-                return Ok(CliPosition::Percent(0.5, 0.0));
+                return Ok(CliPosition::new(
+                    CliCoord::Percent(0.5),
+                    CliCoord::Percent(0.0)
+                ));
             }
             "left" => {
-                return Ok(CliPosition::Percent(0.0, 0.5));
+                return Ok(CliPosition::new(
+                    CliCoord::Percent(0.0),
+                    CliCoord::Percent(0.5)
+                ));
             }
             "right" => {
-                return Ok(CliPosition::Percent(1.0, 0.5));
+                return Ok(CliPosition::new(
+                    CliCoord::Percent(1.0),
+                    CliCoord::Percent(0.5)
+                ));
             }
             "top-left" => {
-                return Ok(CliPosition::Percent(0.0, 1.0));
+                return Ok(CliPosition::new(
+                    CliCoord::Percent(0.0),
+                    CliCoord::Percent(1.0)
+                ));
             }
             "top-right" => {
-                return Ok(CliPosition::Percent(1.0, 1.0));
+                return Ok(CliPosition::new(
+                    CliCoord::Percent(1.0),
+                    CliCoord::Percent(1.0)
+                ));
             }
             "bottom-left" => {
-                return Ok(CliPosition::Percent(0.0, 0.0));
+                return Ok(CliPosition::new(
+                    CliCoord::Percent(0.0),
+                    CliCoord::Percent(0.0)
+                ));
             }
             "bottom-right" => {
-                return Ok(CliPosition::Percent(1.0, 0.0));
+                return Ok(CliPosition::new(
+                    CliCoord::Percent(1.0),
+                    CliCoord::Percent(0.0)
+                ));
             }
             _ => return Err(format!("Invalid position keyword: {raw}")),
         }
@@ -350,16 +389,24 @@ fn parse_coords(raw: &str) -> Result<CliPosition, String> {
     let x = coords[0];
     let y = coords[1];
 
-    match (x.parse::<u32>(), y.parse::<u32>()) {
-        (Ok(x), Ok(y)) => Ok(CliPosition::Pixel(x as f32, y as f32)),
-        (Err(_),Err(_)) => {
-            match (x.parse::<f32>(), y.parse::<f32>()) {
-                (Ok(x), Ok(y)) => Ok(CliPosition::Percent(x as f32, y as f32)),
-                _ => Err(format!("Invalid position: {raw}, value must be numeric (float for percentage and int for pixel)")),
-            }
-        }
-        _ => Err(format!("Invalid position: {raw}, both values must be of the same type")),
-    }
+    let parsed_x = match x.parse::<u32>() {
+        Ok(x) => CliCoord::Pixel(x as f32),
+        Err(_) => match x.parse::<f32>() {
+            Ok(x) => CliCoord::Percent(x),
+            Err(_) => return Err(format!("Invalid x coord: {x}")),
+        },
+    };
+
+    let parsed_y = match y.parse::<u32>() {
+        Ok(y) => CliCoord::Pixel(y as f32),
+        Err(_) => match y.parse::<f32>() {
+            Ok(y) => CliCoord::Percent(y),
+            Err(_) => return Err(format!("Invalid y coord: {y}")),
+        },
+    };
+
+    Ok(CliPosition::new(parsed_x, parsed_y))
+
 }
 
 #[cfg(test)]

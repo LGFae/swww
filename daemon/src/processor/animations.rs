@@ -6,7 +6,7 @@ use std::{
 
 use log::debug;
 use utils::{
-    communication::{Position, TransitionType},
+    communication::{Position,Coord, TransitionType},
     comp_decomp::ReadiedPack,
 };
 
@@ -413,7 +413,10 @@ mod tests {
             step: 100,
             fps: Duration::from_nanos(1),
             angle: 0.0,
-            pos: Position::Percent(1.0, 1.0),
+            pos: Position::new(
+                Coord::Percent(0.0),
+                Coord::Percent(0.0),
+            ),
             bezier: BezierCurve::from(Vector2 { x: 1.0, y: 0.0 }, Vector2 { x: 0.0, y: 1.0 }),
             wave: (20.0, 20.0),
         }
