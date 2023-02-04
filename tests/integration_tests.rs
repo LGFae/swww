@@ -47,6 +47,10 @@ fn cmd() -> Command {
     Command::cargo_bin("swww").unwrap()
 }
 
+fn start_daemon() -> Command {
+    Command::cargo_bin("swww-daemon").unwrap()
+}
+
 fn main() {
     make_test_imgs();
 
@@ -73,12 +77,20 @@ fn sending_imgs() {
 }
 
 fn init_daemon() {
-    cmd().arg("init").assert().success();
+    std::thread::spawn(|| {
+        start_daemon().assert().success();
+    });
+    // sleep for a bit to allow the daemon to init correctly
+    // note that even though this is a race-condition, in the actual program we
+    // have implemented some proper syncronization. And, in here, it is *very*
+    // unlikely that this will ever be a problem, (and, if it is, it is not a
+    // very big deal, it will merely cause init_daemon_twice to false-fail)
+    std::thread::sleep(std::time::Duration::from_millis(100));
 }
 
-///This should fail since we already have an instance running
+/// Should fail since we already have an instance running
 fn init_daemon_twice() {
-    cmd().arg("init").assert().failure();
+    start_daemon().assert().failure();
 }
 
 fn sending_img_that_does_not_exist() {
