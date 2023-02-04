@@ -351,14 +351,14 @@ fn parse_coords(raw: &str) -> Result<CliPosition, String> {
     let y = coords[1];
 
     match (x.parse::<u32>(), y.parse::<u32>()) {
-        (Ok(x), Ok(y)) => return Ok(CliPosition::Pixel(x as f32, y as f32)),
+        (Ok(x), Ok(y)) => Ok(CliPosition::Pixel(x as f32, y as f32)),
         (Err(_),Err(_)) => {
             match (x.parse::<f32>(), y.parse::<f32>()) {
-                (Ok(x), Ok(y)) => return Ok(CliPosition::Percent(x as f32, y as f32)),
-                _ => return Err(format!("Invalid position: {raw}, value must be numeric (float for percentage and int for pixel)")),
+                (Ok(x), Ok(y)) => Ok(CliPosition::Percent(x as f32, y as f32)),
+                _ => Err(format!("Invalid position: {raw}, value must be numeric (float for percentage and int for pixel)")),
             }
         }
-        _ => return Err(format!("Invalid position: {raw}, both values must be of the same type")),
+        _ => Err(format!("Invalid position: {raw}, both values must be of the same type")),
     }
 }
 
