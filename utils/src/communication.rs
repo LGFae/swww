@@ -9,10 +9,10 @@ use std::{
 
 use crate::comp_decomp::BitPack;
 
-#[derive(PartialEq, Clone, Serialize, Deserialize,Debug)]
+#[derive(PartialEq, Clone, Serialize, Deserialize, Debug)]
 pub enum Position {
-    Pixel(f32,f32),
-    Percent(f32,f32),
+    Pixel(f32, f32),
+    Percent(f32, f32),
 }
 
 impl Position {

@@ -5,12 +5,15 @@ use std::{
 };
 
 use log::debug;
-use utils::{communication::{TransitionType,Position}, comp_decomp::ReadiedPack};
+use utils::{
+    communication::{Position, TransitionType},
+    comp_decomp::ReadiedPack,
+};
 
 use super::send_frame;
 
 use keyframe::{
-    functions::BezierCurve, keyframes, num_traits::Pow , mint::Vector2, AnimationSequence,
+    functions::BezierCurve, keyframes, mint::Vector2, num_traits::Pow, AnimationSequence,
 };
 
 macro_rules! send_transition_frame {

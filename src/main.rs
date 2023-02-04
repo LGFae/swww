@@ -13,7 +13,7 @@ use std::{
 };
 
 use utils::{
-    communication::{self, get_socket_path, AnimationRequest, Answer, Request,Position},
+    communication::{self, get_socket_path, AnimationRequest, Answer, Position, Request},
     comp_decomp::BitPack,
 };
 
@@ -426,19 +426,16 @@ fn img_resize(
 fn make_transition(img: &cli::Img) -> communication::Transition {
     let mut angle = img.transition_angle;
 
-    
-    let mut pos =  match img.transition_pos {
-        cli::CliPosition::Percent(x,y) => {
+    let mut pos = match img.transition_pos {
+        cli::CliPosition::Percent(x, y) => {
             if !(0.0..1.0).contains(&x) && !(0.0..1.0).contains(&y) {
                 println!("Warning: Percentage values not in range [0,1], position might be set out of screen: {},{}", x, y);
             }
-            Position::Percent(x,y)
-        },
-        cli::CliPosition::Pixel(x,y) => {
-            Position::Pixel(x,y)
-        },
+            Position::Percent(x, y)
+        }
+        cli::CliPosition::Pixel(x, y) => Position::Pixel(x, y),
     };
-    
+
     let transition_type = match img.transition_type {
         cli::TransitionType::Simple => communication::TransitionType::Simple,
         cli::TransitionType::Wipe => communication::TransitionType::Wipe,
