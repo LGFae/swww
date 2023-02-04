@@ -428,15 +428,16 @@ fn make_transition(img: &cli::Img) -> communication::Transition {
 
     
     let mut pos =  match img.transition_pos {
-        cli::CliPosition::Percent(x,y) => match img.screen_pos {
-                true => Position::Pixel(x,y),
-                false => Position::Percent(x,y),
-            },
-        cli::CliPosition::Pixel(x,y) => Position::Pixel(x,y),
+        cli::CliPosition::Percent(x,y) => {
+            if !(0.0..1.0).contains(&x) && !(0.0..1.0).contains(&y) {
+                println!("Warning: Percentage values not in range [0,1], position might be set out of screen: {},{}", x, y);
+            }
+            Position::Percent(x,y)
+        },
+        cli::CliPosition::Pixel(x,y) => {
+            Position::Pixel(x,y)
+        },
     };
-    
-
-    println!("pos: {:?}", pos.to_pixel((1920,1080)));
     
     let transition_type = match img.transition_type {
         cli::TransitionType::Simple => communication::TransitionType::Simple,

@@ -268,11 +268,8 @@ pub struct Img {
     ///
     ///the value can also be an alias which will set the position accordingly):
     /// 'center' | 'top' | 'left' | 'right' | 'bottom' | 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
-    #[arg(long, env = "SWWW_TRANSITION_POS", default_value = "center", value_parser = parse_coords)]
+    #[arg(long, env = "SWWW_TRANSITION_POS", default_value = "center", value_parser=parse_coords)]
     pub transition_pos: CliPosition,
-
-    #[arg(long)]    
-    pub screen_pos: bool,
 
 
     ///bezier curve to use for the transition
@@ -354,25 +351,14 @@ fn parse_coords(raw: &str) -> Result<CliPosition, String> {
     let y = coords[1];
 
     match (x.parse::<u32>(), y.parse::<u32>()) {
-        (Ok(x), Ok(y)) => {
-            return Ok(CliPosition::Pixel(x as f32, y as f32));
-        }
+        (Ok(x), Ok(y)) => return Ok(CliPosition::Pixel(x as f32, y as f32)),
         (Err(_),Err(_)) => {
             match (x.parse::<f32>(), y.parse::<f32>()) {
-                (Ok(x), Ok(y)) => {
-                    if (0.0..1.0).contains(&x) && (0.0..1.0).contains(&y) {
-                        return Ok(CliPosition::Percent(x as f32, y as f32));
-                    }
-                    return Err(format!("Invalid position: {raw}, percentage values must be between 0 and 1"));
-                },
-                _ => {
-                    return Err(format!("Invalid position: {raw}, value must be numeric (float for percentage and int for pixel)"));
-                }
+                (Ok(x), Ok(y)) => return Ok(CliPosition::Percent(x as f32, y as f32)),
+                _ => return Err(format!("Invalid position: {raw}, value must be numeric (float for percentage and int for pixel)")),
             }
         }
-        _ => {
-            return Err(format!("Invalid position: {raw}, both values must be of the same type"));
-        }
+        _ => return Err(format!("Invalid position: {raw}, both values must be of the same type")),
     }
 }
 
