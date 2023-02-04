@@ -9,6 +9,53 @@ use std::{
 
 use crate::comp_decomp::BitPack;
 
+#[derive(PartialEq, Clone, Serialize, Deserialize, Debug)]
+pub enum Coord {
+    Pixel(f32),
+    Percent(f32),
+}
+
+#[derive(PartialEq, Clone, Serialize, Deserialize, Debug)]
+pub struct Position {
+    pub x: Coord,
+    pub y: Coord,
+}
+
+impl Position {
+    
+    pub fn new(x: Coord, y: Coord) -> Self {
+        Self { x, y }
+    }
+
+    pub fn to_pixel(&self, dim: (u32, u32)) -> (f32, f32) {
+        let x = match self.x {
+            Coord::Pixel(x) => x,
+            Coord::Percent(x) => x * dim.0 as f32,
+        };
+
+        let y = match self.y {
+            Coord::Pixel(y) => y,
+            Coord::Percent(y) => y * dim.1 as f32,
+        };
+
+        (x, y)
+    }
+
+    pub fn to_percent(&self, dim: (u32, u32)) -> (f32, f32) {
+        let x = match self.x {
+            Coord::Pixel(x) => x / dim.0 as f32,
+            Coord::Percent(x) => x,
+        };
+
+        let y = match self.y {
+            Coord::Pixel(y) => y / dim.1 as f32,
+            Coord::Percent(y) => y,
+        };
+
+        (x, y)
+    }
+}
+
 #[derive(PartialEq, Eq, Clone, Serialize, Deserialize)]
 pub enum BgImg {
     Color([u8; 3]),
@@ -83,7 +130,7 @@ pub struct Transition {
     pub step: u8,
     pub fps: u8,
     pub angle: f64,
-    pub pos: (f32, f32),
+    pub pos: Position,
     pub bezier: (f32, f32, f32, f32),
     pub wave: (f32, f32),
 }

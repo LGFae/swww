@@ -5,7 +5,10 @@ use std::{
 };
 
 use log::debug;
-use utils::{communication::TransitionType, comp_decomp::ReadiedPack};
+use utils::{
+    communication::{Position, TransitionType},
+    comp_decomp::ReadiedPack,
+};
 
 use super::send_frame;
 
@@ -35,7 +38,7 @@ pub struct Transition {
     step: u8,
     fps: Duration,
     angle: f64,
-    pos: (f32, f32),
+    pos: Position,
     bezier: BezierCurve,
     wave: (f32, f32),
 }
@@ -261,7 +264,7 @@ impl Transition {
     ) {
         let fps = self.fps;
         let (width, height) = (self.dimensions.0 as f32, self.dimensions.1 as f32);
-        let (center_x, center_y) = (width * self.pos.0, height * self.pos.1);
+        let (center_x, center_y) = self.pos.to_pixel(self.dimensions);
         let mut dist_center: f32 = 0.0;
         let dist_end: f32 = {
             let mut x = center_x;
@@ -314,7 +317,7 @@ impl Transition {
     ) {
         let fps = self.fps;
         let (width, height) = (self.dimensions.0 as f32, self.dimensions.1 as f32);
-        let (center_x, center_y) = (width * self.pos.0, height * self.pos.1);
+        let (center_x, center_y) = self.pos.to_pixel(self.dimensions);
         let mut dist_center = {
             let mut x = center_x;
             let mut y = center_y;
@@ -377,6 +380,7 @@ mod tests {
     use super::*;
     use keyframe::mint::Vector2;
     use smithay_client_toolkit::reexports::calloop::channel::{self, Channel, SyncSender};
+    use utils::communication::Coord;
 
     #[allow(clippy::type_complexity)]
     fn make_senders_and_receivers() -> (
@@ -410,7 +414,10 @@ mod tests {
             step: 100,
             fps: Duration::from_nanos(1),
             angle: 0.0,
-            pos: (0.0, 0.0),
+            pos: Position::new(
+                Coord::Percent(0.0),
+                Coord::Percent(0.0),
+            ),
             bezier: BezierCurve::from(Vector2 { x: 1.0, y: 0.0 }, Vector2 { x: 0.0, y: 1.0 }),
             wave: (20.0, 20.0),
         }

@@ -102,6 +102,25 @@ impl std::str::FromStr for TransitionType {
     }
 }
 
+#[derive(Clone)]
+pub enum CliCoord {
+    Percent(f32),
+    Pixel(f32),
+}
+
+#[derive(Clone)]
+pub struct CliPosition {
+    pub x: CliCoord,
+    pub y: CliCoord,
+    //Unknown(f32, f32),
+}
+
+impl CliPosition {
+    pub fn new(x: CliCoord, y: CliCoord) -> Self {
+        Self { x, y }
+    }
+}
+
 #[derive(Parser)]
 #[command(version, name = "swww")]
 ///A Solution to your Wayland Wallpaper Woes
@@ -261,12 +280,15 @@ pub struct Img {
 
     ///This is only used for the 'grow','outer' transitions. It controls the center of circle (default is 'center').
     ///
-    ///position values are in the format 'x,y' where x and y are in the range [0,1.0] and represent the percentage of screen dimension
+    ///position values can be given in both percentage values and pixel values:
+    ///  float values are interpretted as percentages and integer values as pixel values
+    ///  eg: 0.5,0.5 means 50% of the screen width and 50% of the screen height
+    ///      200,400 means 200 pixels from the left and 400 pixels from the bottom
     ///
     ///the value can also be an alias which will set the position accordingly):
     /// 'center' | 'top' | 'left' | 'right' | 'bottom' | 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
-    #[arg(long, env = "SWWW_TRANSITION_POS", default_value = "center", value_parser = parse_coords)]
-    pub transition_pos: (f32, f32),
+    #[arg(long, env = "SWWW_TRANSITION_POS", default_value = "center", value_parser=parse_coords)]
+    pub transition_pos: CliPosition,
 
     ///bezier curve to use for the transition
     ///https://cubic-bezier.com is a good website to get these values from
@@ -307,79 +329,90 @@ fn parse_bezier(raw: &str) -> Result<(f32, f32, f32, f32), String> {
     Ok(parsed)
 }
 
-// parses percentages and numbers in format of "<coord1>,<coord2>"
-fn parse_coords(raw: &str) -> Result<(f32, f32), String> {
+// parses Percents and numbers in format of "<coord1>,<coord2>"
+fn parse_coords(raw: &str) -> Result<CliPosition, String> {
     let coords = raw.split(',').map(|s| s.trim()).collect::<Vec<&str>>();
-    let x: &str;
-    let y: &str;
     if coords.len() != 2 {
         match coords[0] {
             "center" => {
-                x = "0.5";
-                y = "0.5";
+                return Ok(CliPosition::new(
+                    CliCoord::Percent(0.5),
+                    CliCoord::Percent(0.5)
+                ));
             }
             "top" => {
-                x = "0.5";
-                y = "1.0";
+                return Ok(CliPosition::new(
+                    CliCoord::Percent(0.5),
+                    CliCoord::Percent(1.0)
+                ));
             }
             "bottom" => {
-                x = "0.5";
-                y = "0";
+                return Ok(CliPosition::new(
+                    CliCoord::Percent(0.5),
+                    CliCoord::Percent(0.0)
+                ));
             }
             "left" => {
-                x = "0";
-                y = "0.5";
+                return Ok(CliPosition::new(
+                    CliCoord::Percent(0.0),
+                    CliCoord::Percent(0.5)
+                ));
             }
             "right" => {
-                x = "1.0";
-                y = "0.5";
+                return Ok(CliPosition::new(
+                    CliCoord::Percent(1.0),
+                    CliCoord::Percent(0.5)
+                ));
             }
             "top-left" => {
-                x = "0";
-                y = "1.0";
+                return Ok(CliPosition::new(
+                    CliCoord::Percent(0.0),
+                    CliCoord::Percent(1.0)
+                ));
             }
             "top-right" => {
-                x = "1.0";
-                y = "1.0";
+                return Ok(CliPosition::new(
+                    CliCoord::Percent(1.0),
+                    CliCoord::Percent(1.0)
+                ));
             }
             "bottom-left" => {
-                x = "0";
-                y = "0";
+                return Ok(CliPosition::new(
+                    CliCoord::Percent(0.0),
+                    CliCoord::Percent(0.0)
+                ));
             }
             "bottom-right" => {
-                x = "1.0%";
-                y = "0";
+                return Ok(CliPosition::new(
+                    CliCoord::Percent(1.0),
+                    CliCoord::Percent(0.0)
+                ));
             }
             _ => return Err(format!("Invalid position keyword: {raw}")),
         }
-    } else {
-        x = coords[0];
-        y = coords[1];
     }
 
-    //parse x coord
-    let parsed_x = match x.parse::<f32>() {
-        Ok(x) => {
-            if !(0.0..=1.0).contains(&x) {
-                return Err(format!("x coord not in range [0,1.0]: {x}"));
-            }
-            x
-        }
-        Err(_) => return Err(format!("Invalid x coord: {x}")),
+    let x = coords[0];
+    let y = coords[1];
+
+    let parsed_x = match x.parse::<u32>() {
+        Ok(x) => CliCoord::Pixel(x as f32),
+        Err(_) => match x.parse::<f32>() {
+            Ok(x) => CliCoord::Percent(x),
+            Err(_) => return Err(format!("Invalid x coord: {x}")),
+        },
     };
 
-    //parse y coord
-    let parsed_y = match y.parse::<f32>() {
-        Ok(y) => {
-            if !(0.0..=1.0).contains(&y) {
-                return Err(format!("y coord not in range [0,1.0]: {y}"));
-            }
-            y
-        }
-        Err(_) => return Err(format!("Invalid y coord: {y}")),
+    let parsed_y = match y.parse::<u32>() {
+        Ok(y) => CliCoord::Pixel(y as f32),
+        Err(_) => match y.parse::<f32>() {
+            Ok(y) => CliCoord::Percent(y),
+            Err(_) => return Err(format!("Invalid y coord: {y}")),
+        },
     };
 
-    Ok((parsed_x, parsed_y))
+    Ok(CliPosition::new(parsed_x, parsed_y))
+
 }
 
 #[cfg(test)]

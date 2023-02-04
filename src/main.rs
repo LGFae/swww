@@ -13,9 +13,10 @@ use std::{
 };
 
 use utils::{
-    communication::{self, get_socket_path, AnimationRequest, Answer, Request},
+    communication::{self, get_socket_path, AnimationRequest, Answer, Position, Request, Coord},
     comp_decomp::BitPack,
 };
+
 mod cli;
 use cli::Swww;
 
@@ -430,7 +431,29 @@ fn img_resize(
 
 fn make_transition(img: &cli::Img) -> communication::Transition {
     let mut angle = img.transition_angle;
-    let mut pos = img.transition_pos;
+
+    let x = match img.transition_pos.x {
+        cli::CliCoord::Percent(x) => {
+            if !(0.0..=1.0).contains(&x) {
+                println!("Warning: x value not in range [0,1] position might be set outside screen: {}", x);
+            }
+            Coord::Percent(x)
+        },
+        cli::CliCoord::Pixel(x) => Coord::Pixel(x),
+    };
+
+    let y = match img.transition_pos.y {
+        cli::CliCoord::Percent(y) => {
+            if !(0.0..=1.0).contains(&y) {
+                println!("Warning: y value not in range [0,1] position might be set outside screen: {}", y);
+            }
+            Coord::Percent(y)
+        },
+        cli::CliCoord::Pixel(y) => Coord::Pixel(y),
+    };
+
+    let mut pos = Position::new(x, y);
+
     let transition_type = match img.transition_type {
         cli::TransitionType::Simple => communication::TransitionType::Simple,
         cli::TransitionType::Wipe => communication::TransitionType::Wipe,
@@ -454,11 +477,17 @@ fn make_transition(img: &cli::Img) -> communication::Transition {
             communication::TransitionType::Wipe
         }
         cli::TransitionType::Center => {
-            pos = (0.5, 0.5);
+            pos = Position::new(
+                Coord::Percent(0.5),
+                Coord::Percent(0.5),
+            );
             communication::TransitionType::Grow
         }
         cli::TransitionType::Any => {
-            pos = (rand::random::<f32>(), rand::random::<f32>());
+            pos = Position::new(
+                Coord::Percent(rand::random::<f32>()),
+                Coord::Percent(rand::random::<f32>()),
+            );
             if rand::random::<u8>() % 2 == 0 {
                 communication::TransitionType::Grow
             } else {
@@ -466,7 +495,10 @@ fn make_transition(img: &cli::Img) -> communication::Transition {
             }
         }
         cli::TransitionType::Random => {
-            pos = (rand::random::<f32>(), rand::random::<f32>());
+            pos = Position::new(
+                Coord::Percent(rand::random::<f32>()),
+                Coord::Percent(rand::random::<f32>()),
+            );
             angle = rand::random();
             match rand::random::<u8>() % 4 {
                 0 => communication::TransitionType::Simple,
