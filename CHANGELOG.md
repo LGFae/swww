@@ -1,10 +1,17 @@
 ### Unreleased
 
+Improvements:
+  * you can now use absolute screen coordinates with `--transition-pos`
+  (@flick0)
+
 Fixes:
   * `swww query` not returing the image being displayed
   * document `--no_resize` and `--fill_color` options for `swww img`
   * reading img from stdin (now with a proper integration test to make sure
   it doesn't happen again) (#42)
+
+Internal:
+ * fixed `tests/integration_tests.rs` calling the wrong `swww-daemon` binary
 
 ### 0.7.0
 
