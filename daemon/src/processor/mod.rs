@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use std::{sync::mpsc, thread, time::Duration};
 
-use utils::communication::{Answer, BgInfo, Img};
+use utils::communication::{Animation, Answer, BgInfo, Img};
 
 mod animations;
 use utils::comp_decomp::ReadiedPack;
@@ -129,12 +129,12 @@ impl Processor {
     }
 
     pub fn import_cached_img(&mut self, info: BgInfo, old_img: &mut [u8]) -> Option<PathBuf> {
-        if let Some(Img { img, path }) = get_cached_bg(&info.name) {
-            if old_img.len() < img.len() {
+        if let Some((Img { img, path }, anim)) = get_cached_bg(&info.name) {
+            let output_size = old_img.len();
+            if output_size < img.len() {
                 info!(
-                    "{} monitor's buffer size ({}) is smaller than cache's image ({})",
+                    "{} monitor's buffer size ({output_size}) is smaller than cache's image ({})",
                     info.name,
-                    old_img.len(),
                     img.len()
                 );
                 return None;
@@ -152,6 +152,20 @@ impl Processor {
                 .spawn(move || {
                     let mut outputs = vec![info.name];
                     send_frame(pack, &mut outputs, Duration::new(0, 0), &sender, &stop_recv);
+                    if let Some(anim) = anim {
+                        let mut now = std::time::Instant::now();
+                        if anim.animation.len() == 1 {
+                            return;
+                        }
+                        for (frame, duration) in anim.animation.iter().cycle() {
+                            let frame = frame.ready(output_size);
+                            let timeout = duration.saturating_sub(now.elapsed());
+                            if send_frame(frame, &mut outputs, timeout, &sender, &stop_recv) {
+                                return;
+                            }
+                            now = std::time::Instant::now();
+                        }
+                    }
                 })
             {
                 error!("failed to spawn 'cache importing' thread: {}", e);
@@ -199,7 +213,7 @@ fn send_frame(
     }
 }
 
-fn get_cached_bg(output: &str) -> Option<Img> {
+fn get_cached_bg(output: &str) -> Option<(Img, Option<Animation>)> {
     let cache_path = match utils::communication::get_cache_path() {
         Ok(mut path) => {
             path.push(output);
@@ -223,8 +237,12 @@ fn get_cached_bg(output: &str) -> Option<Img> {
         }
     };
 
-    match Img::from_file(&cache_file) {
-        Ok(img) => Some(img),
+    let mut reader = std::io::BufReader::new(cache_file);
+    match Img::try_from(&mut reader) {
+        Ok(img) => match Animation::try_from(&mut reader) {
+            Ok(anim) => Some((img, Some(anim))),
+            Err(_) => Some((img, None)),
+        },
         Err(e) => {
             error!("failed to read bgs cache's file: {e}");
             None

@@ -1,10 +1,11 @@
 use serde::{Deserialize, Serialize};
 use std::{
     fmt,
+    fs::File,
     io::{BufReader, BufWriter},
     os::unix::net::UnixStream,
     path::{Path, PathBuf},
-    time::Duration, fs::File,
+    time::Duration,
 };
 
 use crate::comp_decomp::BitPack;
@@ -22,7 +23,6 @@ pub struct Position {
 }
 
 impl Position {
-    
     pub fn new(x: Coord, y: Coord) -> Self {
         Self { x, y }
     }
@@ -114,6 +114,16 @@ pub struct Animation {
     pub animation: Box<[(BitPack, Duration)]>,
 }
 
+impl TryFrom<&mut BufReader<File>> for Animation {
+    type Error = String;
+    fn try_from(file_reader: &mut BufReader<File>) -> Result<Self, Self::Error> {
+        match bincode::deserialize_from(file_reader) {
+            Ok(i) => Ok(i),
+            Err(e) => Err(format!("Failed to deserialize request: {e}")),
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum TransitionType {
     Simple,
@@ -141,10 +151,10 @@ pub struct Img {
     pub img: Vec<u8>,
 }
 
-impl Img {
-    pub fn from_file(file: &File) -> Result<Self, String> {
-        let reader = BufReader::new(file);
-        match bincode::deserialize_from(reader) {
+impl TryFrom<&mut BufReader<File>> for Img {
+    type Error = String;
+    fn try_from(file_reader: &mut BufReader<File>) -> Result<Self, Self::Error> {
+        match bincode::deserialize_from(file_reader) {
             Ok(i) => Ok(i),
             Err(e) => Err(format!("Failed to deserialize request: {e}")),
         }
@@ -174,14 +184,29 @@ impl Request {
             });
 
             match self {
-                Request::Animation(_anim) => (), // TODO
+                Request::Animation(anims) => {
+                    if let Ok(mut cache_path) = get_cache_path() {
+                        s.spawn(move || {
+                            for (anim, outputs) in anims {
+                                for output in outputs {
+                                    cache_path.push(output);
+                                    let file =
+                                        File::options().append(true).open(&cache_path).unwrap();
+                                    let writer = BufWriter::new(file);
+                                    bincode::serialize_into(writer, anim).unwrap();
+                                    cache_path.pop();
+                                }
+                            }
+                        });
+                    }
+                }
                 Request::Img((_, imgs)) => {
                     if let Ok(mut cache_path) = get_cache_path() {
                         s.spawn(move || {
                             for (img, outputs) in imgs {
                                 for output in outputs {
                                     cache_path.push(output);
-                                    let file = std::fs::File::create(&cache_path).unwrap();
+                                    let file = File::create(&cache_path).unwrap();
                                     let writer = BufWriter::new(file);
                                     bincode::serialize_into(writer, img).unwrap();
                                     cache_path.pop();
