@@ -1,5 +1,8 @@
 ### Unreleased
 
+
+### 0.7.1
+
 Improvements:
   * you can now use absolute screen coordinates with `--transition-pos`
   (@flick0)
