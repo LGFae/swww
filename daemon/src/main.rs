@@ -126,26 +126,9 @@ impl Bg {
                     let height = height as usize * scale_factor as usize;
                     self.pool.resize(width * height * 4).unwrap();
 
-                    if let Some(img) = get_cached_bg(&self.info.name) {
-                        let dim = self.info.real_dim();
-                        let stride = 4 * dim.0 as i32;
-                        let width = dim.0 as i32;
-                        let height = dim.1 as i32;
-
-                        let buffer = self
-                            .pool
-                            .buffer(0, width, height, stride, wl_shm::Format::Xrgb8888);
-                        let canvas = self.pool.mmap();
-                        canvas.copy_from_slice(&img.img);
-                        self.info.img = BgImg::Img(img.path);
-                        self.surface.attach(Some(&buffer), 0, 0);
-                        self.surface.damage_buffer(0, 0, width, height);
-                        self.surface.commit();
-                    } else {
-                        // We must clear the outputs so that animations work due to the new underlying
-                        // buffer needing to be the exact size of the monitor's.
-                        self.clear([0, 0, 0]);
-                    }
+                    // We must clear the outputs so that animations work due to the new underlying
+                    // buffer needing to be the exact size of the monitor's.
+                    self.clear([0, 0, 0]);
                     debug!("Configured {}", self.info);
                     Some(false)
                 } else {
@@ -207,6 +190,12 @@ impl Bg {
         let dim = self.info.real_dim();
         let size = dim.0 as usize * dim.1 as usize * 4;
         &self.pool.mmap()[0..size]
+    }
+
+    fn get_current_img_mut(&mut self) -> &mut [u8] {
+        let dim = self.info.real_dim();
+        let size = dim.0 as usize * dim.1 as usize * 4;
+        &mut self.pool.mmap()[0..size]
     }
 }
 
@@ -446,6 +435,8 @@ fn main_loop(
                     if should_remove {
                         bgs.remove(i);
                     } else {
+                        let info = bgs[i].info.clone();
+                        processor.import_cached_img(info, bgs[i].get_current_img_mut());
                         i += 1;
                     }
                 } else {
@@ -555,35 +546,4 @@ fn clear_outputs(bgs: &mut RefMut<Vec<Bg>>, clear: &Clear, proc: &mut Processor)
             .for_each(|bg| bg.clear(clear.color));
     }
     Answer::Ok
-}
-
-fn get_cached_bg(output: &str) -> Option<Img> {
-    let cache_path = match utils::communication::get_cache_path(){
-        Ok(mut path) => {
-            path.push(output);
-                path
-        },
-        Err(e) => {
-            error!("failed to get bgs cache's path: {e}");
-            return None;
-        }
-    };
-
-    let cache_file = match std::fs::File::open(cache_path) {
-        Ok(file) => file,
-        Err(e) => if e.kind() == std::io::ErrorKind::NotFound {
-            return None;
-        } else {
-            error!("failed to open bgs cache's file: {e}");
-            return None;
-        }
-    };
-
-    match Img::from_file(&cache_file) {
-        Ok(img) => Some(img),
-        Err(e) => {
-            error!("failed to read bgs cache's file: {e}");
-            None
-        }
-    }
 }

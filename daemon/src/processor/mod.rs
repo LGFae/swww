@@ -1,11 +1,12 @@
-use log::debug;
+use log::{debug, error, info};
 
 use smithay_client_toolkit::reexports::calloop::channel::SyncSender;
 
+use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use std::{sync::mpsc, thread, time::Duration};
 
-use utils::communication::{Answer, Img};
+use utils::communication::{Answer, BgInfo, Img};
 
 mod animations;
 use utils::comp_decomp::ReadiedPack;
@@ -65,7 +66,7 @@ impl Processor {
                 })
             {
                 answer = Answer::Err(format!("failed to spawn transition thread: {e}"));
-                log::error!("failed to spawn 'transition' thread: {}", e);
+                error!("failed to spawn 'transition' thread: {}", e);
             };
         }
         answer
@@ -112,7 +113,7 @@ impl Processor {
             })
         {
             answer = Answer::Err(format!("failed to spawn animation thread: {e}"));
-            log::error!("failed to spawn 'animation' thread: {e}");
+            error!("failed to spawn 'animation' thread: {e}");
         };
 
         answer
@@ -125,6 +126,42 @@ impl Processor {
             .retain(|output| !to_stop.contains(output));
         self.anim_stoppers
             .retain(|a| a.send(to_stop.to_vec()).is_ok());
+    }
+
+    pub fn import_cached_img(&mut self, info: BgInfo, old_img: &mut [u8]) -> Option<PathBuf> {
+        if let Some(Img { img, path }) = get_cached_bg(&info.name) {
+            if old_img.len() < img.len() {
+                info!(
+                    "{} monitor's buffer size ({}) is smaller than cache's image ({})",
+                    info.name,
+                    old_img.len(),
+                    img.len()
+                );
+                return None;
+            }
+            let pack = ReadiedPack::new(old_img, &img, |cur, goal, _| {
+                *cur = *goal;
+            });
+
+            let sender = self.frame_sender.clone();
+            let (stopper, stop_recv) = mpsc::channel();
+            self.anim_stoppers.push(stopper);
+            if let Err(e) = thread::Builder::new()
+                .name("cache importing".to_string()) //Name our threads  for better log messages
+                .stack_size(TSTACK_SIZE) //the default of 2MB is way too overkill for this
+                .spawn(move || {
+                    let mut outputs = vec![info.name];
+                    send_frame(pack, &mut outputs, Duration::new(0, 0), &sender, &stop_recv);
+                })
+            {
+                error!("failed to spawn 'cache importing' thread: {}", e);
+                return None;
+            }
+
+            return Some(path);
+        }
+        info!("failed to find cached image for monitor '{}'", info.name);
+        None
     }
 }
 
@@ -159,5 +196,38 @@ fn send_frame(
     match sender.send((outputs.clone(), frame)) {
         Ok(()) => false,
         Err(_) => true,
+    }
+}
+
+fn get_cached_bg(output: &str) -> Option<Img> {
+    let cache_path = match utils::communication::get_cache_path() {
+        Ok(mut path) => {
+            path.push(output);
+            path
+        }
+        Err(e) => {
+            error!("failed to get bgs cache's path: {e}");
+            return None;
+        }
+    };
+
+    let cache_file = match std::fs::File::open(cache_path) {
+        Ok(file) => file,
+        Err(e) => {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                return None;
+            } else {
+                error!("failed to open bgs cache's file: {e}");
+                return None;
+            }
+        }
+    };
+
+    match Img::from_file(&cache_file) {
+        Ok(img) => Some(img),
+        Err(e) => {
+            error!("failed to read bgs cache's file: {e}");
+            None
+        }
     }
 }
