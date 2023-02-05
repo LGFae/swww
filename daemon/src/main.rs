@@ -438,7 +438,10 @@ fn main_loop(
                         bgs.remove(i);
                     } else {
                         let info = bgs[i].info.clone();
-                        processor.import_cached_img(info, bgs[i].get_current_img_mut());
+                        let old_img = bgs[i].get_current_img_mut();
+                        if let Some(path) = processor.import_cached_img(info, old_img) {
+                            bgs[i].info.img = BgImg::Img(path);
+                        }
                         i += 1;
                     }
                 } else {

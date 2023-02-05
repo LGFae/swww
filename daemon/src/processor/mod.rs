@@ -128,6 +128,7 @@ impl Processor {
             .retain(|a| a.send(to_stop.to_vec()).is_ok());
     }
 
+    #[must_use]
     pub fn import_cached_img(&mut self, info: BgInfo, old_img: &mut [u8]) -> Option<PathBuf> {
         if let Some((Img { img, path }, anim)) = get_cached_bg(&info.name) {
             let output_size = old_img.len();
