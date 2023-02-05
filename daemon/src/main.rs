@@ -124,7 +124,9 @@ impl Bg {
                     self.info.scale_factor = scale_factor;
                     let width = width as usize * scale_factor as usize;
                     let height = height as usize * scale_factor as usize;
-                    self.pool.resize(width * height * 4).unwrap();
+                    if let Err(e) = self.pool.resize(width * height * 4) {
+                        error!("failed to resize {} memory pool: {e}", &self.info.name);
+                    }
 
                     // We must clear the outputs so that animations work due to the new underlying
                     // buffer needing to be the exact size of the monitor's.

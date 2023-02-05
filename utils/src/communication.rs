@@ -103,27 +103,6 @@ impl fmt::Display for BgInfo {
     }
 }
 
-#[derive(Serialize, Deserialize)]
-pub struct Clear {
-    pub color: [u8; 3],
-    pub outputs: Vec<String>,
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct Animation {
-    pub animation: Box<[(BitPack, Duration)]>,
-}
-
-impl TryFrom<&mut BufReader<File>> for Animation {
-    type Error = String;
-    fn try_from(file_reader: &mut BufReader<File>) -> Result<Self, Self::Error> {
-        match bincode::deserialize_from(file_reader) {
-            Ok(i) => Ok(i),
-            Err(e) => Err(format!("Failed to deserialize request: {e}")),
-        }
-    }
-}
-
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum TransitionType {
     Simple,
@@ -146,12 +125,33 @@ pub struct Transition {
 }
 
 #[derive(Serialize, Deserialize)]
+pub struct Clear {
+    pub color: [u8; 3],
+    pub outputs: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize)]
 pub struct Img {
     pub path: PathBuf,
     pub img: Vec<u8>,
 }
 
 impl TryFrom<&mut BufReader<File>> for Img {
+    type Error = String;
+    fn try_from(file_reader: &mut BufReader<File>) -> Result<Self, Self::Error> {
+        match bincode::deserialize_from(file_reader) {
+            Ok(i) => Ok(i),
+            Err(e) => Err(format!("Failed to deserialize request: {e}")),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Animation {
+    pub animation: Box<[(BitPack, Duration)]>,
+}
+
+impl TryFrom<&mut BufReader<File>> for Animation {
     type Error = String;
     fn try_from(file_reader: &mut BufReader<File>) -> Result<Self, Self::Error> {
         match bincode::deserialize_from(file_reader) {
@@ -184,37 +184,18 @@ impl Request {
             });
 
             match self {
-                Request::Animation(anims) => {
-                    if let Ok(mut cache_path) = get_cache_path() {
-                        s.spawn(move || {
-                            for (anim, outputs) in anims {
-                                for output in outputs {
-                                    cache_path.push(output);
-                                    let file =
-                                        File::options().append(true).open(&cache_path).unwrap();
-                                    let writer = BufWriter::new(file);
-                                    bincode::serialize_into(writer, anim).unwrap();
-                                    cache_path.pop();
-                                }
-                            }
-                        });
+                Request::Animation(animations) => match get_cache_path() {
+                    Ok(cache_path) => {
+                        s.spawn(move || Self::cache_animations(animations, cache_path));
                     }
-                }
-                Request::Img((_, imgs)) => {
-                    if let Ok(mut cache_path) = get_cache_path() {
-                        s.spawn(move || {
-                            for (img, outputs) in imgs {
-                                for output in outputs {
-                                    cache_path.push(output);
-                                    let file = File::create(&cache_path).unwrap();
-                                    let writer = BufWriter::new(file);
-                                    bincode::serialize_into(writer, img).unwrap();
-                                    cache_path.pop();
-                                }
-                            }
-                        });
+                    Err(e) => eprintln!("failed to get cache path: {e}"),
+                },
+                Request::Img((_, images)) => match get_cache_path() {
+                    Ok(cache_path) => {
+                        s.spawn(move || Self::cache_images(images, cache_path));
                     }
-                }
+                    Err(e) => eprintln!("failed to get cache path: {e}"),
+                },
                 _ => (),
             };
 
@@ -230,6 +211,46 @@ impl Request {
         match bincode::deserialize_from(reader) {
             Ok(i) => Ok(i),
             Err(e) => Err(format!("Failed to deserialize request: {e}")),
+        }
+    }
+
+    fn cache_images(images: &[(Img, Vec<String>)], mut cache_path: PathBuf) {
+        for (img, outputs) in images {
+            for output in outputs {
+                cache_path.push(output);
+                match File::create(&cache_path) {
+                    Ok(file) => {
+                        let writer = BufWriter::new(file);
+                        if let Err(e) = bincode::serialize_into(writer, img) {
+                            eprintln!(
+                                "failed to serialize image into cache file '{cache_path:?}': {e}"
+                            )
+                        }
+                    }
+                    Err(e) => eprintln!("failed to create cache file '{cache_path:?}': {e}"),
+                }
+                cache_path.pop();
+            }
+        }
+    }
+
+    fn cache_animations(animations: &[(Animation, Vec<String>)], mut cache_path: PathBuf) {
+        for (animation, outputs) in animations {
+            for output in outputs {
+                cache_path.push(output);
+                match File::options().append(true).open(&cache_path) {
+                    Ok(file) => {
+                        let writer = BufWriter::new(file);
+                        if let Err(e) = bincode::serialize_into(writer, animation) {
+                            eprintln!("failed to serialize animation into cache file '{cache_path:?}': {e}")
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("failed to append animation to cache file '{cache_path:?}': {e}")
+                    }
+                }
+                cache_path.pop();
+            }
         }
     }
 }
