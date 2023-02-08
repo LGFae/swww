@@ -1,5 +1,8 @@
 ### Unreleased
 
+Improvements:
+  * Images (and animations) are now cached at `$XDG_CACHE_HOME` #65
+
 Internal:
   * Integration tests are not run by default. You must now use
   `cargo test -- --ignored` to run them. This will make it possible for some
