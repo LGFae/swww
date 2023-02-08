@@ -1,5 +1,12 @@
 ### Unreleased
 
+Internal:
+  * Integration tests are not run by default. You must now use
+  `cargo test -- --ignored` to run them. This will make it possible for some
+  people (like the ones trying to package `swww` at Nix) to run some of the
+  tests in a sandboxed environment where they don't have access to the wayland
+  server. If anyone is interested in running *all* tests, they can do that with
+  `cargo test -- --include-ignored`.
 
 ### 0.7.1
 
@@ -14,7 +21,7 @@ Fixes:
   it doesn't happen again) (#42)
 
 Internal:
- * fixed `tests/integration_tests.rs` calling the wrong `swww-daemon` binary
+  * fixed `tests/integration_tests.rs` calling the wrong `swww-daemon` binary
 
 ### 0.7.0
 

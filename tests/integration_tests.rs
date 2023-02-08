@@ -51,7 +51,9 @@ fn start_daemon() -> Command {
     Command::cargo_bin("swww-daemon").unwrap()
 }
 
-fn main() {
+#[test]
+#[ignore]
+fn general_commands() {
     make_test_imgs();
 
     init_daemon();

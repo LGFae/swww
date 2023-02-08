@@ -34,7 +34,3 @@ assert_cmd = "=2.0.8"
 clap = { version = "4.1", features = ["derive", "env"] }
 clap_complete = "=4.1.1"
 serde =  { version = "=1.0.152", features = [ "derive" ] }
-
-[[test]]
-name = "integration_tests"
-harness = false

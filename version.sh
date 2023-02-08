@@ -8,6 +8,10 @@ if [ $# -lt 1 ]; then
 	exit 1
 fi
 
+# don't forget testing everything
+pkill swww-daemon 
+cargo test -- --include-ignored || exit 1
+
 # Cargo.toml:
 sed "s/^version = .*/version = \"$1\"/" Cargo.toml > TMP \
 	&& mv TMP Cargo.toml
