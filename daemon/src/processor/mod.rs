@@ -3,7 +3,7 @@ use log::{debug, error, info};
 use smithay_client_toolkit::reexports::calloop::channel::SyncSender;
 
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Condvar, Mutex, RwLock};
 use std::{sync::mpsc, thread, time::Duration};
 
 use utils::communication::{Animation, Answer, BgInfo, Img};
@@ -20,14 +20,27 @@ pub struct Processor {
     frame_sender: SyncSender<(Vec<String>, ReadiedPack)>,
     anim_stoppers: Vec<mpsc::Sender<Vec<String>>>,
     on_going_transitions: Arc<RwLock<Vec<String>>>,
+    outputs_count: Arc<RwLock<u8>>,
+    ready_frame: Arc<Mutex<u8>>,
+    sync_anim: Arc<Condvar>,
 }
 
 impl Processor {
     pub fn new(frame_sender: SyncSender<(Vec<String>, ReadiedPack)>) -> Self {
         Self {
+            frame_sender,
             anim_stoppers: Vec::new(),
             on_going_transitions: Arc::new(RwLock::new(Vec::new())),
-            frame_sender,
+            outputs_count: Arc::new(RwLock::new(0)),
+            ready_frame: Arc::new(Mutex::new(0)),
+            sync_anim: Arc::new(Condvar::new()),
+        }
+    }
+
+    pub fn set_output_count(&mut self, outputs_count: u8) {
+        match self.outputs_count.write() {
+            Ok(mut guard) => *guard = outputs_count,
+            Err(e) => error!("failed to lock RwLock to update outputs_count: {e}"),
         }
     }
 
@@ -84,6 +97,9 @@ impl Processor {
         let (stopper, stop_recv) = mpsc::channel();
         let on_going_transitions = Arc::clone(&self.on_going_transitions);
 
+        let outputs_count = Arc::clone(&self.outputs_count);
+        let ready_frame = Arc::clone(&self.ready_frame);
+        let condvar = Arc::clone(&self.sync_anim);
         self.anim_stoppers.push(stopper);
         if let Err(e) = thread::Builder::new()
             .name("animation".to_string()) //Name our threads  for better log messages
@@ -104,6 +120,22 @@ impl Processor {
                 }
                 for (frame, duration) in animation.animation.iter().cycle() {
                     let frame = frame.ready(output_size);
+
+                    if animation.sync {
+                        let mut lock = ready_frame.lock().unwrap();
+                        let outputs_count = outputs_count.read().unwrap();
+                        *lock += 1;
+                        if *lock != *outputs_count {
+                            drop(outputs_count);
+                            while *lock != 0 {
+                                lock = condvar.wait_timeout(lock, *duration).unwrap().0;
+                            }
+                        } else {
+                            *lock = 0;
+                            condvar.notify_all();
+                        }
+                    }
+
                     let timeout = duration.saturating_sub(now.elapsed());
                     if send_frame(frame, &mut outputs, timeout, &sender, &stop_recv) {
                         return;
