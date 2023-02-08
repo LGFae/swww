@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::{
     fmt,
+    fs::File,
     io::{BufReader, BufWriter},
     os::unix::net::UnixStream,
     path::{Path, PathBuf},
@@ -22,7 +23,6 @@ pub struct Position {
 }
 
 impl Position {
-    
     pub fn new(x: Coord, y: Coord) -> Self {
         Self { x, y }
     }
@@ -103,17 +103,6 @@ impl fmt::Display for BgInfo {
     }
 }
 
-#[derive(Serialize, Deserialize)]
-pub struct Clear {
-    pub color: [u8; 3],
-    pub outputs: Vec<String>,
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct Animation {
-    pub animation: Box<[(BitPack, Duration)]>,
-}
-
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum TransitionType {
     Simple,
@@ -136,9 +125,40 @@ pub struct Transition {
 }
 
 #[derive(Serialize, Deserialize)]
+pub struct Clear {
+    pub color: [u8; 3],
+    pub outputs: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize)]
 pub struct Img {
     pub path: PathBuf,
     pub img: Vec<u8>,
+}
+
+impl TryFrom<&mut BufReader<File>> for Img {
+    type Error = String;
+    fn try_from(file_reader: &mut BufReader<File>) -> Result<Self, Self::Error> {
+        match bincode::deserialize_from(file_reader) {
+            Ok(i) => Ok(i),
+            Err(e) => Err(format!("Failed to deserialize request: {e}")),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Animation {
+    pub animation: Box<[(BitPack, Duration)]>,
+}
+
+impl TryFrom<&mut BufReader<File>> for Animation {
+    type Error = String;
+    fn try_from(file_reader: &mut BufReader<File>) -> Result<Self, Self::Error> {
+        match bincode::deserialize_from(file_reader) {
+            Ok(i) => Ok(i),
+            Err(e) => Err(format!("Failed to deserialize request: {e}")),
+        }
+    }
 }
 
 pub type AnimationRequest = Vec<(Animation, Vec<String>)>;
@@ -157,10 +177,33 @@ pub enum Request {
 impl Request {
     pub fn send(&self, stream: &UnixStream) -> Result<(), String> {
         let writer = BufWriter::new(stream);
-        match bincode::serialize_into(writer, self) {
-            Ok(()) => Ok(()),
-            Err(e) => Err(format!("Failed to serialize request: {e}")),
-        }
+        std::thread::scope(|s| {
+            let serializer = s.spawn(|| match bincode::serialize_into(writer, self) {
+                Ok(()) => Ok(()),
+                Err(e) => Err(format!("Failed to serialize request: {e}")),
+            });
+
+            match self {
+                Request::Animation(animations) => match get_cache_path() {
+                    Ok(cache_path) => {
+                        s.spawn(move || Self::cache_animations(animations, cache_path));
+                    }
+                    Err(e) => eprintln!("failed to get cache path: {e}"),
+                },
+                Request::Img((_, images)) => match get_cache_path() {
+                    Ok(cache_path) => {
+                        s.spawn(move || Self::cache_images(images, cache_path));
+                    }
+                    Err(e) => eprintln!("failed to get cache path: {e}"),
+                },
+                _ => (),
+            };
+
+            match serializer.join() {
+                Ok(result) => result,
+                Err(e) => Err(format!("{e:?}")),
+            }
+        })
     }
 
     pub fn receive(stream: &UnixStream) -> Result<Self, String> {
@@ -168,6 +211,46 @@ impl Request {
         match bincode::deserialize_from(reader) {
             Ok(i) => Ok(i),
             Err(e) => Err(format!("Failed to deserialize request: {e}")),
+        }
+    }
+
+    fn cache_images(images: &[(Img, Vec<String>)], mut cache_path: PathBuf) {
+        for (img, outputs) in images {
+            for output in outputs {
+                cache_path.push(output);
+                match File::create(&cache_path) {
+                    Ok(file) => {
+                        let writer = BufWriter::new(file);
+                        if let Err(e) = bincode::serialize_into(writer, img) {
+                            eprintln!(
+                                "failed to serialize image into cache file '{cache_path:?}': {e}"
+                            )
+                        }
+                    }
+                    Err(e) => eprintln!("failed to create cache file '{cache_path:?}': {e}"),
+                }
+                cache_path.pop();
+            }
+        }
+    }
+
+    fn cache_animations(animations: &[(Animation, Vec<String>)], mut cache_path: PathBuf) {
+        for (animation, outputs) in animations {
+            for output in outputs {
+                cache_path.push(output);
+                match File::options().append(true).open(&cache_path) {
+                    Ok(file) => {
+                        let writer = BufWriter::new(file);
+                        if let Err(e) = bincode::serialize_into(writer, animation) {
+                            eprintln!("failed to serialize animation into cache file '{cache_path:?}': {e}")
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("failed to append animation to cache file '{cache_path:?}': {e}")
+                    }
+                }
+                cache_path.pop();
+            }
         }
     }
 }
@@ -213,4 +296,23 @@ pub fn get_socket_path() -> PathBuf {
     };
     let runtime_dir = Path::new(&runtime_dir);
     runtime_dir.join("swww.socket")
+}
+
+pub fn get_cache_path() -> Result<PathBuf, String> {
+    let cache_dir = match std::env::var("XDG_CACHE_HOME") {
+        Ok(dir) => dir + "/swww",
+        Err(_) => match std::env::var("HOME") {
+            Ok(dir) => dir + ".cache/swww",
+            Err(_) => return Err("failed to read both XDG_CACHE_HOME and HOME env vars".to_owned()),
+        },
+    };
+
+    let cache_path = PathBuf::from(&cache_dir);
+    if !cache_path.exists() {
+        if let Err(e) = std::fs::create_dir(&cache_path) {
+            return Err(format!("failed to create cache_path: {e}"));
+        }
+    }
+
+    Ok(cache_path)
 }

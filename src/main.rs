@@ -294,8 +294,6 @@ fn compress_frames(
         let (dur_num, dur_div) = frame.delay().numer_denom_ms();
         let duration = Duration::from_millis((dur_num / dur_div).into());
 
-        // Unwrapping is fine because only the thread will panic in the worst case
-        // scenario, not the main loop
         let img = if no_resize {
             img_pad(frame.into_buffer(), dim, color)?
         } else {
