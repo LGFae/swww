@@ -2,14 +2,21 @@ use log::{debug, error, info};
 
 use smithay_client_toolkit::reexports::calloop::channel::SyncSender;
 
-use std::path::PathBuf;
-use std::sync::{Arc, Condvar, Mutex, RwLock};
-use std::{sync::mpsc, thread, time::Duration};
+use std::{
+    path::PathBuf,
+    sync::mpsc,
+    sync::{Arc, RwLock},
+    thread,
+    time::Duration,
+};
 
-use utils::communication::{Animation, Answer, BgInfo, Img};
+use utils::{
+    communication::{Animation, Answer, BgInfo, Img},
+    comp_decomp::ReadiedPack,
+};
 
 mod animations;
-use utils::comp_decomp::ReadiedPack;
+mod barrier;
 
 ///The default thread stack size of 2MiB is way too overkill for our purposes
 const TSTACK_SIZE: usize = 1 << 17; //128KiB
@@ -20,9 +27,7 @@ pub struct Processor {
     frame_sender: SyncSender<(Vec<String>, ReadiedPack)>,
     anim_stoppers: Vec<mpsc::Sender<Vec<String>>>,
     on_going_transitions: Arc<RwLock<Vec<String>>>,
-    outputs_count: Arc<RwLock<u8>>,
-    ready_frame: Arc<Mutex<u8>>,
-    sync_anim: Arc<Condvar>,
+    sync_barrier: Arc<barrier::CountingBarrier>,
 }
 
 impl Processor {
@@ -31,17 +36,12 @@ impl Processor {
             frame_sender,
             anim_stoppers: Vec::new(),
             on_going_transitions: Arc::new(RwLock::new(Vec::new())),
-            outputs_count: Arc::new(RwLock::new(0)),
-            ready_frame: Arc::new(Mutex::new(0)),
-            sync_anim: Arc::new(Condvar::new()),
+            sync_barrier: Arc::new(barrier::CountingBarrier::new(0)),
         }
     }
 
     pub fn set_output_count(&mut self, outputs_count: u8) {
-        match self.outputs_count.write() {
-            Ok(mut guard) => *guard = outputs_count,
-            Err(e) => error!("failed to lock RwLock to update outputs_count: {e}"),
-        }
+        self.sync_barrier.set_goal(outputs_count);
     }
 
     pub fn transition(
@@ -97,9 +97,7 @@ impl Processor {
         let (stopper, stop_recv) = mpsc::channel();
         let on_going_transitions = Arc::clone(&self.on_going_transitions);
 
-        let outputs_count = Arc::clone(&self.outputs_count);
-        let ready_frame = Arc::clone(&self.ready_frame);
-        let condvar = Arc::clone(&self.sync_anim);
+        let barrier = Arc::clone(&self.sync_barrier);
         self.anim_stoppers.push(stopper);
         if let Err(e) = thread::Builder::new()
             .name("animation".to_string()) //Name our threads  for better log messages
@@ -122,22 +120,22 @@ impl Processor {
                     let frame = frame.ready(output_size);
 
                     if animation.sync {
-                        let mut lock = ready_frame.lock().unwrap();
-                        let outputs_count = outputs_count.read().unwrap();
-                        *lock += 1;
-                        if *lock != *outputs_count {
-                            drop(outputs_count);
-                            while *lock != 0 {
-                                lock = condvar.wait_timeout(lock, *duration).unwrap().0;
+                        barrier.inc_and_wait_while(*duration, || match stop_recv.try_recv() {
+                            Ok(to_remove) => {
+                                outputs.retain(|o| !to_remove.contains(o));
+                                outputs.is_empty() || to_remove.is_empty()
                             }
-                        } else {
-                            *lock = 0;
-                            condvar.notify_all();
+                            Err(mpsc::TryRecvError::Empty) => false,
+                            Err(mpsc::TryRecvError::Disconnected) => true,
+                        });
+                        if outputs.is_empty() {
+                            return;
                         }
                     }
 
                     let timeout = duration.saturating_sub(now.elapsed());
                     if send_frame(frame, &mut outputs, timeout, &sender, &stop_recv) {
+                        debug!("STOPPING");
                         return;
                     }
                     now = std::time::Instant::now();
@@ -233,7 +231,6 @@ fn send_frame(
         Ok(to_remove) => {
             outputs.retain(|o| !to_remove.contains(o));
             if outputs.is_empty() || to_remove.is_empty() {
-                debug!("STOPPING");
                 return true;
             }
         }
