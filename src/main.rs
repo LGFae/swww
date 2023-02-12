@@ -13,7 +13,7 @@ use std::{
 };
 
 use utils::{
-    communication::{self, get_socket_path, AnimationRequest, Answer, Position, Request, Coord},
+    communication::{self, get_socket_path, AnimationRequest, Answer, Coord, Position, Request},
     comp_decomp::BitPack,
 };
 
@@ -246,6 +246,7 @@ fn make_animation_request(
     let imgpath = img.path.clone();
     let no_resize = img.no_resize;
     let fill_color = img.fill_color;
+    let sync = img.sync;
     std::thread::spawn(move || {
         let mut animations = Vec::with_capacity(dims.len());
         for (dim, outputs) in dims.into_iter().zip(outputs) {
@@ -261,6 +262,7 @@ fn make_animation_request(
                 communication::Animation {
                     animation: compress_frames(gif, dim, filter, no_resize, &fill_color)?
                         .into_boxed_slice(),
+                    sync,
                 },
                 outputs.to_owned(),
             ));
@@ -433,20 +435,24 @@ fn make_transition(img: &cli::Img) -> communication::Transition {
     let x = match img.transition_pos.x {
         cli::CliCoord::Percent(x) => {
             if !(0.0..=1.0).contains(&x) {
-                println!("Warning: x value not in range [0,1] position might be set outside screen: {x}");
+                println!(
+                    "Warning: x value not in range [0,1] position might be set outside screen: {x}"
+                );
             }
             Coord::Percent(x)
-        },
+        }
         cli::CliCoord::Pixel(x) => Coord::Pixel(x),
     };
 
     let y = match img.transition_pos.y {
         cli::CliCoord::Percent(y) => {
             if !(0.0..=1.0).contains(&y) {
-                println!("Warning: y value not in range [0,1] position might be set outside screen: {y}");
+                println!(
+                    "Warning: y value not in range [0,1] position might be set outside screen: {y}"
+                );
             }
             Coord::Percent(y)
-        },
+        }
         cli::CliCoord::Pixel(y) => Coord::Pixel(y),
     };
 
@@ -475,10 +481,7 @@ fn make_transition(img: &cli::Img) -> communication::Transition {
             communication::TransitionType::Wipe
         }
         cli::TransitionType::Center => {
-            pos = Position::new(
-                Coord::Percent(0.5),
-                Coord::Percent(0.5),
-            );
+            pos = Position::new(Coord::Percent(0.5), Coord::Percent(0.5));
             communication::TransitionType::Grow
         }
         cli::TransitionType::Any => {

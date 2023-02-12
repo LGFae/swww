@@ -2,14 +2,21 @@ use log::{debug, error, info};
 
 use smithay_client_toolkit::reexports::calloop::channel::SyncSender;
 
-use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
-use std::{sync::mpsc, thread, time::Duration};
+use std::{
+    path::PathBuf,
+    sync::mpsc,
+    sync::{Arc, RwLock},
+    thread,
+    time::Duration,
+};
 
-use utils::communication::{Animation, Answer, BgInfo, Img};
+use utils::{
+    communication::{Animation, Answer, BgInfo, Img},
+    comp_decomp::ReadiedPack,
+};
 
 mod animations;
-use utils::comp_decomp::ReadiedPack;
+mod sync_barrier;
 
 ///The default thread stack size of 2MiB is way too overkill for our purposes
 const TSTACK_SIZE: usize = 1 << 17; //128KiB
@@ -20,15 +27,21 @@ pub struct Processor {
     frame_sender: SyncSender<(Vec<String>, ReadiedPack)>,
     anim_stoppers: Vec<mpsc::Sender<Vec<String>>>,
     on_going_transitions: Arc<RwLock<Vec<String>>>,
+    sync_barrier: Arc<sync_barrier::SyncBarrier>,
 }
 
 impl Processor {
     pub fn new(frame_sender: SyncSender<(Vec<String>, ReadiedPack)>) -> Self {
         Self {
+            frame_sender,
             anim_stoppers: Vec::new(),
             on_going_transitions: Arc::new(RwLock::new(Vec::new())),
-            frame_sender,
+            sync_barrier: Arc::new(sync_barrier::SyncBarrier::new(0)),
         }
+    }
+
+    pub fn set_output_count(&mut self, outputs_count: u8) {
+        self.sync_barrier.set_goal(outputs_count);
     }
 
     pub fn transition(
@@ -84,6 +97,7 @@ impl Processor {
         let (stopper, stop_recv) = mpsc::channel();
         let on_going_transitions = Arc::clone(&self.on_going_transitions);
 
+        let barrier = Arc::clone(&self.sync_barrier);
         self.anim_stoppers.push(stopper);
         if let Err(e) = thread::Builder::new()
             .name("animation".to_string()) //Name our threads  for better log messages
@@ -104,8 +118,24 @@ impl Processor {
                 }
                 for (frame, duration) in animation.animation.iter().cycle() {
                     let frame = frame.ready(output_size);
+
+                    if animation.sync {
+                        barrier.inc_and_wait_while(*duration, || match stop_recv.try_recv() {
+                            Ok(to_remove) => {
+                                outputs.retain(|o| !to_remove.contains(o));
+                                outputs.is_empty() || to_remove.is_empty()
+                            }
+                            Err(mpsc::TryRecvError::Empty) => false,
+                            Err(mpsc::TryRecvError::Disconnected) => true,
+                        });
+                        if outputs.is_empty() {
+                            return;
+                        }
+                    }
+
                     let timeout = duration.saturating_sub(now.elapsed());
                     if send_frame(frame, &mut outputs, timeout, &sender, &stop_recv) {
+                        debug!("STOPPING");
                         return;
                     }
                     now = std::time::Instant::now();
@@ -201,7 +231,6 @@ fn send_frame(
         Ok(to_remove) => {
             outputs.retain(|o| !to_remove.contains(o));
             if outputs.is_empty() || to_remove.is_empty() {
-                debug!("STOPPING");
                 return true;
             }
         }

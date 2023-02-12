@@ -149,6 +149,7 @@ impl TryFrom<&mut BufReader<File>> for Img {
 #[derive(Serialize, Deserialize)]
 pub struct Animation {
     pub animation: Box<[(BitPack, Duration)]>,
+    pub sync: bool,
 }
 
 impl TryFrom<&mut BufReader<File>> for Animation {

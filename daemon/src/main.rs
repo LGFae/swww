@@ -433,6 +433,7 @@ fn main_loop(
             while i != bgs.len() {
                 if let Some(should_remove) = bgs[i].handle_events() {
                     let mut processor = processor.borrow_mut();
+                    processor.set_output_count(bgs.len() as u8);
                     processor.stop_animations(&[bgs[i].info.name.clone()]);
                     if should_remove {
                         bgs.remove(i);
