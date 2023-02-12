@@ -16,7 +16,7 @@ use utils::{
 };
 
 mod animations;
-mod barrier;
+mod sync_barrier;
 
 ///The default thread stack size of 2MiB is way too overkill for our purposes
 const TSTACK_SIZE: usize = 1 << 17; //128KiB
@@ -27,7 +27,7 @@ pub struct Processor {
     frame_sender: SyncSender<(Vec<String>, ReadiedPack)>,
     anim_stoppers: Vec<mpsc::Sender<Vec<String>>>,
     on_going_transitions: Arc<RwLock<Vec<String>>>,
-    sync_barrier: Arc<barrier::CountingBarrier>,
+    sync_barrier: Arc<sync_barrier::SyncBarrier>,
 }
 
 impl Processor {
@@ -36,7 +36,7 @@ impl Processor {
             frame_sender,
             anim_stoppers: Vec::new(),
             on_going_transitions: Arc::new(RwLock::new(Vec::new())),
-            sync_barrier: Arc::new(barrier::CountingBarrier::new(0)),
+            sync_barrier: Arc::new(sync_barrier::SyncBarrier::new(0)),
         }
     }
 

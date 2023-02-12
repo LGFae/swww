@@ -3,13 +3,15 @@ use std::{
     time::Duration,
 };
 
-pub struct CountingBarrier {
+///This is a barrier that lets us dynamically set the amount of threads that have to wait. We use
+///this in order to sync the animations, because outputs may be created or deleted during runtime
+pub struct SyncBarrier {
     goal: RwLock<u8>,
     cur: Mutex<u8>,
     condvar: Condvar,
 }
 
-impl CountingBarrier {
+impl SyncBarrier {
     pub fn new(goal: u8) -> Self {
         Self {
             goal: RwLock::new(goal),
