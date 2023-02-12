@@ -267,7 +267,7 @@ pub struct Img {
     ///switch to the new image immediately.
     ///
     ///Broadly speaking, this is mostly only visible during the 'simple' transition. The other
-    ///transitions tend to change more with the 'transition-step' and 'transition-speed' options
+    ///transitions tend to change more with the 'transition-fps' and 'transition-speed' options
     #[arg(long, env = "SWWW_TRANSITION_STEP", default_value = "90")]
     pub transition_step: u8,
 
