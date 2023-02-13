@@ -4,7 +4,7 @@ swww-clear(1)
 swww-clear
 
 # SYNOPSIS
-*swww* [OPTIONS] <COLOR>
+*swww clear* [OPTIONS] <COLOR>
 
 # OPTIONS
 

@@ -134,12 +134,12 @@ pub enum Swww {
     ///Defaults to filling all outputs with black.
     Clear(Clear),
 
-    /// Send an image (or animated gif) for the daemon to display.
+    /// Sends an image (or animated gif) for the daemon to display.
     ///
     /// Use `-` to read from stdin
     Img(Img),
 
-    /// Initialize the daemon.
+    /// Initializes the daemon.
     ///
     /// Exits if there is already a daemon running. We check thay by seeing if
     /// $XDG_RUNTIME_DIR/swww.socket exists.
@@ -202,21 +202,18 @@ pub struct Img {
 
     ///Filter to use when scaling images (run swww img --help to see options).
     ///
-    ///Note that image scaling can sometimes significantly increase RAM usage. If you want to use
-    ///as little RAM as possible, I recommend scaling the images before sending them to swww
-    ///
     ///Available options are:
     ///
     ///Nearest | Bilinear | CatmullRom | Mitchell | Lanczos3
     ///
-    ///These are offered by the image crate (https://crates.io/crates/image). 'Nearest' is
+    ///These are offered by the fast_image_resize crate
+    ///(https://docs.rs/fast_image_resize/2.5.0/fast_image_resize/). 'Nearest' is
     ///what I recommend for pixel art stuff, and ONLY for pixel art stuff. It is also the
     ///fastest filter.
     ///
     ///For non pixel art stuff, I would usually recommend one of the last three, though some
     ///experimentation will be necessary to see which one you like best. Also note they are
-    ///all slower than Nearest. For some examples, see
-    ///https://docs.rs/image/latest/image/imageops/enum.FilterType.html.
+    ///all slower than Nearest.
     #[arg(short, long, default_value = "Lanczos3")]
     pub filter: Filter,
 
@@ -238,21 +235,23 @@ pub struct Img {
     ///
     ///Possible transitions are:
     ///
-    ///simple | left | right | top | bottom | wipe | grow | center | any | outer | random
+    ///simple | left | right | top | bottom | wipe | wave | grow | center | any | outer | random
     ///
     ///The 'left', 'right', 'top' and 'bottom' options make the transition happen from that
     ///position to its oposite in the screen.
     ///
-    ///'wipe' is simillar to 'left' but allows you to specify the angle for transition (with the --transition-angle flag).
+    ///'wipe' is similar to 'left' but allows you to specify the angle for transition with the `--transition-angle` flag.
+    ///
+    ///'wave' is similar to 'wipe' sweeping line is wavy
     ///
     ///'grow' causes a growing circle to transition across the screen and allows changing the circle's center
-    /// position (with --transition-pos flag).
+    /// position with the `--transition-pos` flag.
     ///
-    ///'center' an alias to 'grow' with position set to center of screen.
+    ///'center' is an alias to 'grow' with position set to center of screen.
     ///
-    ///'any' an alias to 'grow' with position set to a random point on screen.
+    ///'any' is an alias to 'grow' with position set to a random point on screen.
     ///
-    ///'outer' same as grow but the circle shrinks instead of growing.
+    ///'outer' is the same as grow but the circle shrinks instead of growing.
     ///
     ///Finally, 'random' will select a transition effect at random
     #[arg(short, long, env = "SWWW_TRANSITION", default_value = "simple")]
@@ -266,14 +265,12 @@ pub struct Img {
     ///Larger values will make the transition faster, but more abrupt. A value of 255 will always
     ///switch to the new image immediately.
     ///
-    ///Broadly speaking, this is mostly only visible during the 'simple' transition. The other
-    ///transitions tend to change more with the 'transition-fps' and 'transition-speed' options
     #[arg(long, env = "SWWW_TRANSITION_STEP", default_value = "90")]
     pub transition_step: u8,
 
     ///How long the transition takes to complete in seconds.
     ///
-    ///Note that this doesnt work with the 'simple' transition
+    ///Note that this doesn't work with the 'simple' transition
     #[arg(long, env = "SWWW_TRANSITION_DURATION", default_value = "3")]
     pub transition_duration: f32,
 
