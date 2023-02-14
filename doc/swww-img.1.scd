@@ -24,7 +24,22 @@ swww-img
 	though some experimentation will be necessary to see which one you like
 	best.
 
+	Note you can also pass the flag *--no-resize*, explained bellow. In which
+	case the *--filter* flag will have no effect.
+
 	Default is Lanczos3.
+
+*--no-resize*
+	Do not resize the image.
+
+	If this is set, the image won't be resized, and will be centralized in the
+	middle of the screen instead. If it is smaller than the screen's size, it
+	will be padded with the value of *--fill_color*, bellow.
+
+*--fill-color* <RRGGBB>
+	Which color to fill the padding with when not resizing.
+
+	Default is '000000'.
 
 *-o*, *--outputs*
 	Comma separated list of outputs to display the image at. Use *swww query* to
@@ -40,15 +55,16 @@ swww-img
 	Possible transitions are:
 
 [- simple
-:- left 
-:- right 
-:- top 
-:- bottom 
-:- wipe 
-:- grow 
-:- center 
-:- any 
-:- outer 
+:- left
+:- right
+:- top
+:- bottom
+:- wipe
+:- wave
+:- grow
+:- center
+:- any
+:- outer
 :- random
 
 	The 'left', 'right', 'top' and 'bottom' options make the transition	happen
@@ -74,7 +90,7 @@ swww-img
 *--transition-step* <0-255>
 	[Environment Variable $SWWW_TRANSITION_STEP]
 	How fast the transition approaches the new image.
-	
+
 	The transition logic works by adding or subtracting from the current rgb
 	values until the old image transforms in the new one. This controls by how
 	much we add or subtract.
@@ -82,14 +98,95 @@ swww-img
 	For example, if pixel A is 000010, and we need it to transition to pixel B,
 	which is 000020, if *transition-step* is 2, then in one frame pixel A will
 	turn to 000012, in the next frame to 000014, and so on.
-	
+
 	Larger values will make the transition faster, but more abrupt. A value of
 	255 will always switch to the new image immediately.
 
+	Default is 90.
+
 *--transition-duration* <seconds (can have decimals)>
+	[Environment Variable $SWWW_TRANSITION_DURATION]
 	How long the transition takes to complete, in seconds.
 
 	Note this doesn't work with the 'simple' transition.
+
+	Default is 3.
+
+*--transition-fps* <frames per second (max 255)>
+	[Environment Variable: $SWWW_TRANSITION_FPS]
+	Frame rate for the transition effect.
+
+	Note there is no point in setting this to a value smaller than what your
+	monitor supports.
+
+	Also note this is **different** from the transition-step. That one controls
+	by how much we approach the new image every frame.
+
+	Default is 30.
+
+*--transition-angle* <angle, in degrees (parsed as a float)>
+	[Environment Variable: SWWW_TRANSITION_ANGLE]
+	This is used for the 'wipe' and 'wave' transitions. It controls the angle of
+	the wipe.
+
+	Note that the angle is in degrees, where '0' is right to left and '90'
+	is top to bottom, and '270' bottom to top
+
+	Default is 45.
+
+*--transition-pos* <x,y>
+	[Environment Variable: SWWW_TRANSITION_POS]
+	This is only used for the 'grow' and 'outer' transitions. It controls the
+	center of circle (default is 'center').
+
+	Position values can be given in both percentage values and pixel values:
+	float values are interpretted as percentages and integer values as pixel
+	values. Eg.: 0.5,0.5 means 50% of the screen width and 50% of the screen
+	height, while 200,400 means 200 pixels from the left and 400 pixels from the
+	bottom.
+
+	The value can also be an alias which will set the position accordingly:
+[- 'center'
+:- 'top'
+:- 'left'
+:- 'right'
+:- 'bottom'
+:- 'top-left'
+:- 'top-right'
+:- 'bottom-left'
+:- 'bottom-right'
+
+	Default is 'center'.
+
+*--transition-bezier* <f1,f2,f3,f4 (all floats)>
+	[Environment Variable: SWWW_TRANSITION_BEZIER]
+	Bezier curve to use for the transition animation. https://cubic-bezier.com
+	is a good website to get these values from.
+
+	eg: 0.0,0.0,1.0,1.0 for linear animation
+
+	Default is .54,0,.34,.99
+
+*--transition-wave* <width,height (both floats)>
+	[Environment Variable: SWWW_TRANSITION_WAVE]
+	Currently only used for 'wave' transition to control the width and height of
+	each wave.
+
+	Default is : 20,20
+
+*--sync*
+	Sync the animations' frames between the monitors.
+
+	Activating this will cause a monitor's animation to wait until all other
+	monitor's are ready to update, and then update them all at once. Note if you
+	want to send different `gif`s to different monitors and have them synced,
+	you will have to call `swww img --sync` *every time*.
+
+	Furthermore, if you only set `--sync` to one monitor and not the others,
+	that monitor will not animate anything, while the others will animate
+	out-of-sync.
+
+	Finally, note this only applies to `gif` animations, not the transitions.
 
 *-h*, *--help*
 	Print help (see a summary with '-h')

@@ -283,7 +283,7 @@ pub struct Img {
     #[arg(long, env = "SWWW_TRANSITION_FPS", default_value = "30")]
     pub transition_fps: u8,
 
-    ///This is only used for the 'wipe' transition. It controls the angle of the wipe (default is '0').
+    ///This is used for the 'wipe' and 'wave' transitions. It controls the angle of the wipe
     ///
     ///Note that the angle is in degrees, where '0' is right to left and '90' is top to bottom, and '270' bottom to top
     #[arg(long, env = "SWWW_TRANSITION_ANGLE", default_value = "45")]
@@ -291,7 +291,7 @@ pub struct Img {
 
     ///This is only used for the 'grow','outer' transitions. It controls the center of circle (default is 'center').
     ///
-    ///position values can be given in both percentage values and pixel values:
+    ///Position values can be given in both percentage values and pixel values:
     ///  float values are interpretted as percentages and integer values as pixel values
     ///  eg: 0.5,0.5 means 50% of the screen width and 50% of the screen height
     ///      200,400 means 200 pixels from the left and 400 pixels from the bottom
