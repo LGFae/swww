@@ -18,7 +18,7 @@ Improvements:
   (@flick0)
 
 Fixes:
-  * `swww query` not returing the image being displayed
+  * `swww query` not returning the image being displayed
   * document `--no_resize` and `--fill_color` options for `swww img`
   * reading img from stdin (now with a proper integration test to make sure
   it doesn't happen again) (#42)
@@ -68,7 +68,7 @@ Internal:
   warning was added when we detect the presence of the SWWW_TRANSITION_SPEED
   environment variable. This warning will go away in the next release, it is
   only there as a means of making sure everyone knows the variable has been
-  superseeded, and having it in your configs no longer does anything.
+  superseded, and having it in your configs no longer does anything.
 
 Improvements:
 
@@ -96,7 +96,7 @@ Improvements:
 
 ### 0.4.3
 
-  * Check to see if daemon is REALLY running when we see tha socket already
+  * Check to see if daemon is REALLY running when we see that socket already
   exists (#11)
   * Fix dpi scaling (#22)
 
@@ -129,9 +129,9 @@ Improvements:
 
 * Limited image formats to: `gif`, `jpeg`, `jpeg_rayon`, `png`, `pnm`, `tga`,
   `tiff`, `webp`, `bmp`, `farbfeld`
-* Bumbed rust edition to 2021
+* Bumped rust edition to 2021
 * Our custom compression is now even faster
-* I did a rewrite of the way the code that handled animations was structed.
+* I did a rewrite of the way the code that handled animations was structured.
   This made caching a LOT faster, but it incurs in more memory usage, since
   we spawn an extra thread to make a pipeline. That said, since this also 
   greatly simplified the code itself, I considered it an overall positive

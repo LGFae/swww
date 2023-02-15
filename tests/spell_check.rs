@@ -18,6 +18,8 @@ fn spell_check_code_and_man_pages() {
             "daemon/src", // daemon
             "utils/src",  // common code
             "doc",        // man pages
+            "CHANGELOG.md",
+            "README.md"
         ])
         .output()
     {
