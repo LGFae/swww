@@ -48,7 +48,8 @@ swww-img
 	If it isn't set, the image is displayed on all outputs.
 
 *-t*, *--transition-type* <TRANSITION_TYPE>
-	[Environment Variable $SWWW_TRANSITION]
+	\[Environment Variable $SWWW_TRANSITION]
+
 	Sets the type of transition. Default is 'simple', that fades into the new
 	image.
 
@@ -88,7 +89,8 @@ swww-img
 	Finally, 'random' will select a transition effect at random
 
 *--transition-step* <0-255>
-	[Environment Variable $SWWW_TRANSITION_STEP]
+	\[Environment Variable $SWWW_TRANSITION_STEP]
+
 	How fast the transition approaches the new image.
 
 	The transition logic works by adding or subtracting from the current rgb
@@ -105,7 +107,8 @@ swww-img
 	Default is 90.
 
 *--transition-duration* <seconds (can have decimals)>
-	[Environment Variable $SWWW_TRANSITION_DURATION]
+	\[Environment Variable $SWWW_TRANSITION_DURATION]
+
 	How long the transition takes to complete, in seconds.
 
 	Note this doesn't work with the 'simple' transition.
@@ -113,7 +116,8 @@ swww-img
 	Default is 3.
 
 *--transition-fps* <frames per second (max 255)>
-	[Environment Variable: $SWWW_TRANSITION_FPS]
+	\[Environment Variable: $SWWW_TRANSITION_FPS]
+
 	Frame rate for the transition effect.
 
 	Note there is no point in setting this to a value smaller than what your
@@ -125,7 +129,8 @@ swww-img
 	Default is 30.
 
 *--transition-angle* <angle, in degrees (parsed as a float)>
-	[Environment Variable: SWWW_TRANSITION_ANGLE]
+	\[Environment Variable: SWWW_TRANSITION_ANGLE]
+
 	This is used for the 'wipe' and 'wave' transitions. It controls the angle of
 	the wipe.
 
@@ -135,7 +140,8 @@ swww-img
 	Default is 45.
 
 *--transition-pos* <x,y>
-	[Environment Variable: SWWW_TRANSITION_POS]
+	\[Environment Variable: SWWW_TRANSITION_POS]
+
 	This is only used for the 'grow' and 'outer' transitions. It controls the
 	center of circle (default is 'center').
 
@@ -159,7 +165,8 @@ swww-img
 	Default is 'center'.
 
 *--transition-bezier* <f1,f2,f3,f4 (all floats)>
-	[Environment Variable: SWWW_TRANSITION_BEZIER]
+	\[Environment Variable: SWWW_TRANSITION_BEZIER]
+
 	Bezier curve to use for the transition animation. https://cubic-bezier.com
 	is a good website to get these values from.
 
@@ -168,7 +175,8 @@ swww-img
 	Default is .54,0,.34,.99
 
 *--transition-wave* <width,height (both floats)>
-	[Environment Variable: SWWW_TRANSITION_WAVE]
+	\[Environment Variable: SWWW_TRANSITION_WAVE]
+
 	Currently only used for 'wave' transition to control the width and height of
 	each wave.
 

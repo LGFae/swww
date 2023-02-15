@@ -3,7 +3,7 @@ swww-daemon(1)
 # NAME
 swww-daemon
 
-#DESCRIPTION 
+# DESCRIPTION 
 
 The *swww-daemon* will run continuously, waiting for commands in
 _$XDG_RUNTIME_DIR/swww.socket_(or _/tmp/swww/swww.socket_, if $XDG_RUNTIME_DIR
