@@ -2,6 +2,13 @@
 
 Improvements:
   * Images (and animations) are now cached at `$XDG_CACHE_HOME` #65
+  * We now have man-pages! They must be installed manually in your system by
+    moving the files in `doc/generated` to the appropriate location. Typically,
+	you can figure out where that is by running `manpath`. The script
+	`doc/gen.sh` will create the above directory and all the relevant manpages.
+	Have a look at it for more details.
+  * We now also have automated spell checking. This let us fix a number in typos
+    in our documentation, both internal and user-oriented.
 
 Internal:
   * Integration tests are not run by default. You must now use
