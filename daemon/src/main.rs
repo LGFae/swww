@@ -213,8 +213,8 @@ fn main() -> Result<(), String> {
 
     let listener = make_socket()?;
     debug!(
-        "Made socket in {:?} and initalized logger. Starting daemon...",
-        listener.local_addr().unwrap() //this should aways work if the socket connected correctly
+        "Made socket in {:?} and initialized logger. Starting daemon...",
+        listener.local_addr().unwrap() //this should always work if the socket connected correctly
     );
 
     let (env, display, queue) = wayland::make_wayland_environment();
@@ -262,7 +262,7 @@ fn main() -> Result<(), String> {
 
 fn make_logger() {
     let config = simplelog::ConfigBuilder::new()
-        .set_thread_level(LevelFilter::Info) //let me see where the processing is happenning
+        .set_thread_level(LevelFilter::Info) //let me see where the processing is happening
         .set_thread_mode(ThreadLogMode::Both)
         .build();
 
@@ -382,7 +382,7 @@ fn register_socket<'a>(
                         Err(e) => error!("Failed to receive socket message: {}", e),
                         Ok(()) => {
                             //We must flush here because if multiple requests are sent at once the loop
-                            //might never be idle, and so the callback in the run function bellow
+                            //might never be idle, and so the callback in the run function below
                             //wouldn't be called (afaik)
                             if let Err(e) = display.flush() {
                                 error!("Couldn't flush display: {}", e);

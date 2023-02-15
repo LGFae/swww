@@ -141,7 +141,7 @@ pub enum Swww {
 
     /// Initializes the daemon.
     ///
-    /// Exits if there is already a daemon running. We check thay by seeing if
+    /// Exits if there is already a daemon running. We check that by seeing if
     /// $XDG_RUNTIME_DIR/swww.socket exists.
     Init {
         ///Don't fork the daemon. This will keep it running in the current terminal.
@@ -158,7 +158,7 @@ pub enum Swww {
     ///Asks the daemon to print output information (names and dimensions).
     ///
     ///You may use this to find out valid values for the <swww-img --outputs> option. If you want
-    ///more detailed information about your outputs, I would recommed trying wlr-randr.
+    ///more detailed information about your outputs, I would recommend trying wlr-randr.
     Query,
 }
 
@@ -192,7 +192,7 @@ pub struct Img {
     ///
     /// If this is set, the image won't be resized, and will be centralized in the middle of the
     /// screen instead. If it is smaller than the screen's size, it will be padded with the value
-    /// of `fill_color`, bellow.
+    /// of `fill_color`, below.
     #[arg(long)]
     pub no_resize: bool,
 
@@ -238,7 +238,7 @@ pub struct Img {
     ///simple | left | right | top | bottom | wipe | wave | grow | center | any | outer | random
     ///
     ///The 'left', 'right', 'top' and 'bottom' options make the transition happen from that
-    ///position to its oposite in the screen.
+    ///position to its opposite in the screen.
     ///
     ///'wipe' is similar to 'left' but allows you to specify the angle for transition with the `--transition-angle` flag.
     ///
@@ -292,7 +292,7 @@ pub struct Img {
     ///This is only used for the 'grow','outer' transitions. It controls the center of circle (default is 'center').
     ///
     ///Position values can be given in both percentage values and pixel values:
-    ///  float values are interpretted as percentages and integer values as pixel values
+    ///  float values are interpreted as percentages and integer values as pixel values
     ///  eg: 0.5,0.5 means 50% of the screen width and 50% of the screen height
     ///      200,400 means 200 pixels from the left and 400 pixels from the bottom
     ///

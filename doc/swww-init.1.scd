@@ -13,7 +13,7 @@ swww-init
 
 	The only reason to do this would be to see the daemon's logs. Note that for
 	release builds we only log info, warnings and errors, so you won't be seeing
-	much (ideally). This is mostly usefull for debugging and developing.
+	much (ideally). This is mostly useful for debugging and developing.
 
 *-h*, *--help*
 	Print help (see a summary with '-h')

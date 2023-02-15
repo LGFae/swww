@@ -16,7 +16,7 @@ swww-query
 Asks the daemon to print output information (names and dimensions).
 
 You may use this to find out valid values for the <swww-img --outputs> option. If
-you want more detailed information about your outputs, I would recommed trying
+you want more detailed information about your outputs, I would recommend trying
 something like *wlr-randr*.
 
 # OUTPUT FORMAT

@@ -24,7 +24,7 @@ swww-img
 	though some experimentation will be necessary to see which one you like
 	best.
 
-	Note you can also pass the flag *--no-resize*, explained bellow. In which
+	Note you can also pass the flag *--no-resize*, explained below. In which
 	case the *--filter* flag will have no effect.
 
 	Default is Lanczos3.
@@ -34,7 +34,7 @@ swww-img
 
 	If this is set, the image won't be resized, and will be centralized in the
 	middle of the screen instead. If it is smaller than the screen's size, it
-	will be padded with the value of *--fill_color*, bellow.
+	will be padded with the value of *--fill_color*, below.
 
 *--fill-color* <RRGGBB>
 	Which color to fill the padding with when not resizing.
@@ -69,7 +69,7 @@ swww-img
 :- random
 
 	The 'left', 'right', 'top' and 'bottom' options make the transition	happen
-	from that position to its oposite in the screen.
+	from that position to its opposite in the screen.
 
 	'wipe' is similar to 'left' but allows you to specify the angle for
 	transition with the `--transition-angle` flag.
@@ -146,7 +146,7 @@ swww-img
 	center of circle (default is 'center').
 
 	Position values can be given in both percentage values and pixel values:
-	float values are interpretted as percentages and integer values as pixel
+	float values are interpreted as percentages and integer values as pixel
 	values. Eg.: 0.5,0.5 means 50% of the screen width and 50% of the screen
 	height, while 200,400 means 200 pixels from the left and 400 pixels from the
 	bottom.

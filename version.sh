@@ -9,7 +9,7 @@ if [ $# -lt 1 ]; then
 fi
 
 pkill swww-daemon
-rm -rf doc/generated
+
 set -e
 
 # don't forget testing everything
