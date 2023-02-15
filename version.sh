@@ -8,9 +8,13 @@ if [ $# -lt 1 ]; then
 	exit 1
 fi
 
+pkill swww-daemon
+rm -rf doc/generated
+set -e
+
 # don't forget testing everything
-pkill swww-daemon 
-cargo test -- --include-ignored || exit 1
+cargo test -- --include-ignored
+./doc/gen.sh # make sure the docs "compile"
 
 # Cargo.toml:
 sed "s/^version = .*/version = \"$1\"/" Cargo.toml > TMP \
