@@ -25,9 +25,21 @@ To build, clone this repository and run:
 ```
 cargo build --release
 ```
-Then, put **both binaries** `target/release/swww` and `target/release/swww-daemon` in your 
-path. Optionally, autocompletion scripts for bash, zsh, fish and elvish are offered in the
-`completions` directory.
+Then, put **both binaries** `target/release/swww` and
+`target/release/swww-daemon` in your  path. Optionally, autocompletion scripts
+for bash, zsh, fish and elvish are offered in the `completions` directory.
+
+#### Man pages:
+
+In order to generate the man pages, **you must have `scdoc` installed**. Run
+
+```
+./doc/gen.sh
+```
+
+The man pages will be in `doc/generated`. To install them, you must move them to
+to the appropriate location in your system. You should be able to figure out
+where that is by running `manpath`.
 
 ## Features
 

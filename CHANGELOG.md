@@ -6,6 +6,7 @@ Improvements:
     moving the files in `doc/generated` to the appropriate location. Typically,
 	you can figure out where that is by running `manpath`. The script
 	`doc/gen.sh` will create the above directory and all the relevant manpages.
+	Note that the script depends on `scdoc` being installed in the system.
 	Have a look at it for more details.
   * We now also have automated spell checking. This let us fix a number in typos
     in our documentation, both internal and user-oriented.
