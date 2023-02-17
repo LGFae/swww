@@ -45,6 +45,9 @@ To start, begin by running *swww init*. That will set up the *swww-daemon*.
 Then, you can send images to be displayed with *swww img*. To kill the daemon,
 use *swww kill*.
 
+*Note that swww only works in a compositor that implements the layer-shell
+protocol*. Typically, _wlr-roots_ based compositors.
+
 # FILES
 *swww* will create the following files in your system:
 	- A socket in _$XDG_RUNTIME_DIR/swww.socket_ or _/tmp/swww/swww.socket_, if

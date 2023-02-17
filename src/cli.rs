@@ -128,6 +128,9 @@ impl CliPosition {
 ///Change what your monitors display as a background by controlling the swww daemon at runtime.
 ///Supports animated gifs and putting different stuff in different monitors. I also did my best to
 ///make it as resource efficient as possible.
+///
+///Note `swww` will only work in a compositor that implements the layer-shell protocol. Typically,
+///wlr-roots based compositors.
 pub enum Swww {
     ///Fills the specified outputs with the given color.
     ///
