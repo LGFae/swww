@@ -13,10 +13,10 @@ swww-img
 
 	Available options are:
 
-	Nearest | Bilinear | CatmullRom | Mitchell | Lanczos3
+	_Nearest_ | _Bilinear_ | _CatmullRom_ | _Mitchell_ | _Lanczos3_
 
 	These are offered by the fast_image_resize crate
-	(https://docs.rs/fast_image_resize/2.5.0/fast_image_resize/). 'Nearest' is
+	(https://docs.rs/fast_image_resize/2.5.0/fast_image_resize/). _Nearest_ is
 	what I recommend for pixel art stuff, and ONLY for pixel art stuff. It is
 	also the fastest filter.
 
@@ -39,7 +39,7 @@ swww-img
 *--fill-color* <RRGGBB>
 	Which color to fill the padding with when not resizing.
 
-	Default is '000000'.
+	Default is _000000_.
 
 *-o*, *--outputs*
 	Comma separated list of outputs to display the image at. Use *swww query* to
@@ -50,43 +50,43 @@ swww-img
 *-t*, *--transition-type* <TRANSITION_TYPE>
 	\[Environment Variable $SWWW_TRANSITION]
 
-	Sets the type of transition. Default is 'simple', that fades into the new
+	Sets the type of transition. Default is _simple_, that fades into the new
 	image.
 
 	Possible transitions are:
 
-[- simple
-:- left
-:- right
-:- top
-:- bottom
-:- wipe
-:- wave
-:- grow
-:- center
-:- any
-:- outer
-:- random
+[- _simple_
+:- _left_
+:- _right_
+:- _top_
+:- _bottom_
+:- _wipe_
+:- _wave_
+:- _grow_
+:- _center_
+:- _any_
+:- _outer_
+:- _random_
 
-	The 'left', 'right', 'top' and 'bottom' options make the transition	happen
+	The _left_, _right_, _top_ and _bottom_ options make the transition	happen
 	from that position to its opposite in the screen.
 
-	'wipe' is similar to 'left' but allows you to specify the angle for
+	_wipe_ is similar to _left_ but allows you to specify the angle for
 	transition with the `--transition-angle` flag.
 
-	'wave' is similar to 'wipe' but the sweeping line is wavy. You can control
+	_wave_ is similar to _wipe_ but the sweeping line is wavy. You can control
 	the "waviness" with `--transition-wave`.
 
-	'grow' causes a growing circle to transition across the screen and allows
+	_grow_ causes a growing circle to transition across the screen and allows
 	changing the circle's center position with the `--transition-pos` flag.
 
-	'center' is an alias to 'grow' with position set to center of screen.
+	_center_ is an alias to _grow_ with position set to center of screen.
 
-	'any' is an alias to 'grow' with position set to a random point on screen.
+	_any_ is an alias to _grow_ with position set to a random point on screen.
 
-	'outer' is the same as grow but the circle shrinks instead of growing.
+	_outer_ is the same as grow but the circle shrinks instead of growing.
 
-	Finally, 'random' will select a transition effect at random
+	Finally, _random_ will select a transition effect at random
 
 *--transition-step* <0-255>
 	\[Environment Variable $SWWW_TRANSITION_STEP]
@@ -111,7 +111,7 @@ swww-img
 
 	How long the transition takes to complete, in seconds.
 
-	Note this doesn't work with the 'simple' transition.
+	Note this doesn't work with the _simple_ transition.
 
 	Default is 3.
 
@@ -131,7 +131,7 @@ swww-img
 *--transition-angle* <angle, in degrees (parsed as a float)>
 	\[Environment Variable: SWWW_TRANSITION_ANGLE]
 
-	This is used for the 'wipe' and 'wave' transitions. It controls the angle of
+	This is used for the _wipe_ and _wave_ transitions. It controls the angle of
 	the wipe.
 
 	Note that the angle is in degrees, where '0' is right to left and '90'
@@ -142,8 +142,8 @@ swww-img
 *--transition-pos* <x,y>
 	\[Environment Variable: SWWW_TRANSITION_POS]
 
-	This is only used for the 'grow' and 'outer' transitions. It controls the
-	center of circle (default is 'center').
+	This is only used for the _grow_ and _outer_ transitions. It controls the
+	center of circle (default is _center_).
 
 	Position values can be given in both percentage values and pixel values:
 	float values are interpreted as percentages and integer values as pixel
@@ -152,17 +152,17 @@ swww-img
 	bottom.
 
 	The value can also be an alias which will set the position accordingly:
-[- 'center'
-:- 'top'
-:- 'left'
-:- 'right'
-:- 'bottom'
-:- 'top-left'
-:- 'top-right'
-:- 'bottom-left'
-:- 'bottom-right'
+[- _center_
+:- _top_
+:- _left_
+:- _right_
+:- _bottom_
+:- _top-left_
+:- _top-right_
+:- _bottom-left_
+:- _bottom-right_
 
-	Default is 'center'.
+	Default is _center_.
 
 *--transition-bezier* <f1,f2,f3,f4 (all floats)>
 	\[Environment Variable: SWWW_TRANSITION_BEZIER]
@@ -177,7 +177,7 @@ swww-img
 *--transition-wave* <width,height (both floats)>
 	\[Environment Variable: SWWW_TRANSITION_WAVE]
 
-	Currently only used for 'wave' transition to control the width and height of
+	Currently only used for _wave_ transition to control the width and height of
 	each wave.
 
 	Default is : 20,20
@@ -206,7 +206,7 @@ to read from stdin instead.
 The images sent will be cached at _$XDG_CACHE_HOME/swww_ or _$HOME/.cache/swww_
 if $XDG_CACHE_HOME does not exist. For each monitor, there will be a file in
 those locations corresponding to the current image/animation being displayed.
-Next time you run `swww init`, the `swww-daemon` will load those files.
+Next time you run *swww init*, the *swww-daemon* will load those files.
 
 # SEE ALSO
 *swww-daemon*(1) *swww-query*(1)
