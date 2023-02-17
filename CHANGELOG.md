@@ -1,5 +1,8 @@
 ### Unreleased
 
+
+### 0.7.2
+
 Improvements:
   * Images (and animations) are now cached at `$XDG_CACHE_HOME` #65
   * We now have man-pages! They must be installed manually in your system by
@@ -10,6 +13,9 @@ Improvements:
 	Have a look at it for more details.
   * We now also have automated spell checking. This let us fix a number in typos
     in our documentation, both internal and user-oriented.
+  * New option for `swww-img`: `--sync`. This syncs the animations in all your
+  monitors. Note that *all monitors must be displaying animations* in order for
+  it to work.
 
 Internal:
   * Integration tests are not run by default. You must now use
