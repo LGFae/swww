@@ -25,9 +25,21 @@ To build, clone this repository and run:
 ```
 cargo build --release
 ```
-Then, put **both binaries** `target/release/swww` and `target/release/swww-daemon` in your 
-path. Optionally, autocompletion scripts for bash, zsh, fish and elvish are offered in the
-`completions` directory.
+Then, put **both binaries** `target/release/swww` and
+`target/release/swww-daemon` in your  path. Optionally, autocompletion scripts
+for bash, zsh, fish and elvish are offered in the `completions` directory.
+
+#### Man pages:
+
+In order to generate the man pages, **you must have `scdoc` installed**. Run
+
+```
+./doc/gen.sh
+```
+
+The man pages will be in `doc/generated`. To install them, you must move them to
+to the appropriate location in your system. You should be able to figure out
+where that is by running `manpath`.
 
 ## Features
 
@@ -176,8 +188,8 @@ recommend:
 
 A huge thanks to everyone involed in the [smithay](https://github.com/Smithay)
 project. Making this program would not have been possible without it. In fact,
-the first versions of swww were quite literaly copy pasted from the [layer shell
-example in the client-toolkit
+the first versions of swww were quite literally copy pasted from the
+[layer shell example in the client-toolkit
 ](https://github.com/Smithay/client-toolkit/blob/master/examples/layer_shell.rs).
 
 A big thank-you also to [HakierGrzonzo](https://github.com/HakierGrzonzo), for

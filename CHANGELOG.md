@@ -2,6 +2,14 @@
 
 Improvements:
   * Images (and animations) are now cached at `$XDG_CACHE_HOME` #65
+  * We now have man-pages! They must be installed manually in your system by
+    moving the files in `doc/generated` to the appropriate location. Typically,
+	you can figure out where that is by running `manpath`. The script
+	`doc/gen.sh` will create the above directory and all the relevant manpages.
+	Note that the script depends on `scdoc` being installed in the system.
+	Have a look at it for more details.
+  * We now also have automated spell checking. This let us fix a number in typos
+    in our documentation, both internal and user-oriented.
 
 Internal:
   * Integration tests are not run by default. You must now use
@@ -18,7 +26,7 @@ Improvements:
   (@flick0)
 
 Fixes:
-  * `swww query` not returing the image being displayed
+  * `swww query` not returning the image being displayed
   * document `--no_resize` and `--fill_color` options for `swww img`
   * reading img from stdin (now with a proper integration test to make sure
   it doesn't happen again) (#42)
@@ -68,7 +76,7 @@ Internal:
   warning was added when we detect the presence of the SWWW_TRANSITION_SPEED
   environment variable. This warning will go away in the next release, it is
   only there as a means of making sure everyone knows the variable has been
-  superseeded, and having it in your configs no longer does anything.
+  superseded, and having it in your configs no longer does anything.
 
 Improvements:
 
@@ -96,7 +104,7 @@ Improvements:
 
 ### 0.4.3
 
-  * Check to see if daemon is REALLY running when we see tha socket already
+  * Check to see if daemon is REALLY running when we see that socket already
   exists (#11)
   * Fix dpi scaling (#22)
 
@@ -129,9 +137,9 @@ Improvements:
 
 * Limited image formats to: `gif`, `jpeg`, `jpeg_rayon`, `png`, `pnm`, `tga`,
   `tiff`, `webp`, `bmp`, `farbfeld`
-* Bumbed rust edition to 2021
+* Bumped rust edition to 2021
 * Our custom compression is now even faster
-* I did a rewrite of the way the code that handled animations was structed.
+* I did a rewrite of the way the code that handled animations was structured.
   This made caching a LOT faster, but it incurs in more memory usage, since
   we spawn an extra thread to make a pipeline. That said, since this also 
   greatly simplified the code itself, I considered it an overall positive

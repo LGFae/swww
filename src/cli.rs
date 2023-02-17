@@ -128,20 +128,23 @@ impl CliPosition {
 ///Change what your monitors display as a background by controlling the swww daemon at runtime.
 ///Supports animated gifs and putting different stuff in different monitors. I also did my best to
 ///make it as resource efficient as possible.
+///
+///Note `swww` will only work in a compositor that implements the layer-shell protocol. Typically,
+///wlr-roots based compositors.
 pub enum Swww {
     ///Fills the specified outputs with the given color.
     ///
     ///Defaults to filling all outputs with black.
     Clear(Clear),
 
-    /// Send an image (or animated gif) for the daemon to display.
+    /// Sends an image (or animated gif) for the daemon to display.
     ///
     /// Use `-` to read from stdin
     Img(Img),
 
-    /// Initialize the daemon.
+    /// Initializes the daemon.
     ///
-    /// Exits if there is already a daemon running. We check thay by seeing if
+    /// Exits if there is already a daemon running. We check that by seeing if
     /// $XDG_RUNTIME_DIR/swww.socket exists.
     Init {
         ///Don't fork the daemon. This will keep it running in the current terminal.
@@ -158,7 +161,7 @@ pub enum Swww {
     ///Asks the daemon to print output information (names and dimensions).
     ///
     ///You may use this to find out valid values for the <swww-img --outputs> option. If you want
-    ///more detailed information about your outputs, I would recommed trying wlr-randr.
+    ///more detailed information about your outputs, I would recommend trying wlr-randr.
     Query,
 }
 
@@ -192,7 +195,7 @@ pub struct Img {
     ///
     /// If this is set, the image won't be resized, and will be centralized in the middle of the
     /// screen instead. If it is smaller than the screen's size, it will be padded with the value
-    /// of `fill_color`, bellow.
+    /// of `fill_color`, below.
     #[arg(long)]
     pub no_resize: bool,
 
@@ -202,21 +205,18 @@ pub struct Img {
 
     ///Filter to use when scaling images (run swww img --help to see options).
     ///
-    ///Note that image scaling can sometimes significantly increase RAM usage. If you want to use
-    ///as little RAM as possible, I recommend scaling the images before sending them to swww
-    ///
     ///Available options are:
     ///
     ///Nearest | Bilinear | CatmullRom | Mitchell | Lanczos3
     ///
-    ///These are offered by the image crate (https://crates.io/crates/image). 'Nearest' is
+    ///These are offered by the fast_image_resize crate
+    ///(https://docs.rs/fast_image_resize/2.5.0/fast_image_resize/). 'Nearest' is
     ///what I recommend for pixel art stuff, and ONLY for pixel art stuff. It is also the
     ///fastest filter.
     ///
     ///For non pixel art stuff, I would usually recommend one of the last three, though some
     ///experimentation will be necessary to see which one you like best. Also note they are
-    ///all slower than Nearest. For some examples, see
-    ///https://docs.rs/image/latest/image/imageops/enum.FilterType.html.
+    ///all slower than Nearest.
     #[arg(short, long, default_value = "Lanczos3")]
     pub filter: Filter,
 
@@ -238,21 +238,23 @@ pub struct Img {
     ///
     ///Possible transitions are:
     ///
-    ///simple | left | right | top | bottom | wipe | grow | center | any | outer | random
+    ///simple | left | right | top | bottom | wipe | wave | grow | center | any | outer | random
     ///
     ///The 'left', 'right', 'top' and 'bottom' options make the transition happen from that
-    ///position to its oposite in the screen.
+    ///position to its opposite in the screen.
     ///
-    ///'wipe' is simillar to 'left' but allows you to specify the angle for transition (with the --transition-angle flag).
+    ///'wipe' is similar to 'left' but allows you to specify the angle for transition with the `--transition-angle` flag.
+    ///
+    ///'wave' is similar to 'wipe' sweeping line is wavy
     ///
     ///'grow' causes a growing circle to transition across the screen and allows changing the circle's center
-    /// position (with --transition-pos flag).
+    /// position with the `--transition-pos` flag.
     ///
-    ///'center' an alias to 'grow' with position set to center of screen.
+    ///'center' is an alias to 'grow' with position set to center of screen.
     ///
-    ///'any' an alias to 'grow' with position set to a random point on screen.
+    ///'any' is an alias to 'grow' with position set to a random point on screen.
     ///
-    ///'outer' same as grow but the circle shrinks instead of growing.
+    ///'outer' is the same as grow but the circle shrinks instead of growing.
     ///
     ///Finally, 'random' will select a transition effect at random
     #[arg(short, long, env = "SWWW_TRANSITION", default_value = "simple")]
@@ -266,14 +268,12 @@ pub struct Img {
     ///Larger values will make the transition faster, but more abrupt. A value of 255 will always
     ///switch to the new image immediately.
     ///
-    ///Broadly speaking, this is mostly only visible during the 'simple' transition. The other
-    ///transitions tend to change more with the 'transition-step' and 'transition-speed' options
     #[arg(long, env = "SWWW_TRANSITION_STEP", default_value = "90")]
     pub transition_step: u8,
 
     ///How long the transition takes to complete in seconds.
     ///
-    ///Note that this doesnt work with the 'simple' transition
+    ///Note that this doesn't work with the 'simple' transition
     #[arg(long, env = "SWWW_TRANSITION_DURATION", default_value = "3")]
     pub transition_duration: f32,
 
@@ -286,7 +286,7 @@ pub struct Img {
     #[arg(long, env = "SWWW_TRANSITION_FPS", default_value = "30")]
     pub transition_fps: u8,
 
-    ///This is only used for the 'wipe' transition. It controls the angle of the wipe (default is '0').
+    ///This is used for the 'wipe' and 'wave' transitions. It controls the angle of the wipe
     ///
     ///Note that the angle is in degrees, where '0' is right to left and '90' is top to bottom, and '270' bottom to top
     #[arg(long, env = "SWWW_TRANSITION_ANGLE", default_value = "45")]
@@ -294,8 +294,8 @@ pub struct Img {
 
     ///This is only used for the 'grow','outer' transitions. It controls the center of circle (default is 'center').
     ///
-    ///position values can be given in both percentage values and pixel values:
-    ///  float values are interpretted as percentages and integer values as pixel values
+    ///Position values can be given in both percentage values and pixel values:
+    ///  float values are interpreted as percentages and integer values as pixel values
     ///  eg: 0.5,0.5 means 50% of the screen width and 50% of the screen height
     ///      200,400 means 200 pixels from the left and 400 pixels from the bottom
     ///

@@ -6,10 +6,10 @@
 //! For what's left, we store only the difference from the last frame to this one. We do that as
 //! follows:
 //! * First, we count how many pixels didn't change. We store that value as a u8.
-//!   Everytime the u8 hits the max (i.e. 255, or 0xFF), we push in onto the vector
+//!   Every time the u8 hits the max (i.e. 255, or 0xFF), we push in onto the vector
 //!   and restart the counting.
 //! * Once we find a pixel that has changed, we count, starting from that one, how many changed,
-//!   the same way we counted above (i.e. store as u8, everytime it hits the max push and restart
+//!   the same way we counted above (i.e. store as u8, every time it hits the max push and restart
 //!   the counting)
 //! * Then, we store all the new bytes.
 //! * Start from the top until we are done with the image
@@ -28,7 +28,7 @@ lazy_static::lazy_static! {
 /// This calculates the difference between the current(cur) frame and the next(goal).
 /// The closure you pass is run at every difference. It dictates the update logic of the current
 /// frame. With that, you can control whether all different pixels changed are updated, or only the
-/// ones at a certain position. It is meant to be used primarily when writting transitions
+/// ones at a certain position. It is meant to be used primarily when writing transitions
 fn pack_bytes<F>(cur: &mut [u8], goal: &[u8], mut f: F) -> Box<[u8]>
 where
     F: FnMut(&mut [u8; 4], &[u8; 4], usize),
@@ -178,7 +178,7 @@ impl ReadiedPack {
         self.inner.is_empty()
     }
 
-    ///return whether unpacking was successfull. Note it can only fail if `buf.len() !=
+    ///return whether unpacking was successful. Note it can only fail if `buf.len() !=
     ///expected_buf_size`
     pub fn unpack(&self, buf: &mut [u8]) -> bool {
         if buf.len() >= self.expected_buf_size {
@@ -228,12 +228,12 @@ impl<'a, I> Iterator for ZipEq<'a, I> {
     }
 }
 
-// The functions bellow were copy pasted and adapted from the bytemuck crate:
+// The functions below were copy pasted and adapted from the bytemuck crate:
 
 #[inline]
 fn pixels(img: &[u8]) -> &[[u8; 4]] {
     if img.len() % 4 != 0 {
-        unreachable!("Calling pixels with a wrongly formated image");
+        unreachable!("Calling pixels with a wrongly formatted image");
     }
     unsafe { core::slice::from_raw_parts(img.as_ptr().cast::<[u8; 4]>(), img.len() / 4) }
 }
@@ -241,7 +241,7 @@ fn pixels(img: &[u8]) -> &[[u8; 4]] {
 #[inline]
 fn pixels_mut(img: &mut [u8]) -> &mut [[u8; 4]] {
     if img.len() % 4 != 0 {
-        unreachable!("Calling pixels_mut with a wrongly formated image");
+        unreachable!("Calling pixels_mut with a wrongly formatted image");
     }
     unsafe { core::slice::from_raw_parts_mut(img.as_ptr() as *mut [u8; 4], img.len() / 4) }
 }

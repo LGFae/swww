@@ -2,4 +2,4 @@ Use clap ValueEnum for our enums. Also use arggroup to deny invalid arguments
 
 Fully automated, complete testing, for every option
 
-Manpages
+See if transitions can be calculated in the client

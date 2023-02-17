@@ -252,7 +252,7 @@ fn make_animation_request(
         for (dim, outputs) in dims.into_iter().zip(outputs) {
             let imgbuf = match image::io::Reader::open(&imgpath) {
                 Ok(img) => img.into_inner(),
-                Err(e) => return Err(format!("error openning image during animation: {e}")),
+                Err(e) => return Err(format!("error opening image during animation: {e}")),
             };
             let gif = match GifDecoder::new(imgbuf) {
                 Ok(gif) => gif,
@@ -382,7 +382,7 @@ fn img_resize(
     let (img_w, img_h) = img.dimensions();
     let mut resized_img = if (img_w, img_h) != (width, height) {
         let mut src = match fast_image_resize::Image::from_vec_u8(
-            // We unwrap bellow because we know the images's dimensions should never be 0
+            // We unwrap below because we know the images's dimensions should never be 0
             NonZeroU32::new(img_w).unwrap(),
             NonZeroU32::new(img_h).unwrap(),
             img.into_raw(),
@@ -397,7 +397,7 @@ fn img_resize(
             return Err(e.to_string());
         }
 
-        // We unwrap bellow because we know the outputs's dimensions should never be 0
+        // We unwrap below because we know the outputs's dimensions should never be 0
         let new_w = NonZeroU32::new(width).unwrap();
         let new_h = NonZeroU32::new(height).unwrap();
         let mut src_view = src.view();
