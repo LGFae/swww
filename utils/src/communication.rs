@@ -300,18 +300,28 @@ pub fn get_socket_path() -> PathBuf {
 }
 
 pub fn get_cache_path() -> Result<PathBuf, String> {
-    let cache_dir = match std::env::var("XDG_CACHE_HOME") {
-        Ok(dir) => dir + "/swww",
+    let cache_path = match std::env::var("XDG_CACHE_HOME") {
+        Ok(dir) => {
+            let mut cache = PathBuf::from(dir);
+            cache.push("swww");
+            cache
+        }
         Err(_) => match std::env::var("HOME") {
-            Ok(dir) => dir + ".cache/swww",
+            Ok(dir) => {
+                let mut cache = PathBuf::from(dir);
+                cache.push(".cache/swww");
+                cache
+            }
             Err(_) => return Err("failed to read both XDG_CACHE_HOME and HOME env vars".to_owned()),
         },
     };
 
-    let cache_path = PathBuf::from(&cache_dir);
     if !cache_path.exists() {
         if let Err(e) = std::fs::create_dir(&cache_path) {
-            return Err(format!("failed to create cache_path: {e}"));
+            return Err(format!(
+                "failed to create cache_path \"{}\": {e}",
+                cache_path.display()
+            ));
         }
     }
 
