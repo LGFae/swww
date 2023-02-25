@@ -145,6 +145,7 @@ impl Transition {
                 break;
             }
         }
+        self.fallback(new_img, outputs, sender, stop_recv)
     }
 
 
