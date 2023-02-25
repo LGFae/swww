@@ -148,7 +148,6 @@ impl Transition {
         self.fallback(new_img, outputs, sender, stop_recv)
     }
 
-
     fn wave(
         mut self,
         new_img: &[u8],

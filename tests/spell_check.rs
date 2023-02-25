@@ -19,7 +19,7 @@ fn spell_check_code_and_man_pages() {
             "utils/src",  // common code
             "doc",        // man pages
             "CHANGELOG.md",
-            "README.md"
+            "README.md",
         ])
         .output()
     {
