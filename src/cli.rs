@@ -225,7 +225,7 @@ pub struct Img {
     ///Activating this will cause a monitor's animation to wait until all other monitor's are
     ///ready to update, and then update them all at once. Note if you want to send different `gif`s
     ///to different monitors and have them synced, you will have to call `swww img --sync` **every
-    ///time**. 
+    ///time**.
     ///
     ///Furthermore, if you only set `--sync` to one monitor and not the others, that monitor will
     ///not animate anything, while the others will animate out-of-sync.
@@ -268,7 +268,13 @@ pub struct Img {
     ///Larger values will make the transition faster, but more abrupt. A value of 255 will always
     ///switch to the new image immediately.
     ///
-    #[arg(long, env = "SWWW_TRANSITION_STEP", default_value = "90")]
+    /// This defaults to 2 when transition-type is 'simple', and 90 otherwise
+    #[arg(
+        long,
+        env = "SWWW_TRANSITION_STEP",
+        default_value = "90",
+        default_value_if("transition_type", "simple", "2")
+    )]
     pub transition_step: u8,
 
     ///How long the transition takes to complete in seconds.
@@ -351,55 +357,55 @@ fn parse_coords(raw: &str) -> Result<CliPosition, String> {
             "center" => {
                 return Ok(CliPosition::new(
                     CliCoord::Percent(0.5),
-                    CliCoord::Percent(0.5)
+                    CliCoord::Percent(0.5),
                 ));
             }
             "top" => {
                 return Ok(CliPosition::new(
                     CliCoord::Percent(0.5),
-                    CliCoord::Percent(1.0)
+                    CliCoord::Percent(1.0),
                 ));
             }
             "bottom" => {
                 return Ok(CliPosition::new(
                     CliCoord::Percent(0.5),
-                    CliCoord::Percent(0.0)
+                    CliCoord::Percent(0.0),
                 ));
             }
             "left" => {
                 return Ok(CliPosition::new(
                     CliCoord::Percent(0.0),
-                    CliCoord::Percent(0.5)
+                    CliCoord::Percent(0.5),
                 ));
             }
             "right" => {
                 return Ok(CliPosition::new(
                     CliCoord::Percent(1.0),
-                    CliCoord::Percent(0.5)
+                    CliCoord::Percent(0.5),
                 ));
             }
             "top-left" => {
                 return Ok(CliPosition::new(
                     CliCoord::Percent(0.0),
-                    CliCoord::Percent(1.0)
+                    CliCoord::Percent(1.0),
                 ));
             }
             "top-right" => {
                 return Ok(CliPosition::new(
                     CliCoord::Percent(1.0),
-                    CliCoord::Percent(1.0)
+                    CliCoord::Percent(1.0),
                 ));
             }
             "bottom-left" => {
                 return Ok(CliPosition::new(
                     CliCoord::Percent(0.0),
-                    CliCoord::Percent(0.0)
+                    CliCoord::Percent(0.0),
                 ));
             }
             "bottom-right" => {
                 return Ok(CliPosition::new(
                     CliCoord::Percent(1.0),
-                    CliCoord::Percent(0.0)
+                    CliCoord::Percent(0.0),
                 ));
             }
             _ => return Err(format!("Invalid position keyword: {raw}")),
@@ -426,7 +432,6 @@ fn parse_coords(raw: &str) -> Result<CliPosition, String> {
     };
 
     Ok(CliPosition::new(parsed_x, parsed_y))
-
 }
 
 #[cfg(test)]

@@ -105,6 +105,7 @@ swww-img
 	255 will always switch to the new image immediately.
 
 	Default is 90.
+	If *transition-type* is _simple_, default is 2.
 
 *--transition-duration* <seconds (can have decimals)>
 	\[Environment Variable $SWWW_TRANSITION_DURATION]
