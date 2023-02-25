@@ -97,7 +97,7 @@ impl Transition {
         )
     }
 
-    fn simple(
+    fn fallback(
         mut self,
         new_img: &[u8],
         outputs: &mut Vec<String>,
@@ -115,6 +115,38 @@ impl Transition {
             now = Instant::now();
         }
     }
+
+    fn simple(
+        mut self,
+        new_img: &[u8],
+        outputs: &mut Vec<String>,
+        sender: &SyncSender<(Vec<String>, ReadiedPack)>,
+        stop_recv: &mpsc::Receiver<Vec<String>>,
+    ) {
+        let fps = self.fps;
+        let mut now = Instant::now();
+
+        let (mut seq, start) = self.bezier_seq(0.0, 1.0);
+
+        let mut step = 0.0;
+
+        loop {
+            let transition_img =
+                ReadiedPack::new(&mut self.old_img, new_img, |old_pix, new_pix, _| {
+                    for (old_col, new_col) in old_pix.iter_mut().zip(*new_pix) {
+                        *old_col = (*old_col as f64 * (1.0 - step) + new_col as f64 * step) as u8;
+                    }
+                });
+            send_transition_frame!(transition_img, outputs, now, fps, sender, stop_recv);
+            now = Instant::now();
+            step = seq.now() as f64;
+            seq.advance_to(start.elapsed().as_secs_f64());
+            if start.elapsed().as_secs_f64() >= seq.duration() {
+                break;
+            }
+        }
+    }
+
 
     fn wave(
         mut self,
@@ -188,7 +220,7 @@ impl Transition {
                 break;
             }
         }
-        self.simple(new_img, outputs, sender, stop_recv)
+        self.fallback(new_img, outputs, sender, stop_recv)
     }
 
     fn wipe(
@@ -252,7 +284,7 @@ impl Transition {
                 break;
             }
         }
-        self.simple(new_img, outputs, sender, stop_recv)
+        self.fallback(new_img, outputs, sender, stop_recv)
     }
 
     fn grow(
@@ -305,7 +337,7 @@ impl Transition {
                 break;
             }
         }
-        self.simple(new_img, outputs, sender, stop_recv)
+        self.fallback(new_img, outputs, sender, stop_recv)
     }
 
     fn outer(
@@ -359,7 +391,7 @@ impl Transition {
                 break;
             }
         }
-        self.simple(new_img, outputs, sender, stop_recv)
+        self.fallback(new_img, outputs, sender, stop_recv)
     }
 }
 
