@@ -95,18 +95,19 @@ fn make_request(args: &Swww) -> Result<Request, String> {
             let requested_outputs = split_cmdline_outputs(&img.outputs);
             let (dims, outputs) = get_dimensions_and_outputs(requested_outputs)?;
             let (img_raw, is_gif) = read_img(&img.path)?;
-            let img_request = make_img_request(img, img_raw, &dims, &outputs)?;
             if is_gif {
                 let animations = make_animation_request(img, &dims, &outputs);
+                let img_request = make_img_request(img, img_raw, &dims, &outputs)?;
+                let animations = match animations.join() {
+                    Ok(result) => Ok(Request::Animation(result?)),
+                    Err(e) => return Err(format!("failed to join animations thread: {e:?}")),
+                };
                 let socket = connect_to_socket(5, 100)?;
                 Request::Img(img_request).send(&socket)?;
                 Answer::receive(socket)?;
-                match animations.join() {
-                    Ok(result) => Ok(Request::Animation(result?)),
-                    Err(e) => Err(format!("failed to join animations thread: {e:?}")),
-                }
+                animations
             } else {
-                Ok(Request::Img(img_request))
+                Ok(Request::Img(make_img_request(img, img_raw, &dims, &outputs)?))
             }
         }
         Swww::Init { .. } => Ok(Request::Init),
