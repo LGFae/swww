@@ -8,7 +8,6 @@ use std::{
     os::unix::net::UnixStream,
     path::{Path, PathBuf},
     process::Stdio,
-    thread::JoinHandle,
     time::Duration,
 };
 
@@ -95,18 +94,26 @@ fn make_request(args: &Swww) -> Result<Request, String> {
             let requested_outputs = split_cmdline_outputs(&img.outputs);
             let (dims, outputs) = get_dimensions_and_outputs(requested_outputs)?;
             let (img_raw, is_gif) = read_img(&img.path)?;
-            let img_request = make_img_request(img, img_raw, &dims, &outputs)?;
             if is_gif {
-                let animations = make_animation_request(img, &dims, &outputs);
-                let socket = connect_to_socket(5, 100)?;
-                Request::Img(img_request).send(&socket)?;
-                Answer::receive(socket)?;
-                match animations.join() {
-                    Ok(result) => Ok(Request::Animation(result?)),
-                    Err(e) => Err(format!("failed to join animations thread: {e:?}")),
+                match std::thread::scope(|s| {
+                    let animations = s.spawn(|| make_animation_request(img, &dims, &outputs));
+                    let img_request = make_img_request(img, img_raw, &dims, &outputs)?;
+                    let animations = match animations.join() {
+                        Ok(a) => a,
+                        Err(e) => Err(format!("{e:?}")),
+                    };
+                    let socket = connect_to_socket(5, 100)?;
+                    Request::Img(img_request).send(&socket)?;
+                    Answer::receive(socket)?;
+                    animations
+                }) {
+                    Ok(animations) => Ok(Request::Animation(animations)),
+                    Err(e) => Err(format!("failed to create animated request: {e}")),
                 }
             } else {
-                Ok(Request::Img(img_request))
+                Ok(Request::Img(make_img_request(
+                    img, img_raw, &dims, &outputs,
+                )?))
             }
         }
         Swww::Init { .. } => Ok(Request::Init),
@@ -239,36 +246,28 @@ fn make_animation_request(
     img: &cli::Img,
     dims: &[(u32, u32)],
     outputs: &[Vec<String>],
-) -> JoinHandle<Result<AnimationRequest, String>> {
-    let dims = dims.to_owned();
-    let outputs = outputs.to_owned();
+) -> Result<AnimationRequest, String> {
     let filter = make_filter(&img.filter);
-    let imgpath = img.path.clone();
-    let no_resize = img.no_resize;
-    let fill_color = img.fill_color;
-    let sync = img.sync;
-    std::thread::spawn(move || {
-        let mut animations = Vec::with_capacity(dims.len());
-        for (dim, outputs) in dims.into_iter().zip(outputs) {
-            let imgbuf = match image::io::Reader::open(&imgpath) {
-                Ok(img) => img.into_inner(),
-                Err(e) => return Err(format!("error opening image during animation: {e}")),
-            };
-            let gif = match GifDecoder::new(imgbuf) {
-                Ok(gif) => gif,
-                Err(e) => return Err(format!("failed to decode gif during animation: {e}")),
-            };
-            animations.push((
-                communication::Animation {
-                    animation: compress_frames(gif, dim, filter, no_resize, &fill_color)?
-                        .into_boxed_slice(),
-                    sync,
-                },
-                outputs.to_owned(),
-            ));
-        }
-        Ok(animations)
-    })
+    let mut animations = Vec::with_capacity(dims.len());
+    for (dim, outputs) in dims.iter().zip(outputs) {
+        let imgbuf = match image::io::Reader::open(&img.path) {
+            Ok(img) => img.into_inner(),
+            Err(e) => return Err(format!("error opening image during animation: {e}")),
+        };
+        let gif = match GifDecoder::new(imgbuf) {
+            Ok(gif) => gif,
+            Err(e) => return Err(format!("failed to decode gif during animation: {e}")),
+        };
+        animations.push((
+            communication::Animation {
+                animation: compress_frames(gif, *dim, filter, img.no_resize, &img.fill_color)?
+                    .into_boxed_slice(),
+                sync: img.sync,
+            },
+            outputs.to_owned(),
+        ));
+    }
+    Ok(animations)
 }
 
 fn compress_frames(
