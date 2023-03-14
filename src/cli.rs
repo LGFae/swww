@@ -65,6 +65,7 @@ impl std::str::FromStr for Filter {
 #[derive(Clone)]
 pub enum TransitionType {
     Simple,
+    Fade,
     Left,
     Right,
     Top,
@@ -95,8 +96,9 @@ impl std::str::FromStr for TransitionType {
             "any" => Ok(Self::Any),
             "wave" => Ok(Self::Wave),
             "random" => Ok(Self::Random),
+            "fade" => Ok(Self::Fade),
             _ => Err("unrecognized transition type.\nValid transitions are:\n\
-                     \tsimple | left | right | top | bottom | wipe | grow | center | outer | random | wave\n\
+                     \tsimple | fade | left | right | top | bottom | wipe | grow | center | outer | random | wave\n\
                      see swww img --help for more details"),
         }
     }
@@ -238,10 +240,12 @@ pub struct Img {
     ///
     ///Possible transitions are:
     ///
-    ///simple | left | right | top | bottom | wipe | wave | grow | center | any | outer | random
+    ///simple | fade | left | right | top | bottom | wipe | wave | grow | center | any | outer | random
     ///
     ///The 'left', 'right', 'top' and 'bottom' options make the transition happen from that
     ///position to its opposite in the screen.
+    /// 
+    ///'fade' is similar to 'simple' but the fade is controlled through the --transition-bezier flag
     ///
     ///'wipe' is similar to 'left' but allows you to specify the angle for transition with the `--transition-angle` flag.
     ///
