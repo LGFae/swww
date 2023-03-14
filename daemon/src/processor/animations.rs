@@ -87,6 +87,7 @@ impl Transition {
             TransitionType::Grow => self.grow(new_img, outputs, sender, stop_recv),
             TransitionType::Outer => self.outer(new_img, outputs, sender, stop_recv),
             TransitionType::Wave => self.wave(new_img, outputs, sender, stop_recv),
+            TransitionType::Fade => self.fade(new_img, outputs, sender, stop_recv),
         }
     }
 
@@ -97,7 +98,7 @@ impl Transition {
         )
     }
 
-    fn fallback(
+    fn simple(
         mut self,
         new_img: &[u8],
         outputs: &mut Vec<String>,
@@ -116,7 +117,7 @@ impl Transition {
         }
     }
 
-    fn simple(
+    fn fade(
         mut self,
         new_img: &[u8],
         outputs: &mut Vec<String>,
@@ -145,7 +146,7 @@ impl Transition {
                 break;
             }
         }
-        self.fallback(new_img, outputs, sender, stop_recv)
+        self.simple(new_img, outputs, sender, stop_recv)
     }
 
     fn wave(
@@ -220,7 +221,7 @@ impl Transition {
                 break;
             }
         }
-        self.fallback(new_img, outputs, sender, stop_recv)
+        self.simple(new_img, outputs, sender, stop_recv)
     }
 
     fn wipe(
@@ -284,7 +285,7 @@ impl Transition {
                 break;
             }
         }
-        self.fallback(new_img, outputs, sender, stop_recv)
+        self.simple(new_img, outputs, sender, stop_recv)
     }
 
     fn grow(
@@ -337,7 +338,7 @@ impl Transition {
                 break;
             }
         }
-        self.fallback(new_img, outputs, sender, stop_recv)
+        self.simple(new_img, outputs, sender, stop_recv)
     }
 
     fn outer(
@@ -391,7 +392,7 @@ impl Transition {
                 break;
             }
         }
-        self.fallback(new_img, outputs, sender, stop_recv)
+        self.simple(new_img, outputs, sender, stop_recv)
     }
 }
 
