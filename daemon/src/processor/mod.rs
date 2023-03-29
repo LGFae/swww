@@ -258,12 +258,10 @@ fn get_cached_bg(output: &str) -> Option<(Img, Option<Animation>)> {
     let cache_file = match std::fs::File::open(cache_path) {
         Ok(file) => file,
         Err(e) => {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                return None;
-            } else {
+            if e.kind() != std::io::ErrorKind::NotFound {
                 error!("failed to open bgs cache's file: {e}");
-                return None;
             }
+            return None;
         }
     };
 

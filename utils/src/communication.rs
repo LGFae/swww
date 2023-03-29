@@ -316,7 +316,7 @@ pub fn get_cache_path() -> Result<PathBuf, String> {
         },
     };
 
-    if !cache_path.exists() {
+    if !cache_path.is_dir() {
         if let Err(e) = std::fs::create_dir(&cache_path) {
             return Err(format!(
                 "failed to create cache_path \"{}\": {e}",
