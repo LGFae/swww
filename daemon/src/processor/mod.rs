@@ -52,6 +52,15 @@ impl Processor {
     ) -> Answer {
         let mut answer = Answer::Ok;
         for ((old_img, dim), (new_img, mut outputs)) in old_imgs.into_iter().zip(requests) {
+            if old_img.len() != new_img.img.len() {
+                return Answer::Err(format!(
+                    "Output and image have different sizes: {} vs {}.\
+                            This should be impossible.\
+                            Please get in the contact with the developers",
+                    old_img.len(),
+                    new_img.img.len()
+                ));
+            }
             self.stop_animations(&outputs);
             let transition = transition.clone();
             let sender = self.frame_sender.clone();
