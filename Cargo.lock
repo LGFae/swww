@@ -1253,7 +1253,6 @@ dependencies = [
  "fast_image_resize",
  "image",
  "rand",
- "serde",
  "utils",
 ]
 

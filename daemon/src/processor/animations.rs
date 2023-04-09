@@ -188,6 +188,7 @@ impl Transition {
                 break;
             }
         }
+        self.step = 255;
         self.simple(new_img, outputs, sender, stop_recv)
     }
 
@@ -252,6 +253,7 @@ impl Transition {
                 break;
             }
         }
+        self.step = 255;
         self.simple(new_img, outputs, sender, stop_recv)
     }
 
@@ -305,6 +307,7 @@ impl Transition {
                 break;
             }
         }
+        self.step = 255;
         self.simple(new_img, outputs, sender, stop_recv)
     }
 
@@ -359,6 +362,7 @@ impl Transition {
                 break;
             }
         }
+        self.step = 255;
         self.simple(new_img, outputs, sender, stop_recv)
     }
 }
