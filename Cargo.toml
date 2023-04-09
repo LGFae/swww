@@ -17,6 +17,7 @@ panic = "abort" # stack unwinding is mostly useless since the user won't be able
 strip = true
 
 [profile.bench]
+lto = "thin"
 debug = 1
 strip = false
 
