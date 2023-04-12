@@ -1,5 +1,3 @@
-Use clap ValueEnum for our enums. Also use arggroup to deny invalid arguments
+Update sctk
 
 Fully automated, complete testing, for every option
-
-See if transitions can be calculated in the client
