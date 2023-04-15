@@ -124,7 +124,7 @@ fn make_request(args: &Swww) -> Result<Request, String> {
 
 fn split_cmdline_outputs(outputs: &str) -> Vec<String> {
     outputs
-        .split(' ')
+        .split(',')
         .map(|s| s.to_owned())
         .filter(|s| !s.is_empty())
         .collect()
