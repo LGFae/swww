@@ -1,6 +1,33 @@
 ### Unreleased
 
 
+### 0.7.3
+
+Fixes:
+  * Missing `/` when using `$HOME/.cache/swww`, by @max-ishere
+  * `--transition-step` with `simple` has saner defaults
+  * correctly spliting outputs argument with ',', by @potatoattack
+
+Improvements:
+  * we only send the image after we've finished processing the whole animation.
+  This diminishes the weird lag that can sometimes happen when sending a large
+  gif.
+  * sending a status update to systemd when daemon has initialized, by @b3nj4m1n
+
+Internals:
+  * we have benchmarks for our compression functions! This will be useful for
+  later once I start poking things to see if I can make them more efficient.
+
+Unfortunately, there are a few bugs people have reported that I still haven't
+been able to fix. Sorry about that.
+
+In any case, the immediate plan for the future is actually to update sctk to
+version 0.17.0. I am actually studying the possibility of using sctk with wgpu,
+since that should bring many improvements (most noticeably, we would be able to
+store an rgb vector, instead of rgba, so we could potentially cut memory usage
+by 3/4. In theory, of course, I still have to actually measure it to see if
+there's any difference. It will probably still take a while).
+
 ### 0.7.2
 
 Improvements:
