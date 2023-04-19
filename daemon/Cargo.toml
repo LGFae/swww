@@ -12,6 +12,7 @@ simplelog = "0.12"
 keyframe = "1.1"
 
 utils = { path = "../utils" }
+sd-notify = { version = "0.4.1" }
 
 [dev-dependencies]
 rand = "0.8"
