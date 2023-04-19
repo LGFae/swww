@@ -427,7 +427,7 @@ fn main_loop(
     info!("Initialization succeeded! Starting main loop...");
     if let Ok(true) = sd_notify::booted() {
         if let Err(e) = sd_notify::notify(true, &[sd_notify::NotifyState::Ready]) {
-            return Err(e.to_string());
+            error!("Error sending status update to systemd: {}", e.to_string());
         }
     }
     let mut loop_signal = event_loop.get_signal();
