@@ -77,7 +77,9 @@ pub enum BgImg {
 impl fmt::Display for BgImg {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            BgImg::Color(color) => write!(f, "color: {}{}{}", color[0], color[1], color[2]),
+            BgImg::Color(color) => {
+                write!(f, "color: {:02X}{:02X}{:02X}", color[0], color[1], color[2])
+            }
             BgImg::Img(p) => write!(
                 f,
                 "image: {:#?}",

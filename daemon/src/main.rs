@@ -1,263 +1,481 @@
-use log::{debug, error, info, warn};
-use simplelog::{ColorChoice, LevelFilter, TermLogger, TerminalMode, ThreadLogMode};
+//! All expects in this program must be carefully chosen on purpose. The idea is that if any of
+//! them fail there is no point in continuing. All of the initialization code, for example, is full
+//! of `expects`, **on purpose**, because we **want** to unwind and exit when they happen
 
-use smithay_client_toolkit::{
-    environment::Environment,
-    get_surface_scale_factor,
-    output::{with_output_info, OutputInfo},
-    reexports::{
-        calloop::{
-            self,
-            channel::{self, Channel},
-            signals::{self, Signal},
-            LoopHandle, LoopSignal,
-        },
-        client::protocol::{wl_output, wl_shm, wl_surface},
-        client::{protocol::wl_compositor, Attached, Display, EventQueue, Main},
-        protocols::wlr::unstable::layer_shell::v1::client::{
-            zwlr_layer_shell_v1, zwlr_layer_surface_v1,
-        },
-    },
-    shm::MemPool,
-    WaylandSource,
+mod wallpaper;
+use log::{debug, error, info, LevelFilter};
+use nix::{
+    poll::{poll, PollFd, PollFlags},
+    sys::signal::{self, SigHandler, Signal},
 };
+use simplelog::{ColorChoice, TermLogger, TerminalMode, ThreadLogMode};
+use wallpaper::Wallpaper;
 
 use std::{
-    cell::{Cell, RefCell, RefMut},
     fs,
-    os::unix::net::{UnixListener, UnixStream},
-    rc::Rc,
+    num::NonZeroI32,
+    os::{
+        fd::{AsRawFd, RawFd},
+        unix::net::{UnixListener, UnixStream},
+    },
+    path::Path,
+    sync::RwLock,
 };
 
-use utils::{
-    communication::{get_socket_path, Answer, BgImg, BgInfo, Clear, Img, Request},
-    comp_decomp::ReadiedPack,
+use smithay_client_toolkit::{
+    compositor::{CompositorHandler, CompositorState, Region},
+    delegate_compositor, delegate_layer, delegate_output, delegate_registry, delegate_shm,
+    output::{OutputHandler, OutputState},
+    registry::{ProvidesRegistryState, RegistryState},
+    registry_handlers,
+    shell::{
+        wlr_layer::{Layer, LayerShell, LayerShellHandler, LayerSurface, LayerSurfaceConfigure},
+        WaylandSurface,
+    },
+    shm::{slot::SlotPool, Shm, ShmHandler},
 };
 
-mod processor;
-mod wayland;
+use wayland_client::{
+    globals::{registry_queue_init, GlobalList},
+    protocol::{wl_output, wl_surface},
+    Connection, QueueHandle,
+};
 
-use processor::{ImgWithDim, Processor};
+use utils::communication::{get_socket_path, Answer, BgInfo, Request};
 
-#[derive(PartialEq, Copy, Clone)]
-enum RenderEvent {
-    Configure { width: u32, height: u32 },
-    Closed,
+// We need this because this might be set by signals, so we can't keep it in the daemon
+static EXIT: RwLock<bool> = RwLock::new(false);
+
+fn exit_daemon() {
+    let mut lock = EXIT.write().expect("failed to lock EXIT for writing");
+    *lock = true;
 }
 
-struct Bg {
-    info: BgInfo,
-    surface: wl_surface::WlSurface,
-    layer_surface: Main<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1>,
-    next_render_event: Rc<Cell<Option<RenderEvent>>>,
-    pool: MemPool,
+fn should_daemon_exit() -> bool {
+    *EXIT.read().expect("failed to read EXIT")
 }
 
-impl Bg {
-    fn new(
-        output: &wl_output::WlOutput,
-        output_name: String,
-        surface: wl_surface::WlSurface,
-        layer_shell: &Attached<zwlr_layer_shell_v1::ZwlrLayerShellV1>,
-        pool: MemPool,
-    ) -> Self {
-        let layer_surface = layer_shell.get_layer_surface(
-            &surface,
-            Some(output),
-            zwlr_layer_shell_v1::Layer::Background,
-            "swww".to_owned(),
-        );
-
-        layer_surface.set_anchor(zwlr_layer_surface_v1::Anchor::all());
-        layer_surface.set_exclusive_zone(-1);
-
-        let next_render_event = Rc::new(Cell::new(None::<RenderEvent>));
-        let next_render_event_handle = Rc::clone(&next_render_event);
-        layer_surface.quick_assign(move |layer_surface, event, _| {
-            match (event, next_render_event_handle.get()) {
-                (zwlr_layer_surface_v1::Event::Closed, _) => {
-                    next_render_event_handle.set(Some(RenderEvent::Closed));
-                }
-                (
-                    zwlr_layer_surface_v1::Event::Configure {
-                        serial,
-                        width,
-                        height,
-                    },
-                    next,
-                ) if next != Some(RenderEvent::Closed) => {
-                    layer_surface.ack_configure(serial);
-                    next_render_event_handle.set(Some(RenderEvent::Configure { width, height }));
-                }
-                (_, _) => {}
-            }
-        });
-
-        // Commit so that the server will send a configure event
-        surface.commit();
-
-        Self {
-            surface,
-            layer_surface,
-            next_render_event,
-            pool,
-            info: BgInfo {
-                name: output_name,
-                dim: (0, 0),
-                scale_factor: 1,
-                img: BgImg::Color([0, 0, 0]),
-            },
-        }
-    }
-
-    /// Handles any events that have occurred since the last call, redrawing if needed.
-    /// Returns whether the surface was configured or not.
-    /// If it was, returns whether or not it should be dropped
-    fn handle_events(&mut self) -> Option<bool> {
-        match self.next_render_event.take() {
-            Some(RenderEvent::Closed) => Some(true),
-            Some(RenderEvent::Configure { width, height }) => {
-                let scale_factor = get_surface_scale_factor(&self.surface);
-                if self.info.dim != (width, height) || self.info.scale_factor != scale_factor {
-                    self.surface.set_buffer_scale(scale_factor);
-                    self.info.dim = (width, height);
-                    self.info.scale_factor = scale_factor;
-                    let width = width as usize * scale_factor as usize;
-                    let height = height as usize * scale_factor as usize;
-                    if let Err(e) = self.pool.resize(width * height * 4) {
-                        error!("failed to resize {} memory pool: {e}", &self.info.name);
-                    }
-
-                    // We must clear the outputs so that animations work due to the new underlying
-                    // buffer needing to be the exact size of the monitor's.
-                    self.clear([0, 0, 0]);
-                    debug!("Configured {}", self.info);
-                    Some(false)
-                } else {
-                    debug!("Output {} is already configured correctly", self.info.name);
-                    None
-                }
-            }
-            None => None,
-        }
-    }
-
-    ///'color' argument is in rbg. We copy it correctly to brgx inside the function
-    fn clear(&mut self, color: [u8; 3]) {
-        self.info.img = BgImg::Color(color);
-        let dim = self.info.real_dim();
-        let stride = 4 * dim.0 as i32;
-        let width = dim.0 as i32;
-        let height = dim.1 as i32;
-
-        let buffer = self
-            .pool
-            .buffer(0, width, height, stride, wl_shm::Format::Xrgb8888);
-
-        let canvas = self.pool.mmap();
-        for pixel in canvas.chunks_exact_mut(4) {
-            pixel[0] = color[2];
-            pixel[1] = color[1];
-            pixel[2] = color[0];
-        }
-        debug!("Clearing output: {}", self.info.name);
-        self.surface.attach(Some(&buffer), 0, 0);
-        self.surface.damage_buffer(0, 0, width, height);
-        self.surface.commit();
-    }
-
-    fn draw(&mut self, img: &ReadiedPack) {
-        let dim = self.info.real_dim();
-        let stride = 4 * dim.0 as i32;
-        let width = dim.0 as i32;
-        let height = dim.1 as i32;
-
-        let buffer = self
-            .pool
-            .buffer(0, width, height, stride, wl_shm::Format::Xrgb8888);
-        let canvas = self.pool.mmap();
-        if !img.unpack(canvas) {
-            error!("buf_len different from expected_buf_size");
-        }
-        debug!("Decompressed img.");
-
-        self.surface.attach(Some(&buffer), 0, 0);
-        self.surface.damage_buffer(0, 0, width, height);
-        self.surface.commit();
-    }
-
-    ///This method is what makes necessary that we use the mempoll, instead of the "easier"
-    ///automempoll
-    fn get_current_img(&mut self) -> &[u8] {
-        let dim = self.info.real_dim();
-        let size = dim.0 as usize * dim.1 as usize * 4;
-        &self.pool.mmap()[0..size]
-    }
-
-    fn get_current_img_mut(&mut self) -> &mut [u8] {
-        let dim = self.info.real_dim();
-        let size = dim.0 as usize * dim.1 as usize * 4;
-        &mut self.pool.mmap()[0..size]
-    }
+extern "C" fn signal_handler(_: i32) {
+    exit_daemon();
 }
 
-impl Drop for Bg {
-    fn drop(&mut self) {
-        self.layer_surface.destroy();
-        self.surface.destroy();
-    }
-}
-
-fn main() -> Result<(), String> {
+type DaemonResult<T> = Result<T, String>;
+fn main() -> DaemonResult<()> {
     make_logger();
+    let listener = SocketWrapper::new()?;
 
-    let listener = make_socket()?;
-    debug!(
-        "Made socket in {:?} and initialized logger. Starting daemon...",
-        listener.local_addr().unwrap() //this should always work if the socket connected correctly
-    );
+    let handler = SigHandler::Handler(signal_handler);
+    for signal in [Signal::SIGINT, Signal::SIGQUIT, Signal::SIGTERM] {
+        unsafe { signal::signal(signal, handler).expect("Failed to install signal handler") };
+    }
 
-    let (env, display, queue) = wayland::make_wayland_environment();
+    let conn = Connection::connect_to_env().expect("failed to connect to the wayland server");
+    // Enumerate the list of globals to get the protocols the server implements.
+    let (globals, mut event_queue) =
+        registry_queue_init(&conn).expect("failed to initialize the event queue");
+    let qh = event_queue.handle();
 
-    let bgs = Rc::new(RefCell::new(Vec::new()));
+    let mut daemon = Daemon::new(&globals, &qh);
 
-    let layer_shell = env.require_global::<zwlr_layer_shell_v1::ZwlrLayerShellV1>();
-
-    let env_handle = env.clone();
-    let bgs_handle = Rc::clone(&bgs);
-    let output_handler = move |output: wl_output::WlOutput, info: &OutputInfo| {
-        create_backgrounds(
-            &output,
-            info,
-            &env_handle,
-            &bgs_handle,
-            &layer_shell.clone(),
-        );
-    };
-    // Process currently existing outputs
-    for output in env.get_all_outputs() {
-        if let Some(info) = with_output_info(&output, Clone::clone) {
-            output_handler(output, &info);
+    if let Ok(true) = sd_notify::booted() {
+        if let Err(e) = sd_notify::notify(true, &[sd_notify::NotifyState::Ready]) {
+            error!("Error sending status update to systemd: {}", e.to_string());
         }
     }
+    info!("Initialization succeeded! Starting main loop...");
+    let mut poll_handler = PollHandler::new(&listener);
+    while !should_daemon_exit() {
+        // Process wayland events
+        event_queue
+            .flush()
+            .expect("failed to flush the event queue");
+        event_queue
+            .dispatch_pending(&mut daemon)
+            .expect("failed to dispatch events");
+        let read_guard = event_queue
+            .prepare_read()
+            .expect("failed to prepare the event queue's read");
 
-    let _listner_handle =
-        env.listen_for_outputs(move |output, info, _| output_handler(output, info));
+        poll_handler.block(read_guard.connection_fd().as_raw_fd());
 
-    //NOTE: we can't move display into the function because it causes a segfault
-    main_loop(&bgs, queue, &display, listener)?;
-    info!("Finished running event loop.");
+        if poll_handler.has_event(PollHandler::WAYLAND_FD) {
+            read_guard.read().expect("failed to read the event queue");
+            event_queue
+                .dispatch_pending(&mut daemon)
+                .expect("failed to dispatch events");
+        }
 
-    let socket_addr = get_socket_path();
-    if let Err(e) = fs::remove_file(&socket_addr) {
-        return Err(format!(
-            "Failed to remove socket at {socket_addr:?} after closing unexpectedly: {e}"
-        ));
+        if poll_handler.has_event(PollHandler::SOCKET_FD) {
+            match listener.0.accept() {
+                Ok((stream, _addr)) => recv_socket_msg(&mut daemon, stream),
+                Err(e) => match e.kind() {
+                    std::io::ErrorKind::WouldBlock => (),
+                    _ => return Err(format!("failed to accept incoming connection: {e}")),
+                },
+            }
+        }
     }
-    info!("Removed socket at {:?}", socket_addr);
 
     info!("Goodbye!");
     Ok(())
+}
+
+/// This is a wrapper that makes sure to delete the socket when it is dropped
+/// It also makes sure to set the listener to nonblocking mode
+struct SocketWrapper(UnixListener);
+impl SocketWrapper {
+    fn new() -> Result<Self, String> {
+        let socket_addr = get_socket_path();
+        let runtime_dir = match socket_addr.parent() {
+            Some(path) => path,
+            None => return Err("couldn't find a valid runtime directory".to_owned()),
+        };
+
+        if !runtime_dir.exists() {
+            match fs::create_dir(runtime_dir) {
+                Ok(()) => (),
+                Err(e) => return Err(format!("failed to create runtime dir: {e}")),
+            }
+        }
+
+        let listener = match UnixListener::bind(socket_addr.clone()) {
+            Ok(address) => address,
+            Err(e) => return Err(format!("couldn't bind socket: {e}")),
+        };
+
+        debug!(
+            "Made socket in {:?} and initialized logger. Starting daemon...",
+            listener.local_addr().unwrap() //this should always work if the socket connected correctly
+        );
+
+        if let Err(e) = listener.set_nonblocking(true) {
+            let _ = fs::remove_file(&socket_addr);
+            return Err(format!("failed to set socket to nonblocking mode: {e}"));
+        }
+
+        Ok(Self(listener))
+    }
+}
+
+impl Drop for SocketWrapper {
+    fn drop(&mut self) {
+        let socket_addr = get_socket_path();
+        if let Err(e) = fs::remove_file(&socket_addr) {
+            error!("Failed to remove socket at {socket_addr:?}: {e}");
+        }
+        info!("Removed socket at {:?}", socket_addr);
+    }
+}
+
+struct PollHandler {
+    fds: [PollFd; 2],
+}
+
+impl PollHandler {
+    const SOCKET_FD: usize = 0;
+    const WAYLAND_FD: usize = 1;
+
+    pub fn new(listener: &SocketWrapper) -> Self {
+        Self {
+            fds: [
+                PollFd::new(listener.0.as_raw_fd(), PollFlags::POLLIN),
+                PollFd::new(0, PollFlags::POLLIN),
+            ],
+        }
+    }
+
+    pub fn block(&mut self, wayland_fd: RawFd) {
+        self.fds[Self::WAYLAND_FD] = PollFd::new(wayland_fd, PollFlags::POLLIN);
+        match poll(&mut self.fds, -1) {
+            Ok(_) => (),
+            Err(e) => match e {
+                nix::errno::Errno::EINTR => (),
+                _ => panic!("failed to poll file descriptors: {e}"),
+            },
+        };
+    }
+
+    pub fn has_event(&self, fd_index: usize) -> bool {
+        if let Some(flags) = self.fds[fd_index].revents() {
+            !flags.is_empty()
+        } else {
+            false
+        }
+    }
+}
+
+pub struct Daemon {
+    // Wayland stuff
+    layer_shell: LayerShell,
+    compositor_state: CompositorState,
+    registry_state: RegistryState,
+    output_state: OutputState,
+    shm: Shm,
+    pool: SlotPool,
+
+    // swww stuff
+    wallpapers: Vec<Wallpaper>,
+}
+
+impl Daemon {
+    pub fn new(globals: &GlobalList, qh: &QueueHandle<Self>) -> Self {
+        // The compositor (not to be confused with the server which is commonly called the compositor) allows
+        // configuring surfaces to be presented.
+        let compositor_state =
+            CompositorState::bind(globals, qh).expect("wl_compositor is not available");
+
+        let layer_shell = LayerShell::bind(globals, qh).expect("layer shell is not available");
+
+        let shm = Shm::bind(globals, qh).expect("wl_shm is not available");
+        let pool = SlotPool::new(256 * 256 * 4, &shm).expect("failed to create SlotPool");
+
+        Self {
+            // Outputs may be hotplugged at runtime, therefore we need to setup a registry state to
+            // listen for Outputs.
+            registry_state: RegistryState::new(globals),
+            output_state: OutputState::new(globals, qh),
+            compositor_state,
+            shm,
+            pool,
+            layer_shell,
+
+            wallpapers: Vec::new(),
+        }
+    }
+
+    pub fn wallpapers_info(&self) -> Vec<BgInfo> {
+        self.output_state
+            .outputs()
+            .filter_map(|output| {
+                if let Some(info) = self.output_state.info(&output) {
+                    if let Some(wallpaper) =
+                        self.wallpapers.iter().find(|w| w.output_id.0 == info.id)
+                    {
+                        return Some(BgInfo {
+                            name: info.name.unwrap_or("?".to_string()),
+                            dim: info
+                                .logical_size
+                                .map(|(width, height)| (width as u32, height as u32))
+                                .unwrap_or((0, 0)),
+                            scale_factor: info.scale_factor,
+                            img: wallpaper.img.clone(),
+                        });
+                    }
+                }
+                None
+            })
+            .collect()
+    }
+
+    pub fn find_wallpapers_id_by_names(&self, names: Vec<String>) -> Vec<u32> {
+        self.output_state
+            .outputs()
+            .filter_map(|output| {
+                if let Some(info) = self.output_state.info(&output) {
+                    if let Some(name) = info.name {
+                        if names.is_empty() || names.contains(&name) {
+                            return Some(info.id);
+                        }
+                    }
+                }
+                None
+            })
+            .collect()
+    }
+
+    pub fn clear_by_id(&mut self, ids: Vec<u32>, color: [u8; 3]) {
+        // TODO: STOP ANIMATIONS
+        for wallpaper in self.wallpapers.iter_mut() {
+            if ids.contains(&wallpaper.output_id.0) {
+                wallpaper.clear(&mut self.pool, color);
+                wallpaper.draw( &mut self.pool);
+            }
+        }
+    }
+
+    pub fn set_img_by_id(
+        &mut self,
+        ids: Vec<u32>,
+        img: &[u8],
+        path: &Path,
+    ) {
+        // TODO: STOP ANIMATIONS
+        for wallpaper in self.wallpapers.iter_mut() {
+            if ids.contains(&wallpaper.output_id.0) {
+                wallpaper.set_img(&mut self.pool, img, path.to_owned());
+                wallpaper.draw(&mut self.pool);
+            }
+        }
+    }
+}
+
+impl CompositorHandler for Daemon {
+    fn scale_factor_changed(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        surface: &wl_surface::WlSurface,
+        new_factor: i32,
+    ) {
+        for wallpaper in self.wallpapers.iter_mut() {
+            if wallpaper.layer_surface.wl_surface() == surface {
+                wallpaper.resize(
+                    &mut self.pool,
+                    wallpaper.width,
+                    wallpaper.height,
+                    NonZeroI32::new(new_factor).unwrap(),
+                );
+                wallpaper.draw(&mut self.pool);
+                return;
+            }
+        }
+    }
+
+    fn frame(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        surface: &wl_surface::WlSurface,
+        _time: u32,
+    ) {
+        for wallpaper in self.wallpapers.iter_mut() {
+            if wallpaper.layer_surface.wl_surface() == surface {
+                wallpaper.draw(&mut self.pool);
+                return;
+            }
+        }
+    }
+}
+
+impl OutputHandler for Daemon {
+    fn output_state(&mut self) -> &mut OutputState {
+        &mut self.output_state
+    }
+
+    fn new_output(
+        &mut self,
+        _conn: &Connection,
+        qh: &QueueHandle<Self>,
+        output: wl_output::WlOutput,
+    ) {
+        if let Some(output_info) = self.output_state.info(&output) {
+            let surface = self.compositor_state.create_surface(qh);
+
+            // Wayland clients are expected to render the cursor on their input region.
+            // By setting the input region to an empty region, the compositor renders the
+            // default cursor. Without this, an empty desktop won't render a cursor.
+            if let Ok(region) = Region::new(&self.compositor_state) {
+                surface.set_input_region(Some(region.wl_region()));
+            }
+            let layer_surface = self.layer_shell.create_layer_surface(
+                qh,
+                surface,
+                Layer::Background,
+                Some("swww"),
+                Some(&output),
+            );
+
+            self.wallpapers
+                .push(Wallpaper::new(output_info, layer_surface, &mut self.pool));
+        }
+    }
+
+    fn update_output(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        output: wl_output::WlOutput,
+    ) {
+        if let Some(output_info) = self.output_state.info(&output) {
+            if let Some(output_size) = output_info.logical_size {
+                if output_size.0 == 0 || output_size.1 == 0 {
+                    error!(
+                        "output dimensions cannot be '0'. Received: {:#?}",
+                        output_size
+                    );
+                    return;
+                }
+                for wallpaper in self.wallpapers.iter_mut() {
+                    if wallpaper.output_id.0 == output_info.id {
+                        let (width, height) = (
+                            NonZeroI32::new(output_size.0).unwrap(),
+                            NonZeroI32::new(output_size.1).unwrap(),
+                        );
+                        let scale_factor = NonZeroI32::new(output_info.scale_factor).unwrap();
+                        if (width, height, scale_factor)
+                            != (wallpaper.width, wallpaper.height, wallpaper.scale_factor)
+                        {
+                            wallpaper.resize(&mut self.pool, width, height, scale_factor);
+                        }
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
+    fn output_destroyed(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        output: wl_output::WlOutput,
+    ) {
+        if let Some(output_info) = self.output_state.info(&output) {
+            self.wallpapers.retain(|w| w.output_id.0 != output_info.id);
+        }
+    }
+}
+
+impl ShmHandler for Daemon {
+    fn shm_state(&mut self) -> &mut Shm {
+        &mut self.shm
+    }
+}
+
+impl LayerShellHandler for Daemon {
+    fn closed(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, layer: &LayerSurface) {
+        self.wallpapers.retain(|w| w.layer_surface != *layer)
+    }
+
+    fn configure(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        layer: &LayerSurface,
+        configure: LayerSurfaceConfigure,
+        _serial: u32,
+    ) {
+        for wallpaper in self.wallpapers.iter_mut() {
+            if wallpaper.layer_surface == *layer {
+                let (width, height) = if configure.new_size.0 == 0 || configure.new_size.1 == 0 {
+                    (256.try_into().unwrap(), 256.try_into().unwrap())
+                } else {
+                    (
+                        NonZeroI32::new(configure.new_size.0 as i32).unwrap(),
+                        NonZeroI32::new(configure.new_size.1 as i32).unwrap(),
+                    )
+                };
+                wallpaper.resize(&mut self.pool, width, height, wallpaper.scale_factor);
+                wallpaper.draw(&mut self.pool);
+                return;
+            }
+        }
+    }
+}
+
+delegate_compositor!(Daemon);
+delegate_output!(Daemon);
+delegate_shm!(Daemon);
+
+delegate_layer!(Daemon);
+
+delegate_registry!(Daemon);
+
+impl ProvidesRegistryState for Daemon {
+    fn registry(&mut self) -> &mut RegistryState {
+        &mut self.registry_state
+    }
+    registry_handlers![OutputState];
 }
 
 fn make_logger() {
@@ -275,286 +493,33 @@ fn make_logger() {
     .expect("Failed to initialize logger. Cancelling...");
 }
 
-fn create_backgrounds(
-    output: &wl_output::WlOutput,
-    info: &OutputInfo,
-    env: &Environment<wayland::Env>,
-    bgs: &Rc<RefCell<Vec<Bg>>>,
-    layer_shell: &Attached<zwlr_layer_shell_v1::ZwlrLayerShellV1>,
-) {
-    if info.obsolete {
-        // an output has been removed, release it
-        bgs.borrow_mut().retain(|bg| bg.info.name != info.name);
-        output.release();
-    } else {
-        // an output has been created, construct a surface for it
-        let surface = env.create_surface().detach();
-        let pool = env
-            .create_simple_pool(|_dispatch_data| {
-                //do I need to do something here???
-            })
-            .expect("Failed to create a memory pool!");
-
-        // Wayland clients are expected to render the cursor on their input region. By setting the
-        // input region to an empty region, the compositor renders the default cursor. Without
-        // this, and empty desktop won't render a cursor.
-        let compositor = env.require_global::<wl_compositor::WlCompositor>();
-        let empty_region = compositor.create_region();
-        surface.set_input_region(Some(&empty_region));
-
-        // From `wl_surface::set_opaque_region`:
-        // > Setting the pending opaque region has copy semantics, and the
-        // > wl_region object can be destroyed immediately.
-        empty_region.destroy();
-
-        debug!("New background with output: {:?}", info);
-        let bg = Bg::new(output, info.name.clone(), surface, layer_shell, pool);
-        bgs.borrow_mut().push(bg);
-    }
-}
-
-fn make_socket() -> Result<UnixListener, String> {
-    let socket_addr = get_socket_path();
-    let runtime_dir = match socket_addr.parent() {
-        Some(path) => path,
-        None => return Err("couldn't find a valid runtime directory".to_owned()),
-    };
-
-    if !runtime_dir.exists() {
-        match fs::create_dir(runtime_dir) {
-            Ok(()) => (),
-            Err(e) => return Err(format!("failed to create runtime dir: {e}")),
-        }
-    }
-
-    let listener = match UnixListener::bind(socket_addr) {
-        Ok(address) => address,
-        Err(e) => return Err(format!("couldn't bind socket: {e}")),
-    };
-
-    Ok(listener)
-}
-
-fn register_signals(handle: &LoopHandle<LoopSignal>) -> Result<(), String> {
-    match signals::Signals::new(&[Signal::SIGINT, Signal::SIGQUIT, Signal::SIGTERM]) {
-        Ok(signals) => {
-            if let Err(e) = handle.insert_source(signals, |_, _, loop_signal| loop_signal.stop()) {
-                Err(format!("failed to insert signals source: {e}"))
-            } else {
-                Ok(())
-            }
-        }
-        Err(e) => Err(format!("failed to register signals to stop program: {e}")),
-    }
-}
-
-fn register_channel<'a>(
-    handle: &LoopHandle<'a, LoopSignal>,
-    bgs: &'a Rc<RefCell<Vec<Bg>>>,
-    fr_recv: Channel<(Vec<String>, ReadiedPack)>,
-) -> Result<(), String> {
-    if let Err(e) = handle.insert_source(fr_recv, |evt, _, loop_signal| match evt {
-        channel::Event::Msg(msg) => handle_recv_img(&mut bgs.borrow_mut(), &msg),
-        channel::Event::Closed => loop_signal.stop(),
-    }) {
-        return Err(format! {"failed to register channel: {e}"});
-    }
-    Ok(())
-}
-
-fn register_socket<'a>(
-    handle: &LoopHandle<'a, LoopSignal>,
-    bgs: &'a Rc<RefCell<Vec<Bg>>>,
-    display: &'a Display,
-    processor: &'a Rc<RefCell<Processor>>,
-    listener: UnixListener,
-) -> Result<(), String> {
-    if let Err(e) = listener.set_nonblocking(true) {
-        return Err(format!("failed to set nonblocking mode for socket: {e}"));
-    };
-    if let Err(e) = handle.insert_source(
-        calloop::generic::Generic::new(listener, calloop::Interest::READ, calloop::Mode::Level),
-        |_, listener, loop_signal| {
-            let mut processor = processor.borrow_mut();
-            match listener.accept() {
-                Ok((stream, _)) => {
-                    match recv_socket_msg(bgs.borrow_mut(), stream, loop_signal, &mut processor) {
-                        Err(e) => error!("Failed to receive socket message: {}", e),
-                        Ok(()) => {
-                            //We must flush here because if multiple requests are sent at once the loop
-                            //might never be idle, and so the callback in the run function below
-                            //wouldn't be called (afaik)
-                            if let Err(e) = display.flush() {
-                                error!("Couldn't flush display: {}", e);
-                            }
-                        }
-                    }
-                }
-                Err(e) => error!("Failed to accept connection: {}", e),
-            }
-            Ok(calloop::PostAction::Continue)
-        },
-    ) {
-        return Err(format! {"failed to register socket: {e}"});
-    }
-    Ok(())
-}
-///bgs and display can't be moved into here because it causes a segfault
-fn main_loop(
-    bgs: &Rc<RefCell<Vec<Bg>>>,
-    queue: EventQueue,
-    display: &Display,
-    listener: UnixListener,
-) -> Result<(), String> {
-    //We use 1 because we can't send a new frame without being absolutely sure that all previous
-    //have already been displayed. Using 0 causes the animation to stop.
-    let (frame_sender, frame_receiver) = calloop::channel::sync_channel(1);
-    let processor = Rc::new(RefCell::new(Processor::new(frame_sender)));
-    let mut event_loop = match calloop::EventLoop::<calloop::LoopSignal>::try_new() {
-        Ok(el) => el,
-        Err(e) => return Err(e.to_string()),
-    };
-    let event_handle = event_loop.handle();
-
-    register_signals(&event_handle)?;
-    register_channel(&event_handle, bgs, frame_receiver)?;
-    register_socket(&event_handle, bgs, display, &processor, listener)?;
-
-    if let Err(e) = WaylandSource::new(queue).quick_insert(event_handle) {
-        return Err(e.to_string());
-    }
-
-    info!("Initialization succeeded! Starting main loop...");
-    if let Ok(true) = sd_notify::booted() {
-        if let Err(e) = sd_notify::notify(true, &[sd_notify::NotifyState::Ready]) {
-            error!("Error sending status update to systemd: {}", e.to_string());
-        }
-    }
-    let mut loop_signal = event_loop.get_signal();
-    if let Err(e) = event_loop.run(None, &mut loop_signal, |_| {
-        {
-            let mut bgs = bgs.borrow_mut();
-            let mut i = 0;
-            while i != bgs.len() {
-                if let Some(should_remove) = bgs[i].handle_events() {
-                    let mut processor = processor.borrow_mut();
-                    processor.set_output_count(bgs.len() as u8);
-                    processor.stop_animations(&[bgs[i].info.name.clone()]);
-                    if should_remove {
-                        bgs.remove(i);
-                    } else {
-                        let info = bgs[i].info.clone();
-                        let old_img = bgs[i].get_current_img_mut();
-                        if let Some(path) = processor.import_cached_img(info, old_img) {
-                            bgs[i].info.img = BgImg::Img(path);
-                        }
-                        i += 1;
-                    }
-                } else {
-                    i += 1;
-                }
-            }
-        }
-        if let Err(e) = display.flush() {
-            error!("Couldn't flush display: {}", e);
-        }
-    }) {
-        return Err(format!("Event loop closed unexpectedly: {e}"));
-    }
-
-    Ok(())
-}
-
-fn recv_socket_msg(
-    mut bgs: RefMut<Vec<Bg>>,
-    stream: UnixStream,
-    loop_signal: &calloop::LoopSignal,
-    proc: &mut Processor,
-) -> Result<(), String> {
+fn recv_socket_msg(daemon: &mut Daemon, stream: UnixStream) {
     let request = Request::receive(&stream);
     let answer = match request {
-        Ok(Request::Animation(animations)) => {
-            let mut result = Answer::Ok;
-            for animation in &animations {
-                for output in &animation.1 {
-                    if !bgs.iter().any(|bg| &bg.info.name == output) {
-                        result = Answer::Err(format!("Output {output} doesn't exit"));
-                        break;
-                    }
+        Ok(request) => match request {
+            Request::Animation(_animations) => Answer::Err("Not implemented".to_string()),
+            Request::Clear(clear) => {
+                let ids = daemon.find_wallpapers_id_by_names(clear.outputs);
+                daemon.clear_by_id(ids, clear.color);
+                Answer::Ok
+            }
+            Request::Init => Answer::Ok,
+            Request::Kill => {
+                exit_daemon();
+                Answer::Ok
+            }
+            Request::Query => Answer::Info(daemon.wallpapers_info()),
+            Request::Img((_transition, imgs)) => {
+                for img in imgs {
+                    let ids = daemon.find_wallpapers_id_by_names(img.1);
+                    daemon.set_img_by_id(ids, &img.0.img, &img.0.path);
                 }
+                Answer::Ok
             }
-            if matches!(result, Answer::Err(_)) {
-                result
-            } else {
-                for animation in animations {
-                    let bg = bgs.iter().find(|bg| animation.1.contains(&bg.info.name));
-                    if bg.is_none() {
-                        continue;
-                    }
-                    //unwraping is fine because we test it above
-                    let dim = bg.unwrap().info.real_dim();
-                    let size = dim.0 as usize * dim.1 as usize * 4;
-                    if let Answer::Err(e) = proc.animate(animation.0, animation.1, size) {
-                        result = Answer::Err(e);
-                    }
-                }
-                result
-            }
-        }
-        Ok(Request::Clear(clear)) => clear_outputs(&mut bgs, &clear, proc),
-        Ok(Request::Kill) => {
-            loop_signal.stop();
-            Answer::Ok
-        }
-        Ok(Request::Img(img)) => {
-            let old_imgs = get_old_imgs(&mut bgs, &img.1);
-            if old_imgs.len() != img.1.len() {
-                Answer::Err("Daemon received request for outputs that don't exist".to_string())
-            } else {
-                proc.transition(&img.0, img.1, old_imgs)
-            }
-        }
-        Ok(Request::Init { .. }) => Answer::Ok,
-        Ok(Request::Query) => Answer::Info(bgs.iter().map(|bg| bg.info.clone()).collect()),
+        },
         Err(e) => Answer::Err(e),
     };
-    answer.send(&stream)
-}
-
-fn get_old_imgs(bgs: &mut RefMut<Vec<Bg>>, imgs: &[(Img, Vec<String>)]) -> Vec<ImgWithDim> {
-    let mut v = Vec::with_capacity(imgs.len());
-
-    for (img, outputs) in imgs {
-        if let Some(bg) = bgs.iter_mut().find(|bg| bg.info.name == outputs[0]) {
-            v.push((bg.get_current_img().into(), bg.info.real_dim()));
-        }
-        for bg in bgs.iter_mut().filter(|bg| outputs.contains(&bg.info.name)) {
-            bg.info.img = BgImg::Img(img.path.clone());
-        }
+    if let Err(e) = answer.send(&stream) {
+        error!("error sending answer to client: {e}");
     }
-
-    v
-}
-
-fn handle_recv_img(bgs: &mut RefMut<Vec<Bg>>, msg: &(Vec<String>, ReadiedPack)) {
-    let (outputs, img) = msg;
-    if outputs.is_empty() {
-        warn!("Received empty list of outputs from processor, which should be impossible");
-    }
-    bgs.iter_mut()
-        .filter(|bg| outputs.contains(&bg.info.name))
-        .for_each(|bg| bg.draw(img));
-}
-
-//TODO: error when no output was valid
-fn clear_outputs(bgs: &mut RefMut<Vec<Bg>>, clear: &Clear, proc: &mut Processor) -> Answer {
-    proc.stop_animations(&clear.outputs);
-    if clear.outputs.is_empty() {
-        bgs.iter_mut().for_each(|bg| bg.clear(clear.color));
-    } else {
-        bgs.iter_mut()
-            .filter(|bg| clear.outputs.contains(&bg.info.name))
-            .for_each(|bg| bg.clear(clear.color));
-    }
-    Answer::Ok
 }
