@@ -1,15 +1,9 @@
-use log::{debug, error, info};
+use log::{error, info};
 use smithay_client_toolkit::shm::slot::SlotPool;
 
-use std::{
-    path::PathBuf,
-    sync::Arc,
-    sync::{mpsc, Mutex},
-    thread,
-    time::Duration,
-};
+use std::{sync::Arc, sync::Mutex, thread, time::Duration};
 
-use utils::communication::{Animation, Answer, BgImg, BgInfo, Img};
+use utils::communication::{Animation, Answer, BgImg, Img};
 
 use crate::{
     lock_pool_and_wallpapers,
@@ -22,13 +16,11 @@ mod sync_barrier;
 ///The default thread stack size of 2MiB is way too overkill for our purposes
 const TSTACK_SIZE: usize = 1 << 17; //128KiB
 
-pub type ImgWithDim = (Box<[u8]>, (u32, u32));
-
-pub struct Processor {
+pub struct Imgproc {
     sync_barrier: Arc<sync_barrier::SyncBarrier>,
 }
 
-impl Processor {
+impl Imgproc {
     pub fn new() -> Self {
         Self {
             sync_barrier: Arc::new(sync_barrier::SyncBarrier::new(0)),
@@ -195,57 +187,92 @@ impl Processor {
 
         answer
     }
-    //
-    //    #[must_use]
-    //    pub fn import_cached_img(&mut self, info: BgInfo, old_img: &mut [u8]) -> Option<PathBuf> {
-    //        if let Some((Img { img, path }, anim)) = get_cached_bg(&info.name) {
-    //            let output_size = old_img.len();
-    //            if output_size < img.len() {
-    //                info!(
-    //                    "{} monitor's buffer size ({output_size}) is smaller than cache's image ({})",
-    //                    info.name,
-    //                    img.len()
-    //                );
-    //                return None;
-    //            }
-    //            let pack = ReadiedPack::new(old_img, &img, |cur, goal, _| {
-    //                *cur = *goal;
-    //            });
-    //
-    //            let sender = self.frame_sender.clone();
-    //            let (stopper, stop_recv) = mpsc::channel();
-    //            self.anim_stoppers.push(stopper);
-    //            if let Err(e) = thread::Builder::new()
-    //                .name("cache importing".to_string()) //Name our threads  for better log messages
-    //                .stack_size(TSTACK_SIZE) //the default of 2MB is way too overkill for this
-    //                .spawn(move || {
-    //                    let mut outputs = vec![info.name];
-    //                    send_frame(pack, &mut outputs, Duration::new(0, 0), &sender, &stop_recv);
-    //                    if let Some(anim) = anim {
-    //                        let mut now = std::time::Instant::now();
-    //                        if anim.animation.len() == 1 {
-    //                            return;
-    //                        }
-    //                        for (frame, duration) in anim.animation.iter().cycle() {
-    //                            let frame = frame.ready(output_size);
-    //                            let timeout = duration.saturating_sub(now.elapsed());
-    //                            if send_frame(frame, &mut outputs, timeout, &sender, &stop_recv) {
-    //                                return;
-    //                            }
-    //                            now = std::time::Instant::now();
-    //                        }
-    //                    }
-    //                })
-    //            {
-    //                error!("failed to spawn 'cache importing' thread: {}", e);
-    //                return None;
-    //            }
-    //
-    //            return Some(path);
-    //        }
-    //        info!("failed to find cached image for monitor '{}'", info.name);
-    //        None
-    //    }
+
+    pub fn import_cached_img(
+        &mut self,
+        pool: &Arc<Mutex<SlotPool>>,
+        wallpapers: &Arc<Mutex<Vec<Wallpaper>>>,
+        output: OutputId,
+        output_name: &str,
+        output_size: usize,
+    ) {
+        if let Some((Img { img, path }, anim)) = get_cached_bg(output_name) {
+            if output_size < img.len() {
+                info!(
+                    "{output_name} monitor's buffer size ({output_size}) is smaller than cache's image ({})",
+                    img.len(),
+                );
+                return;
+            }
+
+            {
+                let (mut pool, mut wallpapers) = lock_pool_and_wallpapers(pool, wallpapers);
+                if let Some(w) = wallpapers.iter_mut().find(|w| w.output_id == output) {
+                    w.img = BgImg::Img(path);
+                    w.set_img(&mut pool, &img);
+                    w.draw(&mut pool);
+                }
+            }
+
+            if let Some(anim) = anim {
+                if anim.animation.len() == 1 {
+                    return;
+                }
+                let pool = Arc::clone(pool);
+                let wallpapers = Arc::clone(wallpapers);
+                if let Err(e) = thread::Builder::new()
+                    .name("cache importing".to_string()) //Name our threads  for better log messages
+                    .stack_size(TSTACK_SIZE) //the default of 2MB is way too overkill for this
+                    .spawn(move || {
+                        {
+                            let (_p, mut wallpapers) = lock_pool_and_wallpapers(&pool, &wallpapers);
+                            if let Some(w) = wallpapers.iter_mut().find(|w| w.output_id == output) {
+                                w.chown();
+                            } else {
+                                return;
+                            }
+                        }
+                        let thread_id = thread::current().id();
+                        let mut now = std::time::Instant::now();
+                        for (frame, duration) in anim.animation.iter().cycle() {
+                            {
+                                let (mut pool, mut wallpapers) =
+                                    lock_pool_and_wallpapers(&pool, &wallpapers);
+                                if let Some(w) = wallpapers
+                                    .iter_mut()
+                                    .find(|w| w.output_id == output && w.is_owned_by(thread_id))
+                                {
+                                    let mut i = 0;
+                                    while w.slot.has_active_buffers() && i < 100 {
+                                        i += 1;
+                                        std::thread::sleep(Duration::from_micros(100));
+                                    }
+                                    if let Some(canvas) = w.slot.canvas(&mut pool) {
+                                        frame.ready(canvas.len()).unpack(canvas);
+                                        w.draw(&mut pool);
+                                    }
+                                } else {
+                                    return;
+                                }
+                            }
+
+                            let timeout = duration.saturating_sub(now.elapsed());
+                            std::thread::sleep(timeout);
+                            nix::sys::signal::kill(
+                                nix::unistd::Pid::this(),
+                                nix::sys::signal::SIGUSR1,
+                            )
+                            .unwrap();
+                            now = std::time::Instant::now();
+                        }
+                    })
+                {
+                    error!("failed to spawn 'cache importing' thread: {}", e);
+                }
+            }
+        }
+        info!("did not find cached image for monitor '{}'", output_name);
+    }
 }
 
 fn get_cached_bg(output: &str) -> Option<(Img, Option<Animation>)> {

@@ -2,7 +2,7 @@
 //! them fail there is no point in continuing. All of the initialization code, for example, is full
 //! of `expects`, **on purpose**, because we **want** to unwind and exit when they happen
 
-mod processor;
+mod imgproc;
 mod wallpaper;
 use log::{debug, error, info, LevelFilter};
 use nix::{
@@ -19,7 +19,6 @@ use std::{
         fd::{AsRawFd, RawFd},
         unix::net::{UnixListener, UnixStream},
     },
-    path::Path,
     sync::{Arc, Mutex, MutexGuard, RwLock},
 };
 
@@ -44,7 +43,7 @@ use wayland_client::{
 
 use utils::communication::{get_socket_path, Answer, BgImg, BgInfo, Request};
 
-use crate::processor::Processor;
+use imgproc::Imgproc;
 
 // We need this because this might be set by signals, so we can't keep it in the daemon
 static EXIT: RwLock<bool> = RwLock::new(false);
@@ -88,7 +87,6 @@ fn main() -> DaemonResult<()> {
     let qh = event_queue.handle();
 
     let mut daemon = Daemon::new(&globals, &qh);
-    let mut processor = Processor::new();
 
     if let Ok(true) = sd_notify::booted() {
         if let Err(e) = sd_notify::notify(true, &[sd_notify::NotifyState::Ready]) {
@@ -120,7 +118,7 @@ fn main() -> DaemonResult<()> {
 
         if poll_handler.has_event(PollHandler::SOCKET_FD) {
             match listener.0.accept() {
-                Ok((stream, _addr)) => recv_socket_msg(&mut daemon, &mut processor, stream),
+                Ok((stream, _addr)) => daemon.recv_socket_msg(stream),
                 Err(e) => match e.kind() {
                     std::io::ErrorKind::WouldBlock => (),
                     _ => return Err(format!("failed to accept incoming connection: {e}")),
@@ -218,7 +216,7 @@ impl PollHandler {
     }
 }
 
-pub struct Daemon {
+struct Daemon {
     // Wayland stuff
     layer_shell: LayerShell,
     compositor_state: CompositorState,
@@ -229,10 +227,11 @@ pub struct Daemon {
 
     // swww stuff
     wallpapers: Arc<Mutex<Vec<Wallpaper>>>,
+    imgproc: Imgproc,
 }
 
 impl Daemon {
-    pub fn new(globals: &GlobalList, qh: &QueueHandle<Self>) -> Self {
+    fn new(globals: &GlobalList, qh: &QueueHandle<Self>) -> Self {
         // The compositor (not to be confused with the server which is commonly called the compositor) allows
         // configuring surfaces to be presented.
         let compositor_state =
@@ -254,10 +253,54 @@ impl Daemon {
             layer_shell,
 
             wallpapers: Arc::new(Mutex::new(Vec::new())),
+            imgproc: Imgproc::new(),
         }
     }
 
-    pub fn wallpapers_info(&self) -> Vec<BgInfo> {
+    fn recv_socket_msg(&mut self, stream: UnixStream) {
+        let request = Request::receive(&stream);
+        let answer = match request {
+            Ok(request) => match request {
+                Request::Animation(animations) => {
+                    let mut result = Answer::Ok;
+                    for animation in animations {
+                        let ids = self.find_wallpapers_id_by_names(animation.1);
+                        result =
+                            self.imgproc
+                                .animate(&self.pool, animation.0, ids, &self.wallpapers);
+                    }
+                    result
+                }
+                Request::Clear(clear) => {
+                    let ids = self.find_wallpapers_id_by_names(clear.outputs);
+                    self.clear_by_id(ids, clear.color);
+                    Answer::Ok
+                }
+                Request::Init => Answer::Ok,
+                Request::Kill => {
+                    exit_daemon();
+                    Answer::Ok
+                }
+                Request::Query => Answer::Info(self.wallpapers_info()),
+                Request::Img((transition, imgs)) => {
+                    let mut requests = Vec::new();
+                    for img in imgs {
+                        let ids = self.find_wallpapers_id_by_names(img.1);
+                        requests.push((img.0, ids));
+                    }
+                    self.imgproc
+                        .transition(&self.pool, transition, requests, &self.wallpapers);
+                    Answer::Ok
+                }
+            },
+            Err(e) => Answer::Err(e),
+        };
+        if let Err(e) = answer.send(&stream) {
+            error!("error sending answer to client: {e}");
+        }
+    }
+
+    fn wallpapers_info(&self) -> Vec<BgInfo> {
         let (_pool, wallpapers) = lock_pool_and_wallpapers(&self.pool, &self.wallpapers);
         self.output_state
             .outputs()
@@ -280,7 +323,7 @@ impl Daemon {
             .collect()
     }
 
-    pub fn find_wallpapers_id_by_names(&self, names: Vec<String>) -> Vec<OutputId> {
+    fn find_wallpapers_id_by_names(&self, names: Vec<String>) -> Vec<OutputId> {
         self.output_state
             .outputs()
             .filter_map(|output| {
@@ -296,23 +339,12 @@ impl Daemon {
             .collect()
     }
 
-    pub fn clear_by_id(&mut self, ids: Vec<OutputId>, color: [u8; 3]) {
+    fn clear_by_id(&mut self, ids: Vec<OutputId>, color: [u8; 3]) {
         let (mut pool, mut wallpapers) = lock_pool_and_wallpapers(&self.pool, &self.wallpapers);
         for wallpaper in wallpapers.iter_mut() {
             if ids.contains(&wallpaper.output_id) {
                 wallpaper.img = BgImg::Color(color);
                 wallpaper.clear(&mut pool, color);
-                wallpaper.draw(&mut pool);
-            }
-        }
-    }
-
-    pub fn set_img_by_id(&mut self, ids: Vec<OutputId>, img: &[u8], path: &Path) {
-        let (mut pool, mut wallpapers) = lock_pool_and_wallpapers(&self.pool, &self.wallpapers);
-        for wallpaper in wallpapers.iter_mut() {
-            if ids.contains(&wallpaper.output_id) {
-                wallpaper.img = BgImg::Img(path.to_owned());
-                wallpaper.set_img(&mut pool, img);
                 wallpaper.draw(&mut pool);
             }
         }
@@ -336,7 +368,7 @@ impl CompositorHandler for Daemon {
                     wallpaper.height,
                     NonZeroI32::new(new_factor).unwrap(),
                 );
-                wallpaper.draw(&mut pool);
+                //wallpaper.draw(&mut pool);
                 return;
             }
         }
@@ -387,8 +419,11 @@ impl OutputHandler for Daemon {
                 Some(&output),
             );
 
-            let (mut pool, mut wallpapers) = lock_pool_and_wallpapers(&self.pool, &self.wallpapers);
-            wallpapers.push(Wallpaper::new(output_info, layer_surface, &mut pool));
+            {
+                let (mut pool, mut wallpapers) =
+                    lock_pool_and_wallpapers(&self.pool, &self.wallpapers);
+                wallpapers.push(Wallpaper::new(output_info, layer_surface, &mut pool));
+            }
         }
     }
 
@@ -434,8 +469,9 @@ impl OutputHandler for Daemon {
         _qh: &QueueHandle<Self>,
         output: wl_output::WlOutput,
     ) {
-        let (mut _pools, mut wallpapers) = lock_pool_and_wallpapers(&self.pool, &self.wallpapers);
         if let Some(output_info) = self.output_state.info(&output) {
+            let (mut _pools, mut wallpapers) =
+                lock_pool_and_wallpapers(&self.pool, &self.wallpapers);
             wallpapers.retain(|w| w.output_id.0 != output_info.id);
         }
     }
@@ -457,10 +493,42 @@ impl LayerShellHandler for Daemon {
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        _layer: &LayerSurface,
+        layer: &LayerSurface,
         _configure: LayerSurfaceConfigure,
         _serial: u32,
     ) {
+        // After configuring, we try to import the cache
+        let (pool, mut wallpapers) = lock_pool_and_wallpapers(&self.pool, &self.wallpapers);
+        for wallpaper in wallpapers.iter_mut() {
+            if wallpaper.layer_surface == *layer {
+                if let Some(output_info) = self.output_state.outputs().find_map(|o| {
+                    if let Some(info) = self.output_state.info(&o) {
+                        if info.id == wallpaper.output_id.0 {
+                            return Some(info);
+                        }
+                    }
+                    None
+                }) {
+                    let id = OutputId(output_info.id);
+                    let output_name = output_info.name.clone().unwrap_or("?".to_string());
+                    let logical_size = output_info
+                        .logical_size
+                        .map(|(width, height)| (width as usize, height as usize))
+                        .unwrap_or((0, 0));
+
+                    drop(pool);
+                    drop(wallpapers);
+                    self.imgproc.import_cached_img(
+                        &self.pool,
+                        &self.wallpapers,
+                        id,
+                        &output_name,
+                        logical_size.0 * logical_size.1 * 4,
+                    );
+                }
+                return;
+            }
+        }
         // We don't care about layer surface resizes, we care about output resizes
     }
 }
@@ -510,45 +578,5 @@ pub fn lock_pool_and_wallpapers<'a>(
             }
             _ => panic!("failed to lock"),
         }
-    }
-}
-
-fn recv_socket_msg(daemon: &mut Daemon, processor: &mut Processor, stream: UnixStream) {
-    let request = Request::receive(&stream);
-    let answer = match request {
-        Ok(request) => match request {
-            Request::Animation(animations) => {
-                let mut result = Answer::Ok;
-                for animation in animations {
-                    let ids = daemon.find_wallpapers_id_by_names(animation.1);
-                    result = processor.animate(&daemon.pool, animation.0, ids, &daemon.wallpapers);
-                }
-                result
-            }
-            Request::Clear(clear) => {
-                let ids = daemon.find_wallpapers_id_by_names(clear.outputs);
-                daemon.clear_by_id(ids, clear.color);
-                Answer::Ok
-            }
-            Request::Init => Answer::Ok,
-            Request::Kill => {
-                exit_daemon();
-                Answer::Ok
-            }
-            Request::Query => Answer::Info(daemon.wallpapers_info()),
-            Request::Img((transition, imgs)) => {
-                let mut requests = Vec::new();
-                for img in imgs {
-                    let ids = daemon.find_wallpapers_id_by_names(img.1);
-                    requests.push((img.0, ids));
-                }
-                processor.transition(&daemon.pool, transition, requests, &daemon.wallpapers);
-                Answer::Ok
-            }
-        },
-        Err(e) => Answer::Err(e),
-    };
-    if let Err(e) = answer.send(&stream) {
-        error!("error sending answer to client: {e}");
     }
 }
