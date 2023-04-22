@@ -113,12 +113,12 @@ impl Wallpaper {
         let stride = width * 4;
 
         let buf = pool
-            .create_buffer_in(&self.slot, width, height, stride, wl_shm::Format::Argb8888)
+            .create_buffer_in(&self.slot, width, height, stride, wl_shm::Format::Xrgb8888)
             .unwrap();
         let surface = self.layer_surface.wl_surface();
-        surface.damage_buffer(0, 0, width, height);
         buf.attach_to(surface).unwrap();
-        self.layer_surface.commit();
+        surface.damage_buffer(0, 0, width, height);
+        surface.commit();
     }
 
     pub fn resize(
@@ -136,6 +136,10 @@ impl Wallpaper {
                 width.get() as usize * height.get() as usize * scale_factor.get() as usize * 4,
             )
             .expect("failed to create slot");
+        self.layer_surface.set_size(
+            width.get() as u32 * scale_factor.get() as u32,
+            height.get() as u32 * scale_factor.get() as u32,
+        );
         self.img = BgImg::Color([0, 0, 0]);
     }
 

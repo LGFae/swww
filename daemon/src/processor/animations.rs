@@ -16,8 +16,10 @@ use keyframe::{
 
 macro_rules! wallpaper_canvas {
     ($wallpaper:ident, $pool:ident, $new_img:ident) => {{
-        while $wallpaper.slot.has_active_buffers() {
-            std::thread::yield_now()
+        let mut i = 0;
+        while $wallpaper.slot.has_active_buffers() && i < 100 {
+            i += 1;
+            std::thread::sleep(Duration::from_micros(100));
         }
         match $wallpaper.slot.canvas(&mut $pool) {
             Some(canvas) => {
@@ -100,15 +102,15 @@ pub struct Transition {
 /// All transitions return whether or not they completed
 impl Transition {
     pub fn new(
-        wallpapers: Arc<Mutex<Vec<Wallpaper>>>,
+        wallpapers: &Arc<Mutex<Vec<Wallpaper>>>,
         dimensions: (u32, u32),
         transition: utils::communication::Transition,
-        pool: Arc<Mutex<SlotPool>>,
+        pool: &Arc<Mutex<SlotPool>>,
     ) -> Self {
         let thread_id = std::thread::current().id();
         Transition {
-            wallpapers,
-            pool,
+            wallpapers: Arc::clone(wallpapers),
+            pool: Arc::clone(pool),
             dimensions,
             transition_type: transition.transition_type,
             duration: transition.duration,
@@ -453,84 +455,3 @@ impl Transition {
         self.simple(new_img)
     }
 }
-
-//#[cfg(test)]
-//mod tests {
-//    use super::*;
-//    use keyframe::mint::Vector2;
-//    use smithay_client_toolkit::reexports::calloop::channel::{self, Channel, SyncSender};
-//    use utils::communication::Coord;
-//
-//    #[allow(clippy::type_complexity)]
-//    fn make_senders_and_receivers() -> (
-//        (
-//            SyncSender<(Vec<String>, ReadiedPack)>,
-//            Channel<(Vec<String>, ReadiedPack)>,
-//        ),
-//        (mpsc::Sender<Vec<String>>, mpsc::Receiver<Vec<String>>),
-//    ) {
-//        (channel::sync_channel(20000), mpsc::channel())
-//    }
-//
-//    fn make_test_boxes() -> (Box<[u8]>, Box<[u8]>) {
-//        let mut vec1 = Vec::with_capacity(4000);
-//        let mut vec2 = Vec::with_capacity(4000);
-//
-//        for _ in 0..4000 {
-//            vec1.push(rand::random());
-//            vec2.push(rand::random());
-//        }
-//
-//        (vec1.into_boxed_slice(), vec2.into_boxed_slice())
-//    }
-//
-//    fn test_transition(old_img: Box<[u8]>, transition_type: TransitionType) -> Transition {
-//        Transition {
-//            old_img,
-//            transition_type,
-//            dimensions: (100, 10),
-//            duration: 2.0,
-//            step: 100,
-//            fps: Duration::from_nanos(1),
-//            angle: 0.0,
-//            pos: Position::new(Coord::Percent(0.0), Coord::Percent(0.0)),
-//            bezier: BezierCurve::from(Vector2 { x: 1.0, y: 0.0 }, Vector2 { x: 0.0, y: 1.0 }),
-//            wave: (20.0, 20.0),
-//        }
-//    }
-//
-//    fn dummy_outputs() -> Vec<String> {
-//        vec!["dummy".to_string()]
-//    }
-//
-//    #[test]
-//    fn transitions_should_end_with_equal_vectors() {
-//        use TransitionType as TT;
-//        let transitions = [TT::Simple, TT::Wipe, TT::Outer, TT::Grow, TT::Wave];
-//        for transition in transitions {
-//            let ((fr_send, fr_recv), (_stop_send, stop_recv)) = make_senders_and_receivers();
-//            let (old_img, new_img) = make_test_boxes();
-//            let mut transition_img = old_img.clone();
-//            let t = test_transition(old_img, transition.clone());
-//            let mut dummies = dummy_outputs();
-//
-//            let handle = {
-//                let new_img = new_img.clone();
-//                std::thread::spawn(move || t.execute(&new_img, &mut dummies, &fr_send, &stop_recv))
-//            };
-//
-//            while let Ok((_, i)) = fr_recv.recv() {
-//                i.unpack(&mut transition_img);
-//            }
-//
-//            assert!(handle.join().is_ok());
-//            for (tpix, npix) in transition_img.chunks_exact(4).zip(new_img.chunks_exact(4)) {
-//                assert_eq!(
-//                    tpix[0..3],
-//                    npix[0..3],
-//                    "Transition {transition:?} did not end with correct new_img"
-//                );
-//            }
-//        }
-//    }
-//}

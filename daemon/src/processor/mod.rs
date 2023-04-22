@@ -9,10 +9,7 @@ use std::{
     time::Duration,
 };
 
-use utils::{
-    communication::{Animation, Answer, BgImg, BgInfo, Img},
-    comp_decomp::ReadiedPack,
-};
+use utils::communication::{Animation, Answer, BgImg, BgInfo, Img};
 
 use crate::{
     lock_pool_and_wallpapers,
@@ -82,7 +79,7 @@ impl Processor {
 
                     if let Some(dimensions) = dimensions {
                         if img.len() == dimensions.0 as usize * dimensions.1 as usize * 4 {
-                            animations::Transition::new(wallpapers, dimensions, transition, pool)
+                            animations::Transition::new(&wallpapers, dimensions, transition, &pool)
                                 .execute(&img);
                         } else {
                             error!(
@@ -90,6 +87,15 @@ impl Processor {
                                 img.len(),
                                 dimensions.0 as usize * dimensions.1 as usize * 4
                             );
+                        }
+                    }
+
+                    {
+                        let (_pool, mut wallpapers) = lock_pool_and_wallpapers(&pool, &wallpapers);
+                        for wallpaper in wallpapers.iter_mut().filter(|w| {
+                            outputs.contains(&w.output_id) || w.is_owned_by(thread::current().id())
+                        }) {
+                            wallpaper.in_transition = false;
                         }
                     }
                 })
@@ -101,69 +107,94 @@ impl Processor {
         answer
     }
 
-    //    pub fn animate(
-    //        &mut self,
-    //        animation: utils::communication::Animation,
-    //        mut outputs: Vec<String>,
-    //        output_size: usize,
-    //    ) -> Answer {
-    //        let mut answer = Answer::Ok;
-    //
-    //        let sender = self.frame_sender.clone();
-    //        let (stopper, stop_recv) = mpsc::channel();
-    //        let on_going_transitions = Arc::clone(&self.on_going_transitions);
-    //
-    //        let barrier = Arc::clone(&self.sync_barrier);
-    //        self.anim_stoppers.push(stopper);
-    //        if let Err(e) = thread::Builder::new()
-    //            .name("animation".to_string()) //Name our threads  for better log messages
-    //            .stack_size(TSTACK_SIZE) //the default of 2MB is way too overkill for this
-    //            .spawn(move || {
-    //                while on_going_transitions
-    //                    .read()
-    //                    .unwrap()
-    //                    .iter()
-    //                    .any(|output| outputs.contains(output))
-    //                {
-    //                    std::thread::yield_now();
-    //                }
-    //                let mut now = std::time::Instant::now();
-    //                /* We only need to animate if we have > 1 frame */
-    //                if animation.animation.len() == 1 {
-    //                    return;
-    //                }
-    //                for (frame, duration) in animation.animation.iter().cycle() {
-    //                    let frame = frame.ready(output_size);
-    //
-    //                    if animation.sync {
-    //                        barrier.inc_and_wait_while(*duration, || match stop_recv.try_recv() {
-    //                            Ok(to_remove) => {
-    //                                outputs.retain(|o| !to_remove.contains(o));
-    //                                outputs.is_empty() || to_remove.is_empty()
-    //                            }
-    //                            Err(mpsc::TryRecvError::Empty) => false,
-    //                            Err(mpsc::TryRecvError::Disconnected) => true,
-    //                        });
-    //                        if outputs.is_empty() {
-    //                            return;
-    //                        }
-    //                    }
-    //
-    //                    let timeout = duration.saturating_sub(now.elapsed());
-    //                    if send_frame(frame, &mut outputs, timeout, &sender, &stop_recv) {
-    //                        debug!("STOPPING");
-    //                        return;
-    //                    }
-    //                    now = std::time::Instant::now();
-    //                }
-    //            })
-    //        {
-    //            answer = Answer::Err(format!("failed to spawn animation thread: {e}"));
-    //            error!("failed to spawn 'animation' thread: {e}");
-    //        };
-    //
-    //        answer
-    //    }
+    pub fn animate(
+        &mut self,
+        pool: &Arc<Mutex<SlotPool>>,
+        animation: utils::communication::Animation,
+        outputs: Vec<OutputId>,
+        wallpapers: &Arc<Mutex<Vec<Wallpaper>>>,
+    ) -> Answer {
+        let mut answer = Answer::Ok;
+
+        let wallpapers = Arc::clone(wallpapers);
+        let pool = Arc::clone(pool);
+        let barrier = Arc::clone(&self.sync_barrier);
+        if let Err(e) = thread::Builder::new()
+            .name("animation".to_string()) //Name our threads  for better log messages
+            .stack_size(TSTACK_SIZE) //the default of 2MB is way too overkill for this
+            .spawn(move || {
+                /* We only need to animate if we have > 1 frame */
+                if animation.animation.len() == 1 || outputs.is_empty() {
+                    return;
+                }
+
+                loop {
+                    {
+                        let (_pool, wallpapers) = lock_pool_and_wallpapers(&pool, &wallpapers);
+                        if wallpapers
+                            .iter()
+                            .filter(|w| outputs.contains(&w.output_id))
+                            .all(|w| !w.in_transition)
+                        {
+                            break;
+                        }
+                    }
+                    std::thread::sleep(Duration::from_micros(100));
+                }
+                {
+                    let (_pool, mut wallpapers) = lock_pool_and_wallpapers(&pool, &wallpapers);
+                    for wallpaper in wallpapers
+                        .iter_mut()
+                        .filter(|w| outputs.contains(&w.output_id))
+                    {
+                        wallpaper.chown();
+                    }
+                }
+                let mut now = std::time::Instant::now();
+
+                for (frame, duration) in animation.animation.iter().cycle() {
+                    if animation.sync {
+                        barrier.inc_and_wait(*duration);
+                    }
+
+                    let mut done = true;
+                    {
+                        let (mut pool, mut wallpapers) =
+                            lock_pool_and_wallpapers(&pool, &wallpapers);
+                        for wallpaper in wallpapers.iter_mut().filter(|w| {
+                            outputs.contains(&w.output_id)
+                                && w.is_owned_by(std::thread::current().id())
+                        }) {
+                            done = false;
+                            let mut i = 0;
+                            while wallpaper.slot.has_active_buffers() && i < 100 {
+                                i += 1;
+                                std::thread::sleep(Duration::from_micros(100));
+                            }
+                            if let Some(canvas) = wallpaper.slot.canvas(&mut pool) {
+                                frame.ready(canvas.len()).unpack(canvas);
+                                wallpaper.draw(&mut pool);
+                            }
+                        }
+                    }
+                    if done {
+                        return;
+                    }
+
+                    let timeout = duration.saturating_sub(now.elapsed());
+                    std::thread::sleep(timeout);
+                    nix::sys::signal::kill(nix::unistd::Pid::this(), nix::sys::signal::SIGUSR1)
+                        .unwrap();
+                    now = std::time::Instant::now();
+                }
+            })
+        {
+            answer = Answer::Err(format!("failed to spawn animation thread: {e}"));
+            error!("failed to spawn 'animation' thread: {e}");
+        };
+
+        answer
+    }
     //
     //    #[must_use]
     //    pub fn import_cached_img(&mut self, info: BgInfo, old_img: &mut [u8]) -> Option<PathBuf> {

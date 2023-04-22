@@ -25,10 +25,7 @@ impl SyncBarrier {
         *goal = new_goal;
     }
 
-    pub fn inc_and_wait_while<F>(&self, timeout: Duration, mut f: F)
-    where
-        F: FnMut() -> bool,
-    {
+    pub fn inc_and_wait(&self, timeout: Duration) {
         let mut cur = self.cur.lock().unwrap();
         let goal = self.goal.read().unwrap();
 
@@ -36,9 +33,6 @@ impl SyncBarrier {
         if *cur != *goal {
             drop(goal);
             while *cur != 0 {
-                if f() {
-                    return;
-                }
                 cur = self.condvar.wait_timeout(cur, timeout).unwrap().0;
             }
         } else {
