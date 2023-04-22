@@ -205,25 +205,31 @@ impl Imgproc {
                 return;
             }
 
-            {
-                let (mut pool, mut wallpapers) = lock_pool_and_wallpapers(pool, wallpapers);
-                if let Some(w) = wallpapers.iter_mut().find(|w| w.output_id == output) {
-                    w.img = BgImg::Img(path);
-                    w.set_img(&mut pool, &img);
-                    w.draw(&mut pool);
-                }
-            }
+            let pool = Arc::clone(pool);
+            let wallpapers = Arc::clone(wallpapers);
+            if let Err(e) = thread::Builder::new()
+                .name("cache importing".to_string()) //Name our threads  for better log messages
+                .stack_size(TSTACK_SIZE) //the default of 2MB is way too overkill for this
+                .spawn(move || {
+                    {
+                        let (mut pool, mut wallpapers) =
+                            lock_pool_and_wallpapers(&pool, &wallpapers);
+                        if let Some(w) = wallpapers.iter_mut().find(|w| w.output_id == output) {
+                            let mut i = 0;
+                            while w.slot.has_active_buffers() && i < 100 {
+                                i += 1;
+                                std::thread::sleep(Duration::from_micros(100));
+                            }
+                            w.img = BgImg::Img(path);
+                            w.set_img(&mut pool, &img);
+                            w.draw(&mut pool);
+                        }
+                    }
 
-            if let Some(anim) = anim {
-                if anim.animation.len() == 1 {
-                    return;
-                }
-                let pool = Arc::clone(pool);
-                let wallpapers = Arc::clone(wallpapers);
-                if let Err(e) = thread::Builder::new()
-                    .name("cache importing".to_string()) //Name our threads  for better log messages
-                    .stack_size(TSTACK_SIZE) //the default of 2MB is way too overkill for this
-                    .spawn(move || {
+                    if let Some(anim) = anim {
+                        if anim.animation.len() == 1 {
+                            return;
+                        }
                         {
                             let (_p, mut wallpapers) = lock_pool_and_wallpapers(&pool, &wallpapers);
                             if let Some(w) = wallpapers.iter_mut().find(|w| w.output_id == output) {
@@ -265,10 +271,10 @@ impl Imgproc {
                             .unwrap();
                             now = std::time::Instant::now();
                         }
-                    })
-                {
-                    error!("failed to spawn 'cache importing' thread: {}", e);
-                }
+                    }
+                })
+            {
+                error!("failed to spawn 'cache importing' thread: {}", e);
             }
         } else {
             info!("did not find cached image for monitor '{}'", output_name);
