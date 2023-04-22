@@ -1,7 +1,7 @@
 use log::error;
 use utils::communication::BgImg;
 
-use std::{num::NonZeroI32, path::PathBuf};
+use std::{num::NonZeroI32, thread::ThreadId};
 
 use smithay_client_toolkit::{
     output::OutputInfo,
@@ -14,6 +14,7 @@ use smithay_client_toolkit::{
 
 use wayland_client::protocol::wl_shm;
 
+#[derive(PartialEq)]
 pub struct OutputId(pub u32);
 
 /// Owns all the necessary information for drawing. In order to get the current image, use `buf_arc_clone`
@@ -27,6 +28,14 @@ pub struct Wallpaper {
     pub img: BgImg,
 
     pub layer_surface: LayerSurface,
+
+    /// We change the owner in two instances: first, when sending things to the processor threads.
+    /// Second, when we clear the wallpaper
+    ///
+    /// The processor threads use this to figure out when they should no longer draw to that
+    /// wallpaper
+    owner: ThreadId,
+    pub in_transition: bool,
 }
 
 impl Wallpaper {
@@ -66,6 +75,8 @@ impl Wallpaper {
             layer_surface,
             slot,
             img: BgImg::Color([0, 0, 0]),
+            owner: std::thread::current().id(),
+            in_transition: false,
         }
     }
 
@@ -84,24 +95,23 @@ impl Wallpaper {
             }
         }
 
-        self.img = BgImg::Color(color);
+        self.chown();
     }
 
-    pub fn set_img(&mut self, pool: &mut SlotPool, img: &[u8], path: PathBuf) {
+    pub fn set_img(&mut self, pool: &mut SlotPool, img: &[u8]) {
         match self.slot.canvas(pool) {
             Some(canvas) => canvas.copy_from_slice(img),
-            None => {
-                error!("failed to get slot canvas");
-                return;
-            }
+            None => error!("failed to get slot canvas"),
         }
-        self.img = BgImg::Img(path);
     }
 
     pub fn draw(&mut self, pool: &mut SlotPool) {
         log::debug!("drawing: {}", self.img);
 
-        let (width, height, stride) = (self.width.get(), self.height.get(), self.width.get() * 4);
+        let width = self.width.get() * self.scale_factor.get();
+        let height = self.height.get() * self.scale_factor.get();
+        let stride = width * 4;
+
         let buf = pool
             .create_buffer_in(&self.slot, width, height, stride, wl_shm::Format::Argb8888)
             .unwrap();
@@ -127,5 +137,15 @@ impl Wallpaper {
             )
             .expect("failed to create slot");
         self.img = BgImg::Color([0, 0, 0]);
+    }
+
+    /// sets `in_transition` to false
+    pub fn chown(&mut self) {
+        self.owner = std::thread::current().id();
+        self.in_transition = false;
+    }
+
+    pub fn is_owned_by(&self, thread_id: ThreadId) -> bool {
+        self.owner == thread_id
     }
 }

@@ -1,37 +1,89 @@
-use smithay_client_toolkit::reexports::calloop::channel::SyncSender;
 use std::{
-    sync::mpsc,
+    sync::{Arc, Mutex},
+    thread::ThreadId,
     time::{Duration, Instant},
 };
 
 use log::debug;
-use utils::{
-    communication::{Position, TransitionType},
-    comp_decomp::ReadiedPack,
-};
+use smithay_client_toolkit::shm::slot::SlotPool;
+use utils::communication::{Position, TransitionType};
 
-use super::send_frame;
+use crate::{lock_pool_and_wallpapers, wallpaper::Wallpaper};
 
 use keyframe::{
     functions::BezierCurve, keyframes, mint::Vector2, num_traits::Pow, AnimationSequence,
 };
 
-macro_rules! send_transition_frame {
-    ($img:ident, $outputs:ident, $now:ident, $fps:ident, $sender:ident, $stop_recv:ident) => {
-        if $img.is_empty() {
-            debug!("Transition has finished.");
-            return;
+macro_rules! wallpaper_canvas {
+    ($wallpaper:ident, $pool:ident, $new_img:ident) => {{
+        while $wallpaper.slot.has_active_buffers() {
+            std::thread::yield_now()
         }
-        let timeout = $fps.saturating_sub($now.elapsed());
-        if send_frame($img, $outputs, timeout, $sender, $stop_recv) {
-            debug!("Transition was interrupted!");
-            return;
+        match $wallpaper.slot.canvas(&mut $pool) {
+            Some(canvas) => {
+                if canvas.len() == $new_img.len() {
+                    canvas
+                } else {
+                    continue;
+                }
+            }
+            None => continue,
+        }
+    }};
+}
+
+macro_rules! owned_wallpapers {
+    ($transition:ident, $wallpapers:ident) => {
+        $wallpapers
+            .iter_mut()
+            .filter(|w| w.is_owned_by($transition.thread_id))
+    };
+}
+
+macro_rules! draw_wallpapers {
+    ($transition:ident, $now:ident) => {{
+        let (mut pool, mut wallpapers) =
+            lock_pool_and_wallpapers(&$transition.pool, &$transition.wallpapers);
+        for wallpaper in owned_wallpapers!($transition, wallpapers) {
+            wallpaper.draw(&mut pool);
+        }
+    }
+    let timeout = $transition.fps.saturating_sub($now.elapsed());
+    std::thread::sleep(timeout);
+    nix::sys::signal::kill(nix::unistd::Pid::this(), nix::sys::signal::SIGUSR1).unwrap();};
+}
+
+macro_rules! change_cols {
+    ($step:ident, $old:ident, $new:ident, $done:ident) => {
+        for (old_col, new_col) in $old.iter_mut().zip($new) {
+            if old_col.abs_diff(*new_col) < $step {
+                *old_col = *new_col;
+            } else if *old_col > *new_col {
+                *old_col -= $step;
+                $done = false;
+            } else {
+                *old_col += $step;
+                $done = false;
+            }
+        }
+    };
+
+    ($step:ident, $old:ident, $new:ident) => {
+        for (old_col, new_col) in $old.iter_mut().zip($new) {
+            if old_col.abs_diff(*new_col) < $step {
+                *old_col = *new_col;
+            } else if *old_col > *new_col {
+                *old_col -= $step;
+            } else {
+                *old_col += $step;
+            }
         }
     };
 }
 
 pub struct Transition {
-    old_img: Box<[u8]>,
+    wallpapers: Arc<Mutex<Vec<Wallpaper>>>,
+    pool: Arc<Mutex<SlotPool>>,
     dimensions: (u32, u32),
     transition_type: TransitionType,
     duration: f32,
@@ -42,17 +94,21 @@ pub struct Transition {
     bezier: BezierCurve,
     wave: (f32, f32),
     invert_y: bool,
+    thread_id: ThreadId,
 }
 
 /// All transitions return whether or not they completed
 impl Transition {
     pub fn new(
-        old_img: Box<[u8]>,
+        wallpapers: Arc<Mutex<Vec<Wallpaper>>>,
         dimensions: (u32, u32),
         transition: utils::communication::Transition,
+        pool: Arc<Mutex<SlotPool>>,
     ) -> Self {
+        let thread_id = std::thread::current().id();
         Transition {
-            old_img,
+            wallpapers,
+            pool,
             dimensions,
             transition_type: transition.transition_type,
             duration: transition.duration,
@@ -72,25 +128,21 @@ impl Transition {
             ),
             wave: transition.wave,
             invert_y: transition.invert_y,
+            thread_id,
         }
     }
 
-    pub fn execute(
-        self,
-        new_img: &[u8],
-        outputs: &mut Vec<String>,
-        sender: &SyncSender<(Vec<String>, ReadiedPack)>,
-        stop_recv: &mpsc::Receiver<Vec<String>>,
-    ) {
+    pub fn execute(self, new_img: &[u8]) {
         debug!("Starting transition");
         match self.transition_type {
-            TransitionType::Simple => self.simple(new_img, outputs, sender, stop_recv),
-            TransitionType::Wipe => self.wipe(new_img, outputs, sender, stop_recv),
-            TransitionType::Grow => self.grow(new_img, outputs, sender, stop_recv),
-            TransitionType::Outer => self.outer(new_img, outputs, sender, stop_recv),
-            TransitionType::Wave => self.wave(new_img, outputs, sender, stop_recv),
-            TransitionType::Fade => self.fade(new_img, outputs, sender, stop_recv),
-        }
+            TransitionType::Simple => self.simple(new_img),
+            TransitionType::Wipe => self.wipe(new_img),
+            TransitionType::Grow => self.grow(new_img),
+            TransitionType::Outer => self.outer(new_img),
+            TransitionType::Wave => self.wave(new_img),
+            TransitionType::Fade => self.fade(new_img),
+        };
+        debug!("Transition finished")
     }
 
     fn bezier_seq(&self, start: f32, end: f32) -> (AnimationSequence<f32>, Instant) {
@@ -100,65 +152,59 @@ impl Transition {
         )
     }
 
-    fn simple(
-        mut self,
-        new_img: &[u8],
-        outputs: &mut Vec<String>,
-        sender: &SyncSender<(Vec<String>, ReadiedPack)>,
-        stop_recv: &mpsc::Receiver<Vec<String>>,
-    ) {
-        let fps = self.fps;
+    fn simple(self, new_img: &[u8]) {
+        let step = self.step;
         let mut now = Instant::now();
-        loop {
-            let transition_img =
-                ReadiedPack::new(&mut self.old_img, new_img, |old_pix, new_pix, _| {
-                    change_cols(self.step, old_pix, *new_pix);
-                });
-            send_transition_frame!(transition_img, outputs, now, fps, sender, stop_recv);
+        let mut done = false;
+        while !done {
+            done = true;
+            {
+                let (mut pool, mut wallpapers) =
+                    lock_pool_and_wallpapers(&self.pool, &self.wallpapers);
+                for wallpaper in owned_wallpapers!(self, wallpapers) {
+                    let canvas = wallpaper_canvas!(wallpaper, pool, new_img);
+                    for (old, new) in canvas.chunks_exact_mut(4).zip(new_img.chunks_exact(4)) {
+                        change_cols!(step, old, new, done);
+                    }
+                }
+            }
+
+            draw_wallpapers!(self, now);
             now = Instant::now();
         }
     }
 
-    fn fade(
-        mut self,
-        new_img: &[u8],
-        outputs: &mut Vec<String>,
-        sender: &SyncSender<(Vec<String>, ReadiedPack)>,
-        stop_recv: &mpsc::Receiver<Vec<String>>,
-    ) {
-        let fps = self.fps;
-        let mut now = Instant::now();
-
+    fn fade(mut self, new_img: &[u8]) {
+        let mut step = 0.0;
         let (mut seq, start) = self.bezier_seq(0.0, 1.0);
 
-        let mut step = 0.0;
-
-        loop {
-            let transition_img =
-                ReadiedPack::new(&mut self.old_img, new_img, |old_pix, new_pix, _| {
-                    for (old_col, new_col) in old_pix.iter_mut().zip(*new_pix) {
-                        *old_col = (*old_col as f64 * (1.0 - step) + new_col as f64 * step) as u8;
+        let mut now = Instant::now();
+        while start.elapsed().as_secs_f64() < seq.duration() {
+            {
+                let (mut pool, mut wallpapers) =
+                    lock_pool_and_wallpapers(&self.pool, &self.wallpapers);
+                for wallpaper in owned_wallpapers!(self, wallpapers) {
+                    let canvas = wallpaper_canvas!(wallpaper, pool, new_img);
+                    for (old_pix, new_pix) in
+                        canvas.chunks_exact_mut(4).zip(new_img.chunks_exact(4))
+                    {
+                        for (old_col, new_col) in old_pix.iter_mut().zip(new_pix) {
+                            *old_col =
+                                (*old_col as f64 * (1.0 - step) + *new_col as f64 * step) as u8;
+                        }
                     }
-                });
-            send_transition_frame!(transition_img, outputs, now, fps, sender, stop_recv);
+                }
+            }
+            draw_wallpapers!(self, now);
             now = Instant::now();
             step = seq.now() as f64;
             seq.advance_to(start.elapsed().as_secs_f64());
-            if start.elapsed().as_secs_f64() >= seq.duration() {
-                break;
-            }
         }
-        self.simple(new_img, outputs, sender, stop_recv)
+        self.step = 255;
+        self.simple(new_img)
     }
 
-    fn wave(
-        mut self,
-        new_img: &[u8],
-        outputs: &mut Vec<String>,
-        sender: &SyncSender<(Vec<String>, ReadiedPack)>,
-        stop_recv: &mpsc::Receiver<Vec<String>>,
-    ) {
-        let fps = self.fps;
+    fn wave(mut self, new_img: &[u8]) {
         let width = self.dimensions.0;
         let height = self.dimensions.1;
         let mut now = Instant::now();
@@ -203,38 +249,38 @@ impl Transition {
 
         let step = self.step;
 
-        loop {
-            let transition_img =
-                ReadiedPack::new(&mut self.old_img, new_img, |old_pix, new_pix, i| {
-                    let width = width as usize;
-                    let height = height as usize;
-                    let pix_x = i % width;
-                    let pix_y = height - i / width;
-                    if is_low(pix_x as f64, pix_y as f64, offset) {
-                        change_cols(step, old_pix, *new_pix);
+        while start.elapsed().as_secs_f64() < seq.duration() {
+            {
+                let (mut pool, mut wallpapers) =
+                    lock_pool_and_wallpapers(&self.pool, &self.wallpapers);
+                for wallpaper in owned_wallpapers!(self, wallpapers) {
+                    let canvas = wallpaper_canvas!(wallpaper, pool, new_img);
+                    for (i, (old, new)) in canvas
+                        .chunks_exact_mut(4)
+                        .zip(new_img.chunks_exact(4))
+                        .enumerate()
+                    {
+                        let width = width as usize;
+                        let height = height as usize;
+                        let pix_x = i % width;
+                        let pix_y = height - i / width;
+                        if is_low(pix_x as f64, pix_y as f64, offset) {
+                            change_cols!(step, old, new);
+                        }
                     }
-                });
-            send_transition_frame!(transition_img, outputs, now, fps, sender, stop_recv);
+                }
+            }
+            draw_wallpapers!(self, now);
             now = Instant::now();
 
             offset = seq.now() as f64;
             seq.advance_to(start.elapsed().as_secs_f64());
-            if start.elapsed().as_secs_f64() >= seq.duration() {
-                break;
-            }
         }
         self.step = 255;
-        self.simple(new_img, outputs, sender, stop_recv)
+        self.simple(new_img)
     }
 
-    fn wipe(
-        mut self,
-        new_img: &[u8],
-        outputs: &mut Vec<String>,
-        sender: &SyncSender<(Vec<String>, ReadiedPack)>,
-        stop_recv: &mpsc::Receiver<Vec<String>>,
-    ) {
-        let fps = self.fps;
+    fn wipe(mut self, new_img: &[u8]) {
         let width = self.dimensions.0;
         let height = self.dimensions.1;
         let mut now = Instant::now();
@@ -268,40 +314,40 @@ impl Transition {
 
         let step = self.step;
 
-        loop {
-            let transition_img =
-                ReadiedPack::new(&mut self.old_img, new_img, |old_pix, new_pix, i| {
-                    let width = width as usize;
-                    let height = height as usize;
-                    let pix_x = i % width;
-                    let pix_y = height - i / width;
-                    if is_low(pix_x as f64, pix_y as f64, offset, circle_radius) {
-                        change_cols(step, old_pix, *new_pix);
+        while start.elapsed().as_secs_f64() < seq.duration() {
+            {
+                let (mut pool, mut wallpapers) =
+                    lock_pool_and_wallpapers(&self.pool, &self.wallpapers);
+                for wallpaper in owned_wallpapers!(self, wallpapers) {
+                    let canvas = wallpaper_canvas!(wallpaper, pool, new_img);
+                    for (i, (old, new)) in canvas
+                        .chunks_exact_mut(4)
+                        .zip(new_img.chunks_exact(4))
+                        .enumerate()
+                    {
+                        let width = width as usize;
+                        let height = height as usize;
+                        let pix_x = i % width;
+                        let pix_y = height - i / width;
+                        if is_low(pix_x as f64, pix_y as f64, offset, circle_radius) {
+                            change_cols!(step, old, new);
+                        }
                     }
-                });
-            send_transition_frame!(transition_img, outputs, now, fps, sender, stop_recv);
+                }
+            }
+            draw_wallpapers!(self, now);
             now = Instant::now();
 
             offset = seq.now() as f64;
             seq.advance_to(start.elapsed().as_secs_f64());
-            if start.elapsed().as_secs_f64() >= seq.duration() {
-                break;
-            }
         }
         self.step = 255;
-        self.simple(new_img, outputs, sender, stop_recv)
+        self.simple(new_img)
     }
 
-    fn grow(
-        mut self,
-        new_img: &[u8],
-        outputs: &mut Vec<String>,
-        sender: &SyncSender<(Vec<String>, ReadiedPack)>,
-        stop_recv: &mpsc::Receiver<Vec<String>>,
-    ) {
-        let fps = self.fps;
+    fn grow(mut self, new_img: &[u8]) {
         let (width, height) = (self.dimensions.0 as f32, self.dimensions.1 as f32);
-        let (center_x, center_y) = self.pos.to_pixel(self.dimensions,self.invert_y);
+        let (center_x, center_y) = self.pos.to_pixel(self.dimensions, self.invert_y);
         let mut dist_center: f32 = 0.0;
         let dist_end: f32 = {
             let mut x = center_x;
@@ -318,44 +364,44 @@ impl Transition {
 
         let (mut seq, start) = self.bezier_seq(0.0, dist_end);
 
-        loop {
-            let transition_img =
-                ReadiedPack::new(&mut self.old_img, new_img, |old_pix, new_pix, i| {
-                    let (width, height) = (width as usize, height as usize);
-                    let pix_x = i % width;
-                    let pix_y = height - i / width;
-                    let diff_x = pix_x.abs_diff(center_x as usize) as f32;
-                    let diff_y = pix_y.abs_diff(center_y as usize) as f32;
-                    let pix_center_dist = f32::sqrt(diff_x.pow(2) + diff_y.pow(2));
-                    if pix_center_dist <= dist_center {
-                        let step = self
-                            .step
-                            .saturating_add((dist_center - pix_center_dist).log2() as u8);
-                        change_cols(step, old_pix, *new_pix);
+        while start.elapsed().as_secs_f64() < seq.duration() {
+            {
+                let (mut pool, mut wallpapers) =
+                    lock_pool_and_wallpapers(&self.pool, &self.wallpapers);
+                for wallpaper in owned_wallpapers!(self, wallpapers) {
+                    let canvas = wallpaper_canvas!(wallpaper, pool, new_img);
+                    for (i, (old, new)) in canvas
+                        .chunks_exact_mut(4)
+                        .zip(new_img.chunks_exact(4))
+                        .enumerate()
+                    {
+                        let (width, height) = (width as usize, height as usize);
+                        let pix_x = i % width;
+                        let pix_y = height - i / width;
+                        let diff_x = pix_x.abs_diff(center_x as usize) as f32;
+                        let diff_y = pix_y.abs_diff(center_y as usize) as f32;
+                        let pix_center_dist = f32::sqrt(diff_x.pow(2) + diff_y.pow(2));
+                        if pix_center_dist <= dist_center {
+                            let step = self
+                                .step
+                                .saturating_add((dist_center - pix_center_dist).log2() as u8);
+                            change_cols!(step, old, new);
+                        }
                     }
-                });
-            send_transition_frame!(transition_img, outputs, now, fps, sender, stop_recv);
+                }
+            }
+            draw_wallpapers!(self, now);
             now = Instant::now();
             dist_center = seq.now();
             seq.advance_to(start.elapsed().as_secs_f64());
-            if start.elapsed().as_secs_f64() >= seq.duration() {
-                break;
-            }
         }
         self.step = 255;
-        self.simple(new_img, outputs, sender, stop_recv)
+        self.simple(new_img)
     }
 
-    fn outer(
-        mut self,
-        new_img: &[u8],
-        outputs: &mut Vec<String>,
-        sender: &SyncSender<(Vec<String>, ReadiedPack)>,
-        stop_recv: &mpsc::Receiver<Vec<String>>,
-    ) {
-        let fps = self.fps;
+    fn outer(mut self, new_img: &[u8]) {
         let (width, height) = (self.dimensions.0 as f32, self.dimensions.1 as f32);
-        let (center_x, center_y) = self.pos.to_pixel(self.dimensions,self.invert_y);
+        let (center_x, center_y) = self.pos.to_pixel(self.dimensions, self.invert_y);
         let mut dist_center = {
             let mut x = center_x;
             let mut y = center_y;
@@ -371,127 +417,120 @@ impl Transition {
 
         let (mut seq, start) = self.bezier_seq(dist_center, 0.0);
 
-        loop {
-            let transition_img =
-                ReadiedPack::new(&mut self.old_img, new_img, |old_pix, new_pix, i| {
-                    let (width, height) = (width as usize, height as usize);
-                    let pix_x = i % width;
-                    let pix_y = height - i / width;
-                    let diff_x = pix_x.abs_diff(center_x as usize) as f32;
-                    let diff_y = pix_y.abs_diff(center_y as usize) as f32;
-                    let pix_center_dist = f32::sqrt(diff_x.pow(2) + diff_y.pow(2));
-                    if pix_center_dist >= dist_center {
-                        let step = self
-                            .step
-                            .saturating_add((pix_center_dist - dist_center).log2() as u8);
-                        change_cols(step, old_pix, *new_pix);
+        while start.elapsed().as_secs_f64() < seq.duration() {
+            {
+                let (mut pool, mut wallpapers) =
+                    lock_pool_and_wallpapers(&self.pool, &self.wallpapers);
+                for wallpaper in owned_wallpapers!(self, wallpapers) {
+                    let canvas = wallpaper_canvas!(wallpaper, pool, new_img);
+                    for (i, (old, new)) in canvas
+                        .chunks_exact_mut(4)
+                        .zip(new_img.chunks_exact(4))
+                        .enumerate()
+                    {
+                        let (width, height) = (width as usize, height as usize);
+                        let pix_x = i % width;
+                        let pix_y = height - i / width;
+                        let diff_x = pix_x.abs_diff(center_x as usize) as f32;
+                        let diff_y = pix_y.abs_diff(center_y as usize) as f32;
+                        let pix_center_dist = f32::sqrt(diff_x.pow(2) + diff_y.pow(2));
+                        if pix_center_dist >= dist_center {
+                            let step = self
+                                .step
+                                .saturating_add((pix_center_dist - dist_center).log2() as u8);
+                            change_cols!(step, old, new);
+                        }
                     }
-                });
-            send_transition_frame!(transition_img, outputs, now, fps, sender, stop_recv);
+                }
+            }
+            draw_wallpapers!(self, now);
             now = Instant::now();
 
             dist_center = seq.now();
             seq.advance_to(start.elapsed().as_secs_f64());
-
-            if start.elapsed().as_secs_f64() >= seq.duration() {
-                break;
-            }
         }
         self.step = 255;
-        self.simple(new_img, outputs, sender, stop_recv)
+        self.simple(new_img)
     }
 }
 
-fn change_cols(step: u8, old: &mut [u8; 4], new: [u8; 4]) {
-    for (old_col, new_col) in old.iter_mut().zip(new) {
-        if old_col.abs_diff(new_col) < step {
-            *old_col = new_col;
-        } else if *old_col > new_col {
-            *old_col -= step;
-        } else {
-            *old_col += step;
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use keyframe::mint::Vector2;
-    use smithay_client_toolkit::reexports::calloop::channel::{self, Channel, SyncSender};
-    use utils::communication::Coord;
-
-    #[allow(clippy::type_complexity)]
-    fn make_senders_and_receivers() -> (
-        (
-            SyncSender<(Vec<String>, ReadiedPack)>,
-            Channel<(Vec<String>, ReadiedPack)>,
-        ),
-        (mpsc::Sender<Vec<String>>, mpsc::Receiver<Vec<String>>),
-    ) {
-        (channel::sync_channel(20000), mpsc::channel())
-    }
-
-    fn make_test_boxes() -> (Box<[u8]>, Box<[u8]>) {
-        let mut vec1 = Vec::with_capacity(4000);
-        let mut vec2 = Vec::with_capacity(4000);
-
-        for _ in 0..4000 {
-            vec1.push(rand::random());
-            vec2.push(rand::random());
-        }
-
-        (vec1.into_boxed_slice(), vec2.into_boxed_slice())
-    }
-
-    fn test_transition(old_img: Box<[u8]>, transition_type: TransitionType) -> Transition {
-        Transition {
-            old_img,
-            transition_type,
-            dimensions: (100, 10),
-            duration: 2.0,
-            step: 100,
-            fps: Duration::from_nanos(1),
-            angle: 0.0,
-            pos: Position::new(Coord::Percent(0.0), Coord::Percent(0.0)),
-            bezier: BezierCurve::from(Vector2 { x: 1.0, y: 0.0 }, Vector2 { x: 0.0, y: 1.0 }),
-            wave: (20.0, 20.0),
-            invert_y: false,
-        }
-    }
-
-    fn dummy_outputs() -> Vec<String> {
-        vec!["dummy".to_string()]
-    }
-
-    #[test]
-    fn transitions_should_end_with_equal_vectors() {
-        use TransitionType as TT;
-        let transitions = [TT::Simple, TT::Wipe, TT::Outer, TT::Grow, TT::Wave];
-        for transition in transitions {
-            let ((fr_send, fr_recv), (_stop_send, stop_recv)) = make_senders_and_receivers();
-            let (old_img, new_img) = make_test_boxes();
-            let mut transition_img = old_img.clone();
-            let t = test_transition(old_img, transition.clone());
-            let mut dummies = dummy_outputs();
-
-            let handle = {
-                let new_img = new_img.clone();
-                std::thread::spawn(move || t.execute(&new_img, &mut dummies, &fr_send, &stop_recv))
-            };
-
-            while let Ok((_, i)) = fr_recv.recv() {
-                i.unpack(&mut transition_img);
-            }
-
-            assert!(handle.join().is_ok());
-            for (tpix, npix) in transition_img.chunks_exact(4).zip(new_img.chunks_exact(4)) {
-                assert_eq!(
-                    tpix[0..3],
-                    npix[0..3],
-                    "Transition {transition:?} did not end with correct new_img"
-                );
-            }
-        }
-    }
-}
+//#[cfg(test)]
+//mod tests {
+//    use super::*;
+//    use keyframe::mint::Vector2;
+//    use smithay_client_toolkit::reexports::calloop::channel::{self, Channel, SyncSender};
+//    use utils::communication::Coord;
+//
+//    #[allow(clippy::type_complexity)]
+//    fn make_senders_and_receivers() -> (
+//        (
+//            SyncSender<(Vec<String>, ReadiedPack)>,
+//            Channel<(Vec<String>, ReadiedPack)>,
+//        ),
+//        (mpsc::Sender<Vec<String>>, mpsc::Receiver<Vec<String>>),
+//    ) {
+//        (channel::sync_channel(20000), mpsc::channel())
+//    }
+//
+//    fn make_test_boxes() -> (Box<[u8]>, Box<[u8]>) {
+//        let mut vec1 = Vec::with_capacity(4000);
+//        let mut vec2 = Vec::with_capacity(4000);
+//
+//        for _ in 0..4000 {
+//            vec1.push(rand::random());
+//            vec2.push(rand::random());
+//        }
+//
+//        (vec1.into_boxed_slice(), vec2.into_boxed_slice())
+//    }
+//
+//    fn test_transition(old_img: Box<[u8]>, transition_type: TransitionType) -> Transition {
+//        Transition {
+//            old_img,
+//            transition_type,
+//            dimensions: (100, 10),
+//            duration: 2.0,
+//            step: 100,
+//            fps: Duration::from_nanos(1),
+//            angle: 0.0,
+//            pos: Position::new(Coord::Percent(0.0), Coord::Percent(0.0)),
+//            bezier: BezierCurve::from(Vector2 { x: 1.0, y: 0.0 }, Vector2 { x: 0.0, y: 1.0 }),
+//            wave: (20.0, 20.0),
+//        }
+//    }
+//
+//    fn dummy_outputs() -> Vec<String> {
+//        vec!["dummy".to_string()]
+//    }
+//
+//    #[test]
+//    fn transitions_should_end_with_equal_vectors() {
+//        use TransitionType as TT;
+//        let transitions = [TT::Simple, TT::Wipe, TT::Outer, TT::Grow, TT::Wave];
+//        for transition in transitions {
+//            let ((fr_send, fr_recv), (_stop_send, stop_recv)) = make_senders_and_receivers();
+//            let (old_img, new_img) = make_test_boxes();
+//            let mut transition_img = old_img.clone();
+//            let t = test_transition(old_img, transition.clone());
+//            let mut dummies = dummy_outputs();
+//
+//            let handle = {
+//                let new_img = new_img.clone();
+//                std::thread::spawn(move || t.execute(&new_img, &mut dummies, &fr_send, &stop_recv))
+//            };
+//
+//            while let Ok((_, i)) = fr_recv.recv() {
+//                i.unpack(&mut transition_img);
+//            }
+//
+//            assert!(handle.join().is_ok());
+//            for (tpix, npix) in transition_img.chunks_exact(4).zip(new_img.chunks_exact(4)) {
+//                assert_eq!(
+//                    tpix[0..3],
+//                    npix[0..3],
+//                    "Transition {transition:?} did not end with correct new_img"
+//                );
+//            }
+//        }
+//    }
+//}

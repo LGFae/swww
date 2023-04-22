@@ -1,18 +1,22 @@
 use log::{debug, error, info};
-
-use smithay_client_toolkit::reexports::calloop::channel::SyncSender;
+use smithay_client_toolkit::shm::slot::SlotPool;
 
 use std::{
     path::PathBuf,
-    sync::mpsc,
-    sync::{Arc, RwLock},
+    sync::Arc,
+    sync::{mpsc, Mutex},
     thread,
     time::Duration,
 };
 
 use utils::{
-    communication::{Animation, Answer, BgInfo, Img},
+    communication::{Animation, Answer, BgImg, BgInfo, Img},
     comp_decomp::ReadiedPack,
+};
+
+use crate::{
+    lock_pool_and_wallpapers,
+    wallpaper::{OutputId, Wallpaper},
 };
 
 mod animations;
@@ -24,18 +28,12 @@ const TSTACK_SIZE: usize = 1 << 17; //128KiB
 pub type ImgWithDim = (Box<[u8]>, (u32, u32));
 
 pub struct Processor {
-    frame_sender: SyncSender<(Vec<String>, ReadiedPack)>,
-    anim_stoppers: Vec<mpsc::Sender<Vec<String>>>,
-    on_going_transitions: Arc<RwLock<Vec<String>>>,
     sync_barrier: Arc<sync_barrier::SyncBarrier>,
 }
 
 impl Processor {
-    pub fn new(frame_sender: SyncSender<(Vec<String>, ReadiedPack)>) -> Self {
+    pub fn new() -> Self {
         Self {
-            frame_sender,
-            anim_stoppers: Vec::new(),
-            on_going_transitions: Arc::new(RwLock::new(Vec::new())),
             sync_barrier: Arc::new(sync_barrier::SyncBarrier::new(0)),
         }
     }
@@ -46,45 +44,54 @@ impl Processor {
 
     pub fn transition(
         &mut self,
-        transition: &utils::communication::Transition,
-        requests: Vec<(Img, Vec<String>)>,
-        old_imgs: Vec<ImgWithDim>,
+        pool: &Arc<Mutex<SlotPool>>,
+        transition: utils::communication::Transition,
+        requests: Vec<(Img, Vec<OutputId>)>,
+        wallpapers: &Arc<Mutex<Vec<Wallpaper>>>,
     ) -> Answer {
         let mut answer = Answer::Ok;
-        for ((old_img, dim), (new_img, mut outputs)) in old_imgs.into_iter().zip(requests) {
-            if old_img.len() != new_img.img.len() {
-                return Answer::Err(format!(
-                    "Output and image have different sizes: {} vs {}.\
-                            This should be impossible.\
-                            Please get in the contact with the developers",
-                    old_img.len(),
-                    new_img.img.len()
-                ));
-            }
-            self.stop_animations(&outputs);
+        for (Img { img, path }, outputs) in requests {
+            let wallpapers = Arc::clone(wallpapers);
+            let pool = Arc::clone(pool);
             let transition = transition.clone();
-            let sender = self.frame_sender.clone();
-            let (stopper, stop_recv) = mpsc::channel();
-            self.anim_stoppers.push(stopper);
-            let on_going_transitions = Arc::clone(&self.on_going_transitions);
+
             if let Err(e) = thread::Builder::new()
                 .name("transition".to_string()) //Name our threads  for better log messages
                 .stack_size(TSTACK_SIZE) //the default of 2MB is way too overkill for this
                 .spawn(move || {
-                    on_going_transitions
-                        .write()
-                        .unwrap()
-                        .extend_from_slice(&outputs);
-                    animations::Transition::new(old_img, dim, transition).execute(
-                        &new_img.img,
-                        &mut outputs,
-                        &sender,
-                        &stop_recv,
-                    );
-                    on_going_transitions
-                        .write()
-                        .unwrap()
-                        .retain(|output| !outputs.contains(output));
+                    let mut dimensions = None;
+                    {
+                        let (_pool, mut wallpapers) = lock_pool_and_wallpapers(&pool, &wallpapers);
+                        for wallpaper in wallpapers
+                            .iter_mut()
+                            .filter(|w| outputs.contains(&w.output_id))
+                        {
+                            wallpaper.chown();
+                            wallpaper.img = BgImg::Img(path.clone());
+                            wallpaper.in_transition = true;
+                            if dimensions.is_none() {
+                                dimensions = Some((
+                                    wallpaper.width.get() as u32
+                                        * wallpaper.scale_factor.get() as u32,
+                                    wallpaper.height.get() as u32
+                                        * wallpaper.scale_factor.get() as u32,
+                                ));
+                            }
+                        }
+                    }
+
+                    if let Some(dimensions) = dimensions {
+                        if img.len() == dimensions.0 as usize * dimensions.1 as usize * 4 {
+                            animations::Transition::new(wallpapers, dimensions, transition, pool)
+                                .execute(&img);
+                        } else {
+                            error!(
+                                "image is of wrong size! Image len: {}, expected size: {}",
+                                img.len(),
+                                dimensions.0 as usize * dimensions.1 as usize * 4
+                            );
+                        }
+                    }
                 })
             {
                 answer = Answer::Err(format!("failed to spawn transition thread: {e}"));
@@ -94,162 +101,120 @@ impl Processor {
         answer
     }
 
-    pub fn animate(
-        &mut self,
-        animation: utils::communication::Animation,
-        mut outputs: Vec<String>,
-        output_size: usize,
-    ) -> Answer {
-        let mut answer = Answer::Ok;
-
-        let sender = self.frame_sender.clone();
-        let (stopper, stop_recv) = mpsc::channel();
-        let on_going_transitions = Arc::clone(&self.on_going_transitions);
-
-        let barrier = Arc::clone(&self.sync_barrier);
-        self.anim_stoppers.push(stopper);
-        if let Err(e) = thread::Builder::new()
-            .name("animation".to_string()) //Name our threads  for better log messages
-            .stack_size(TSTACK_SIZE) //the default of 2MB is way too overkill for this
-            .spawn(move || {
-                while on_going_transitions
-                    .read()
-                    .unwrap()
-                    .iter()
-                    .any(|output| outputs.contains(output))
-                {
-                    std::thread::yield_now();
-                }
-                let mut now = std::time::Instant::now();
-                /* We only need to animate if we have > 1 frame */
-                if animation.animation.len() == 1 {
-                    return;
-                }
-                for (frame, duration) in animation.animation.iter().cycle() {
-                    let frame = frame.ready(output_size);
-
-                    if animation.sync {
-                        barrier.inc_and_wait_while(*duration, || match stop_recv.try_recv() {
-                            Ok(to_remove) => {
-                                outputs.retain(|o| !to_remove.contains(o));
-                                outputs.is_empty() || to_remove.is_empty()
-                            }
-                            Err(mpsc::TryRecvError::Empty) => false,
-                            Err(mpsc::TryRecvError::Disconnected) => true,
-                        });
-                        if outputs.is_empty() {
-                            return;
-                        }
-                    }
-
-                    let timeout = duration.saturating_sub(now.elapsed());
-                    if send_frame(frame, &mut outputs, timeout, &sender, &stop_recv) {
-                        debug!("STOPPING");
-                        return;
-                    }
-                    now = std::time::Instant::now();
-                }
-            })
-        {
-            answer = Answer::Err(format!("failed to spawn animation thread: {e}"));
-            error!("failed to spawn 'animation' thread: {e}");
-        };
-
-        answer
-    }
-
-    pub fn stop_animations(&mut self, to_stop: &[String]) {
-        self.on_going_transitions
-            .write()
-            .unwrap()
-            .retain(|output| !to_stop.contains(output));
-        self.anim_stoppers
-            .retain(|a| a.send(to_stop.to_vec()).is_ok());
-    }
-
-    #[must_use]
-    pub fn import_cached_img(&mut self, info: BgInfo, old_img: &mut [u8]) -> Option<PathBuf> {
-        if let Some((Img { img, path }, anim)) = get_cached_bg(&info.name) {
-            let output_size = old_img.len();
-            if output_size < img.len() {
-                info!(
-                    "{} monitor's buffer size ({output_size}) is smaller than cache's image ({})",
-                    info.name,
-                    img.len()
-                );
-                return None;
-            }
-            let pack = ReadiedPack::new(old_img, &img, |cur, goal, _| {
-                *cur = *goal;
-            });
-
-            let sender = self.frame_sender.clone();
-            let (stopper, stop_recv) = mpsc::channel();
-            self.anim_stoppers.push(stopper);
-            if let Err(e) = thread::Builder::new()
-                .name("cache importing".to_string()) //Name our threads  for better log messages
-                .stack_size(TSTACK_SIZE) //the default of 2MB is way too overkill for this
-                .spawn(move || {
-                    let mut outputs = vec![info.name];
-                    send_frame(pack, &mut outputs, Duration::new(0, 0), &sender, &stop_recv);
-                    if let Some(anim) = anim {
-                        let mut now = std::time::Instant::now();
-                        if anim.animation.len() == 1 {
-                            return;
-                        }
-                        for (frame, duration) in anim.animation.iter().cycle() {
-                            let frame = frame.ready(output_size);
-                            let timeout = duration.saturating_sub(now.elapsed());
-                            if send_frame(frame, &mut outputs, timeout, &sender, &stop_recv) {
-                                return;
-                            }
-                            now = std::time::Instant::now();
-                        }
-                    }
-                })
-            {
-                error!("failed to spawn 'cache importing' thread: {}", e);
-                return None;
-            }
-
-            return Some(path);
-        }
-        info!("failed to find cached image for monitor '{}'", info.name);
-        None
-    }
-}
-
-impl Drop for Processor {
-    //We need to make sure pending animators exited
-    fn drop(&mut self) {
-        while !self.anim_stoppers.is_empty() {
-            self.stop_animations(&Vec::new());
-        }
-    }
-}
-
-///Returns whether the calling function should exit or not
-fn send_frame(
-    frame: ReadiedPack,
-    outputs: &mut Vec<String>,
-    timeout: Duration,
-    sender: &SyncSender<(Vec<String>, ReadiedPack)>,
-    stop_recv: &mpsc::Receiver<Vec<String>>,
-) -> bool {
-    match stop_recv.recv_timeout(timeout) {
-        Ok(to_remove) => {
-            outputs.retain(|o| !to_remove.contains(o));
-            if outputs.is_empty() || to_remove.is_empty() {
-                return true;
-            }
-        }
-        Err(mpsc::RecvTimeoutError::Timeout) => (),
-        Err(mpsc::RecvTimeoutError::Disconnected) => return true,
-    }
-    match sender.send((outputs.clone(), frame)) {
-        Ok(()) => false,
-        Err(_) => true,
-    }
+    //    pub fn animate(
+    //        &mut self,
+    //        animation: utils::communication::Animation,
+    //        mut outputs: Vec<String>,
+    //        output_size: usize,
+    //    ) -> Answer {
+    //        let mut answer = Answer::Ok;
+    //
+    //        let sender = self.frame_sender.clone();
+    //        let (stopper, stop_recv) = mpsc::channel();
+    //        let on_going_transitions = Arc::clone(&self.on_going_transitions);
+    //
+    //        let barrier = Arc::clone(&self.sync_barrier);
+    //        self.anim_stoppers.push(stopper);
+    //        if let Err(e) = thread::Builder::new()
+    //            .name("animation".to_string()) //Name our threads  for better log messages
+    //            .stack_size(TSTACK_SIZE) //the default of 2MB is way too overkill for this
+    //            .spawn(move || {
+    //                while on_going_transitions
+    //                    .read()
+    //                    .unwrap()
+    //                    .iter()
+    //                    .any(|output| outputs.contains(output))
+    //                {
+    //                    std::thread::yield_now();
+    //                }
+    //                let mut now = std::time::Instant::now();
+    //                /* We only need to animate if we have > 1 frame */
+    //                if animation.animation.len() == 1 {
+    //                    return;
+    //                }
+    //                for (frame, duration) in animation.animation.iter().cycle() {
+    //                    let frame = frame.ready(output_size);
+    //
+    //                    if animation.sync {
+    //                        barrier.inc_and_wait_while(*duration, || match stop_recv.try_recv() {
+    //                            Ok(to_remove) => {
+    //                                outputs.retain(|o| !to_remove.contains(o));
+    //                                outputs.is_empty() || to_remove.is_empty()
+    //                            }
+    //                            Err(mpsc::TryRecvError::Empty) => false,
+    //                            Err(mpsc::TryRecvError::Disconnected) => true,
+    //                        });
+    //                        if outputs.is_empty() {
+    //                            return;
+    //                        }
+    //                    }
+    //
+    //                    let timeout = duration.saturating_sub(now.elapsed());
+    //                    if send_frame(frame, &mut outputs, timeout, &sender, &stop_recv) {
+    //                        debug!("STOPPING");
+    //                        return;
+    //                    }
+    //                    now = std::time::Instant::now();
+    //                }
+    //            })
+    //        {
+    //            answer = Answer::Err(format!("failed to spawn animation thread: {e}"));
+    //            error!("failed to spawn 'animation' thread: {e}");
+    //        };
+    //
+    //        answer
+    //    }
+    //
+    //    #[must_use]
+    //    pub fn import_cached_img(&mut self, info: BgInfo, old_img: &mut [u8]) -> Option<PathBuf> {
+    //        if let Some((Img { img, path }, anim)) = get_cached_bg(&info.name) {
+    //            let output_size = old_img.len();
+    //            if output_size < img.len() {
+    //                info!(
+    //                    "{} monitor's buffer size ({output_size}) is smaller than cache's image ({})",
+    //                    info.name,
+    //                    img.len()
+    //                );
+    //                return None;
+    //            }
+    //            let pack = ReadiedPack::new(old_img, &img, |cur, goal, _| {
+    //                *cur = *goal;
+    //            });
+    //
+    //            let sender = self.frame_sender.clone();
+    //            let (stopper, stop_recv) = mpsc::channel();
+    //            self.anim_stoppers.push(stopper);
+    //            if let Err(e) = thread::Builder::new()
+    //                .name("cache importing".to_string()) //Name our threads  for better log messages
+    //                .stack_size(TSTACK_SIZE) //the default of 2MB is way too overkill for this
+    //                .spawn(move || {
+    //                    let mut outputs = vec![info.name];
+    //                    send_frame(pack, &mut outputs, Duration::new(0, 0), &sender, &stop_recv);
+    //                    if let Some(anim) = anim {
+    //                        let mut now = std::time::Instant::now();
+    //                        if anim.animation.len() == 1 {
+    //                            return;
+    //                        }
+    //                        for (frame, duration) in anim.animation.iter().cycle() {
+    //                            let frame = frame.ready(output_size);
+    //                            let timeout = duration.saturating_sub(now.elapsed());
+    //                            if send_frame(frame, &mut outputs, timeout, &sender, &stop_recv) {
+    //                                return;
+    //                            }
+    //                            now = std::time::Instant::now();
+    //                        }
+    //                    }
+    //                })
+    //            {
+    //                error!("failed to spawn 'cache importing' thread: {}", e);
+    //                return None;
+    //            }
+    //
+    //            return Some(path);
+    //        }
+    //        info!("failed to find cached image for monitor '{}'", info.name);
+    //        None
+    //    }
 }
 
 fn get_cached_bg(output: &str) -> Option<(Img, Option<Animation>)> {

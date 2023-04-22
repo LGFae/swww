@@ -2,6 +2,7 @@
 //! them fail there is no point in continuing. All of the initialization code, for example, is full
 //! of `expects`, **on purpose**, because we **want** to unwind and exit when they happen
 
+mod processor;
 mod wallpaper;
 use log::{debug, error, info, LevelFilter};
 use nix::{
@@ -9,7 +10,7 @@ use nix::{
     sys::signal::{self, SigHandler, Signal},
 };
 use simplelog::{ColorChoice, TermLogger, TerminalMode, ThreadLogMode};
-use wallpaper::Wallpaper;
+use wallpaper::{OutputId, Wallpaper};
 
 use std::{
     fs,
@@ -19,7 +20,7 @@ use std::{
         unix::net::{UnixListener, UnixStream},
     },
     path::Path,
-    sync::RwLock,
+    sync::{Arc, Mutex, MutexGuard, RwLock},
 };
 
 use smithay_client_toolkit::{
@@ -41,7 +42,9 @@ use wayland_client::{
     Connection, QueueHandle,
 };
 
-use utils::communication::{get_socket_path, Answer, BgInfo, Request};
+use utils::communication::{get_socket_path, Answer, BgImg, BgInfo, Request};
+
+use crate::processor::Processor;
 
 // We need this because this might be set by signals, so we can't keep it in the daemon
 static EXIT: RwLock<bool> = RwLock::new(false);
@@ -55,7 +58,11 @@ fn should_daemon_exit() -> bool {
     *EXIT.read().expect("failed to read EXIT")
 }
 
-extern "C" fn signal_handler(_: i32) {
+extern "C" fn signal_handler(s: i32) {
+    // SIGUSR1 simply signals us to stop polling, since we need to draw something
+    if let Ok(Signal::SIGUSR1) = Signal::try_from(s) {
+        return;
+    }
     exit_daemon();
 }
 
@@ -65,7 +72,12 @@ fn main() -> DaemonResult<()> {
     let listener = SocketWrapper::new()?;
 
     let handler = SigHandler::Handler(signal_handler);
-    for signal in [Signal::SIGINT, Signal::SIGQUIT, Signal::SIGTERM] {
+    for signal in [
+        Signal::SIGINT,
+        Signal::SIGQUIT,
+        Signal::SIGTERM,
+        Signal::SIGUSR1,
+    ] {
         unsafe { signal::signal(signal, handler).expect("Failed to install signal handler") };
     }
 
@@ -76,6 +88,7 @@ fn main() -> DaemonResult<()> {
     let qh = event_queue.handle();
 
     let mut daemon = Daemon::new(&globals, &qh);
+    let mut processor = Processor::new();
 
     if let Ok(true) = sd_notify::booted() {
         if let Err(e) = sd_notify::notify(true, &[sd_notify::NotifyState::Ready]) {
@@ -107,7 +120,7 @@ fn main() -> DaemonResult<()> {
 
         if poll_handler.has_event(PollHandler::SOCKET_FD) {
             match listener.0.accept() {
-                Ok((stream, _addr)) => recv_socket_msg(&mut daemon, stream),
+                Ok((stream, _addr)) => recv_socket_msg(&mut daemon, &mut processor, stream),
                 Err(e) => match e.kind() {
                     std::io::ErrorKind::WouldBlock => (),
                     _ => return Err(format!("failed to accept incoming connection: {e}")),
@@ -211,10 +224,10 @@ pub struct Daemon {
     registry_state: RegistryState,
     output_state: OutputState,
     shm: Shm,
-    pool: SlotPool,
+    pool: Arc<Mutex<SlotPool>>,
 
     // swww stuff
-    wallpapers: Vec<Wallpaper>,
+    wallpapers: Arc<Mutex<Vec<Wallpaper>>>,
 }
 
 impl Daemon {
@@ -236,21 +249,20 @@ impl Daemon {
             output_state: OutputState::new(globals, qh),
             compositor_state,
             shm,
-            pool,
+            pool: Arc::new(Mutex::new(pool)),
             layer_shell,
 
-            wallpapers: Vec::new(),
+            wallpapers: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
     pub fn wallpapers_info(&self) -> Vec<BgInfo> {
+        let (_pool, wallpapers) = lock_pool_and_wallpapers(&self.pool, &self.wallpapers);
         self.output_state
             .outputs()
             .filter_map(|output| {
                 if let Some(info) = self.output_state.info(&output) {
-                    if let Some(wallpaper) =
-                        self.wallpapers.iter().find(|w| w.output_id.0 == info.id)
-                    {
+                    if let Some(wallpaper) = wallpapers.iter().find(|w| w.output_id.0 == info.id) {
                         return Some(BgInfo {
                             name: info.name.unwrap_or("?".to_string()),
                             dim: info
@@ -267,14 +279,14 @@ impl Daemon {
             .collect()
     }
 
-    pub fn find_wallpapers_id_by_names(&self, names: Vec<String>) -> Vec<u32> {
+    pub fn find_wallpapers_id_by_names(&self, names: Vec<String>) -> Vec<OutputId> {
         self.output_state
             .outputs()
             .filter_map(|output| {
                 if let Some(info) = self.output_state.info(&output) {
                     if let Some(name) = info.name {
                         if names.is_empty() || names.contains(&name) {
-                            return Some(info.id);
+                            return Some(OutputId(info.id));
                         }
                     }
                 }
@@ -283,27 +295,24 @@ impl Daemon {
             .collect()
     }
 
-    pub fn clear_by_id(&mut self, ids: Vec<u32>, color: [u8; 3]) {
-        // TODO: STOP ANIMATIONS
-        for wallpaper in self.wallpapers.iter_mut() {
-            if ids.contains(&wallpaper.output_id.0) {
-                wallpaper.clear(&mut self.pool, color);
-                wallpaper.draw( &mut self.pool);
+    pub fn clear_by_id(&mut self, ids: Vec<OutputId>, color: [u8; 3]) {
+        let (mut pool, mut wallpapers) = lock_pool_and_wallpapers(&self.pool, &self.wallpapers);
+        for wallpaper in wallpapers.iter_mut() {
+            if ids.contains(&wallpaper.output_id) {
+                wallpaper.img = BgImg::Color(color);
+                wallpaper.clear(&mut pool, color);
+                wallpaper.draw(&mut pool);
             }
         }
     }
 
-    pub fn set_img_by_id(
-        &mut self,
-        ids: Vec<u32>,
-        img: &[u8],
-        path: &Path,
-    ) {
-        // TODO: STOP ANIMATIONS
-        for wallpaper in self.wallpapers.iter_mut() {
-            if ids.contains(&wallpaper.output_id.0) {
-                wallpaper.set_img(&mut self.pool, img, path.to_owned());
-                wallpaper.draw(&mut self.pool);
+    pub fn set_img_by_id(&mut self, ids: Vec<OutputId>, img: &[u8], path: &Path) {
+        let (mut pool, mut wallpapers) = lock_pool_and_wallpapers(&self.pool, &self.wallpapers);
+        for wallpaper in wallpapers.iter_mut() {
+            if ids.contains(&wallpaper.output_id) {
+                wallpaper.img = BgImg::Img(path.to_owned());
+                wallpaper.set_img(&mut pool, img);
+                wallpaper.draw(&mut pool);
             }
         }
     }
@@ -317,15 +326,16 @@ impl CompositorHandler for Daemon {
         surface: &wl_surface::WlSurface,
         new_factor: i32,
     ) {
-        for wallpaper in self.wallpapers.iter_mut() {
+        let (mut pool, mut wallpapers) = lock_pool_and_wallpapers(&self.pool, &self.wallpapers);
+        for wallpaper in wallpapers.iter_mut() {
             if wallpaper.layer_surface.wl_surface() == surface {
                 wallpaper.resize(
-                    &mut self.pool,
+                    &mut pool,
                     wallpaper.width,
                     wallpaper.height,
                     NonZeroI32::new(new_factor).unwrap(),
                 );
-                wallpaper.draw(&mut self.pool);
+                wallpaper.draw(&mut pool);
                 return;
             }
         }
@@ -338,9 +348,10 @@ impl CompositorHandler for Daemon {
         surface: &wl_surface::WlSurface,
         _time: u32,
     ) {
-        for wallpaper in self.wallpapers.iter_mut() {
+        let (mut pool, mut wallpapers) = lock_pool_and_wallpapers(&self.pool, &self.wallpapers);
+        for wallpaper in wallpapers.iter_mut() {
             if wallpaper.layer_surface.wl_surface() == surface {
-                wallpaper.draw(&mut self.pool);
+                wallpaper.draw(&mut pool);
                 return;
             }
         }
@@ -375,8 +386,8 @@ impl OutputHandler for Daemon {
                 Some(&output),
             );
 
-            self.wallpapers
-                .push(Wallpaper::new(output_info, layer_surface, &mut self.pool));
+            let (mut pool, mut wallpapers) = lock_pool_and_wallpapers(&self.pool, &self.wallpapers);
+            wallpapers.push(Wallpaper::new(output_info, layer_surface, &mut pool));
         }
     }
 
@@ -395,7 +406,9 @@ impl OutputHandler for Daemon {
                     );
                     return;
                 }
-                for wallpaper in self.wallpapers.iter_mut() {
+                let (mut pool, mut wallpapers) =
+                    lock_pool_and_wallpapers(&self.pool, &self.wallpapers);
+                for wallpaper in wallpapers.iter_mut() {
                     if wallpaper.output_id.0 == output_info.id {
                         let (width, height) = (
                             NonZeroI32::new(output_size.0).unwrap(),
@@ -405,7 +418,7 @@ impl OutputHandler for Daemon {
                         if (width, height, scale_factor)
                             != (wallpaper.width, wallpaper.height, wallpaper.scale_factor)
                         {
-                            wallpaper.resize(&mut self.pool, width, height, scale_factor);
+                            wallpaper.resize(&mut pool, width, height, scale_factor);
                         }
                         return;
                     }
@@ -420,8 +433,9 @@ impl OutputHandler for Daemon {
         _qh: &QueueHandle<Self>,
         output: wl_output::WlOutput,
     ) {
+        let (mut _pools, mut wallpapers) = lock_pool_and_wallpapers(&self.pool, &self.wallpapers);
         if let Some(output_info) = self.output_state.info(&output) {
-            self.wallpapers.retain(|w| w.output_id.0 != output_info.id);
+            wallpapers.retain(|w| w.output_id.0 != output_info.id);
         }
     }
 }
@@ -434,7 +448,8 @@ impl ShmHandler for Daemon {
 
 impl LayerShellHandler for Daemon {
     fn closed(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, layer: &LayerSurface) {
-        self.wallpapers.retain(|w| w.layer_surface != *layer)
+        let (mut _pools, mut wallpapers) = lock_pool_and_wallpapers(&self.pool, &self.wallpapers);
+        wallpapers.retain(|w| w.layer_surface != *layer)
     }
 
     fn configure(
@@ -445,7 +460,8 @@ impl LayerShellHandler for Daemon {
         configure: LayerSurfaceConfigure,
         _serial: u32,
     ) {
-        for wallpaper in self.wallpapers.iter_mut() {
+        let (mut pool, mut wallpapers) = lock_pool_and_wallpapers(&self.pool, &self.wallpapers);
+        for wallpaper in wallpapers.iter_mut() {
             if wallpaper.layer_surface == *layer {
                 let (width, height) = if configure.new_size.0 == 0 || configure.new_size.1 == 0 {
                     (256.try_into().unwrap(), 256.try_into().unwrap())
@@ -455,8 +471,8 @@ impl LayerShellHandler for Daemon {
                         NonZeroI32::new(configure.new_size.1 as i32).unwrap(),
                     )
                 };
-                wallpaper.resize(&mut self.pool, width, height, wallpaper.scale_factor);
-                wallpaper.draw(&mut self.pool);
+                wallpaper.resize(&mut pool, width, height, wallpaper.scale_factor);
+                wallpaper.draw(&mut pool);
                 return;
             }
         }
@@ -493,7 +509,25 @@ fn make_logger() {
     .expect("Failed to initialize logger. Cancelling...");
 }
 
-fn recv_socket_msg(daemon: &mut Daemon, stream: UnixStream) {
+pub fn lock_pool_and_wallpapers<'a>(
+    pool: &'a Arc<Mutex<SlotPool>>,
+    wallpapers: &'a Arc<Mutex<Vec<Wallpaper>>>,
+) -> (MutexGuard<'a, SlotPool>, MutexGuard<'a, Vec<Wallpaper>>) {
+    use std::sync::TryLockError;
+    loop {
+        match (pool.try_lock(), wallpapers.try_lock()) {
+            (Ok(pool), Ok(wallpapers)) => return (pool, wallpapers),
+            (Err(TryLockError::WouldBlock), Ok(_))
+            | (Ok(_), Err(TryLockError::WouldBlock))
+            | (Err(TryLockError::WouldBlock), Err(TryLockError::WouldBlock)) => {
+                std::thread::yield_now()
+            }
+            _ => panic!("failed to lock"),
+        }
+    }
+}
+
+fn recv_socket_msg(daemon: &mut Daemon, processor: &mut Processor, stream: UnixStream) {
     let request = Request::receive(&stream);
     let answer = match request {
         Ok(request) => match request {
@@ -509,11 +543,13 @@ fn recv_socket_msg(daemon: &mut Daemon, stream: UnixStream) {
                 Answer::Ok
             }
             Request::Query => Answer::Info(daemon.wallpapers_info()),
-            Request::Img((_transition, imgs)) => {
+            Request::Img((transition, imgs)) => {
+                let mut requests = Vec::new();
                 for img in imgs {
                     let ids = daemon.find_wallpapers_id_by_names(img.1);
-                    daemon.set_img_by_id(ids, &img.0.img, &img.0.path);
+                    requests.push((img.0, ids));
                 }
+                processor.transition(&daemon.pool, transition, requests, &daemon.wallpapers);
                 Answer::Ok
             }
         },
