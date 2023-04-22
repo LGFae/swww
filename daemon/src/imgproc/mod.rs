@@ -197,9 +197,9 @@ impl Imgproc {
         output_size: usize,
     ) {
         if let Some((Img { img, path }, anim)) = get_cached_bg(output_name) {
-            if output_size < img.len() {
+            if output_size != img.len() {
                 info!(
-                    "{output_name} monitor's buffer size ({output_size}) is smaller than cache's image ({})",
+                    "{output_name} monitor's buffer size ({output_size}) is different than cache's image ({})",
                     img.len(),
                 );
                 return;
@@ -270,8 +270,9 @@ impl Imgproc {
                     error!("failed to spawn 'cache importing' thread: {}", e);
                 }
             }
+        } else {
+            info!("did not find cached image for monitor '{}'", output_name);
         }
-        info!("did not find cached image for monitor '{}'", output_name);
     }
 }
 

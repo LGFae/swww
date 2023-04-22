@@ -529,7 +529,6 @@ impl LayerShellHandler for Daemon {
                 return;
             }
         }
-        // We don't care about layer surface resizes, we care about output resizes
     }
 }
 
@@ -550,7 +549,7 @@ impl ProvidesRegistryState for Daemon {
 
 fn make_logger() {
     let config = simplelog::ConfigBuilder::new()
-        .set_thread_level(LevelFilter::Info) //let me see where the processing is happening
+        .set_thread_level(LevelFilter::Error) //let me see where the processing is happening
         .set_thread_mode(ThreadLogMode::Both)
         .build();
 

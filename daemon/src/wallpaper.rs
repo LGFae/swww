@@ -140,6 +140,7 @@ impl Wallpaper {
             width.get() as u32 * scale_factor.get() as u32,
             height.get() as u32 * scale_factor.get() as u32,
         );
+        self.layer_surface.commit();
         self.img = BgImg::Color([0, 0, 0]);
     }
 
