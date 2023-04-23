@@ -1,14 +1,11 @@
 use log::{error, info};
 use smithay_client_toolkit::shm::slot::SlotPool;
 
-use std::{sync::Arc, sync::Mutex, thread, time::Duration};
+use std::{sync::Arc, sync::Mutex, thread};
 
 use utils::communication::{Animation, Answer, BgImg, Img};
 
-use crate::{
-    lock_pool_and_wallpapers,
-    wallpaper::{OutputId, Wallpaper},
-};
+use crate::wallpaper::Wallpaper;
 
 mod animations;
 mod sync_barrier;
@@ -35,12 +32,10 @@ impl Imgproc {
         &mut self,
         pool: &Arc<Mutex<SlotPool>>,
         transition: utils::communication::Transition,
-        requests: Vec<(Img, Vec<OutputId>)>,
-        wallpapers: &Arc<Mutex<Vec<Wallpaper>>>,
+        requests: Vec<(Img, Vec<Arc<Wallpaper>>)>,
     ) -> Answer {
         let mut answer = Answer::Ok;
-        for (Img { img, path }, outputs) in requests {
-            let wallpapers = Arc::clone(wallpapers);
+        for (Img { img, path }, mut wallpapers) in requests {
             let pool = Arc::clone(pool);
             let transition = transition.clone();
 
@@ -48,47 +43,23 @@ impl Imgproc {
                 .name("transition".to_string()) //Name our threads  for better log messages
                 .stack_size(TSTACK_SIZE) //the default of 2MB is way too overkill for this
                 .spawn(move || {
-                    let mut dimensions = None;
-                    {
-                        let (_pool, mut wallpapers) = lock_pool_and_wallpapers(&pool, &wallpapers);
-                        for wallpaper in wallpapers
-                            .iter_mut()
-                            .filter(|w| outputs.contains(&w.output_id))
-                        {
-                            wallpaper.chown();
-                            wallpaper.img = BgImg::Img(path.clone());
-                            wallpaper.in_transition = true;
-                            if dimensions.is_none() {
-                                dimensions = Some((
-                                    wallpaper.width.get() as u32
-                                        * wallpaper.scale_factor.get() as u32,
-                                    wallpaper.height.get() as u32
-                                        * wallpaper.scale_factor.get() as u32,
-                                ));
-                            }
-                        }
+                    if wallpapers.is_empty() {
+                        return;
                     }
-
-                    if let Some(dimensions) = dimensions {
-                        if img.len() == dimensions.0 as usize * dimensions.1 as usize * 4 {
-                            animations::Transition::new(&wallpapers, dimensions, transition, &pool)
-                                .execute(&img);
-                        } else {
-                            error!(
-                                "image is of wrong size! Image len: {}, expected size: {}",
-                                img.len(),
-                                dimensions.0 as usize * dimensions.1 as usize * 4
-                            );
-                        }
+                    for w in wallpapers.iter_mut() {
+                        w.set_img_info(BgImg::Img(path.clone()));
                     }
+                    let dimensions = wallpapers[0].get_dimensions();
 
-                    {
-                        let (_pool, mut wallpapers) = lock_pool_and_wallpapers(&pool, &wallpapers);
-                        for wallpaper in wallpapers.iter_mut().filter(|w| {
-                            outputs.contains(&w.output_id) || w.is_owned_by(thread::current().id())
-                        }) {
-                            wallpaper.in_transition = false;
-                        }
+                    if img.len() == dimensions.0 as usize * dimensions.1 as usize * 4 {
+                        animations::Transition::new(wallpapers, dimensions, transition, pool)
+                            .execute(&img);
+                    } else {
+                        error!(
+                            "image is of wrong size! Image len: {}, expected size: {}",
+                            img.len(),
+                            dimensions.0 as usize * dimensions.1 as usize * 4
+                        );
                     }
                 })
             {
@@ -103,12 +74,10 @@ impl Imgproc {
         &mut self,
         pool: &Arc<Mutex<SlotPool>>,
         animation: utils::communication::Animation,
-        outputs: Vec<OutputId>,
-        wallpapers: &Arc<Mutex<Vec<Wallpaper>>>,
+        mut wallpapers: Vec<Arc<Wallpaper>>,
     ) -> Answer {
         let mut answer = Answer::Ok;
 
-        let wallpapers = Arc::clone(wallpapers);
         let pool = Arc::clone(pool);
         let barrier = Arc::clone(&self.sync_barrier);
         if let Err(e) = thread::Builder::new()
@@ -116,32 +85,15 @@ impl Imgproc {
             .stack_size(TSTACK_SIZE) //the default of 2MB is way too overkill for this
             .spawn(move || {
                 /* We only need to animate if we have > 1 frame */
-                if animation.animation.len() == 1 || outputs.is_empty() {
+                if animation.animation.len() == 1 || wallpapers.is_empty() {
                     return;
                 }
 
-                loop {
-                    {
-                        let (_pool, wallpapers) = lock_pool_and_wallpapers(&pool, &wallpapers);
-                        if wallpapers
-                            .iter()
-                            .filter(|w| outputs.contains(&w.output_id))
-                            .all(|w| !w.in_transition)
-                        {
-                            break;
-                        }
-                    }
-                    std::thread::sleep(Duration::from_micros(100));
+                for wallpaper in &wallpapers {
+                    wallpaper.wait_for_animation();
+                    wallpaper.begin_animation();
                 }
-                {
-                    let (_pool, mut wallpapers) = lock_pool_and_wallpapers(&pool, &wallpapers);
-                    for wallpaper in wallpapers
-                        .iter_mut()
-                        .filter(|w| outputs.contains(&w.output_id))
-                    {
-                        wallpaper.chown();
-                    }
-                }
+
                 let mut now = std::time::Instant::now();
 
                 for (frame, duration) in animation.animation.iter().cycle() {
@@ -149,32 +101,23 @@ impl Imgproc {
                         barrier.inc_and_wait(*duration);
                     }
 
-                    let mut done = true;
-                    {
-                        let (mut pool, mut wallpapers) =
-                            lock_pool_and_wallpapers(&pool, &wallpapers);
-                        for wallpaper in wallpapers.iter_mut().filter(|w| {
-                            outputs.contains(&w.output_id)
-                                && w.is_owned_by(std::thread::current().id())
-                        }) {
-                            done = false;
-                            let mut i = 0;
-                            while wallpaper.slot.has_active_buffers() && i < 100 {
-                                i += 1;
-                                std::thread::sleep(Duration::from_micros(100));
-                            }
-                            if let Some(canvas) = wallpaper.slot.canvas(&mut pool) {
-                                frame.ready(canvas.len()).unpack(canvas);
-                                wallpaper.draw(&mut pool);
-                            }
-                        }
-                    }
-                    if done {
-                        return;
+                    for wallpaper in wallpapers.iter_mut() {
+                        let mut pool = wallpaper.lock_pool_to_get_canvas(&pool);
+                        let canvas = wallpaper.get_canvas(&mut pool);
+                        frame.ready(canvas.len()).unpack(canvas);
+                        wallpaper.draw(&mut pool);
                     }
 
+                    wallpapers.retain(|w| {
+                        if w.animation_should_stop() {
+                            w.end_animation();
+                            false
+                        } else {
+                            true
+                        }
+                    });
                     let timeout = duration.saturating_sub(now.elapsed());
-                    std::thread::sleep(timeout);
+                    thread::sleep(timeout);
                     nix::sys::signal::kill(nix::unistd::Pid::this(), nix::sys::signal::SIGUSR1)
                         .unwrap();
                     now = std::time::Instant::now();
@@ -191,8 +134,7 @@ impl Imgproc {
     pub fn import_cached_img(
         &mut self,
         pool: &Arc<Mutex<SlotPool>>,
-        wallpapers: &Arc<Mutex<Vec<Wallpaper>>>,
-        output: OutputId,
+        wallpaper: &Arc<Wallpaper>,
         output_name: &str,
         output_size: usize,
     ) {
@@ -206,64 +148,37 @@ impl Imgproc {
             }
 
             let pool = Arc::clone(pool);
-            let wallpapers = Arc::clone(wallpapers);
+            let wallpaper = Arc::clone(wallpaper);
             if let Err(e) = thread::Builder::new()
                 .name("cache importing".to_string()) //Name our threads  for better log messages
                 .stack_size(TSTACK_SIZE) //the default of 2MB is way too overkill for this
                 .spawn(move || {
-                    {
-                        let (mut pool, mut wallpapers) =
-                            lock_pool_and_wallpapers(&pool, &wallpapers);
-                        if let Some(w) = wallpapers.iter_mut().find(|w| w.output_id == output) {
-                            let mut i = 0;
-                            while w.slot.has_active_buffers() && i < 100 {
-                                i += 1;
-                                std::thread::sleep(Duration::from_micros(100));
-                            }
-                            w.img = BgImg::Img(path);
-                            w.set_img(&mut pool, &img);
-                            w.draw(&mut pool);
-                        }
+                    if wallpaper.is_loading_cache() {
+                        return;
                     }
-
+                    wallpaper.start_cache_load();
+                    wallpaper.set_img(&pool, &img, BgImg::Img(path));
+                    wallpaper.end_cache_load();
                     if let Some(anim) = anim {
-                        if anim.animation.len() == 1 {
+                        if anim.animation.len() <= 1 {
                             return;
                         }
-                        {
-                            let (_p, mut wallpapers) = lock_pool_and_wallpapers(&pool, &wallpapers);
-                            if let Some(w) = wallpapers.iter_mut().find(|w| w.output_id == output) {
-                                w.chown();
-                            } else {
-                                return;
-                            }
-                        }
-                        let thread_id = thread::current().id();
+                        wallpaper.begin_animation();
                         let mut now = std::time::Instant::now();
                         for (frame, duration) in anim.animation.iter().cycle() {
                             {
-                                let (mut pool, mut wallpapers) =
-                                    lock_pool_and_wallpapers(&pool, &wallpapers);
-                                if let Some(w) = wallpapers
-                                    .iter_mut()
-                                    .find(|w| w.output_id == output && w.is_owned_by(thread_id))
-                                {
-                                    let mut i = 0;
-                                    while w.slot.has_active_buffers() && i < 100 {
-                                        i += 1;
-                                        std::thread::sleep(Duration::from_micros(100));
-                                    }
-                                    if let Some(canvas) = w.slot.canvas(&mut pool) {
-                                        frame.ready(canvas.len()).unpack(canvas);
-                                        w.draw(&mut pool);
-                                    }
-                                } else {
-                                    return;
-                                }
+                                let mut pool = wallpaper.lock_pool_to_get_canvas(&pool);
+                                let canvas = wallpaper.get_canvas(&mut pool);
+                                frame.ready(canvas.len()).unpack(canvas);
+                                wallpaper.draw(&mut pool);
                             }
 
+                            if wallpaper.animation_should_stop() {
+                                wallpaper.end_animation();
+                                return;
+                            }
                             let timeout = duration.saturating_sub(now.elapsed());
-                            std::thread::sleep(timeout);
+                            thread::sleep(timeout);
                             nix::sys::signal::kill(
                                 nix::unistd::Pid::this(),
                                 nix::sys::signal::SIGUSR1,

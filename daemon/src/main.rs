@@ -10,7 +10,7 @@ use nix::{
     sys::signal::{self, SigHandler, Signal},
 };
 use simplelog::{ColorChoice, TermLogger, TerminalMode, ThreadLogMode};
-use wallpaper::{OutputId, Wallpaper};
+use wallpaper::Wallpaper;
 
 use std::{
     fs,
@@ -19,7 +19,7 @@ use std::{
         fd::{AsRawFd, RawFd},
         unix::net::{UnixListener, UnixStream},
     },
-    sync::{Arc, Mutex, MutexGuard, RwLock},
+    sync::{Arc, Mutex, RwLock},
 };
 
 use smithay_client_toolkit::{
@@ -41,7 +41,7 @@ use wayland_client::{
     Connection, QueueHandle,
 };
 
-use utils::communication::{get_socket_path, Answer, BgImg, BgInfo, Request};
+use utils::communication::{get_socket_path, Answer, BgInfo, Request};
 
 use imgproc::Imgproc;
 
@@ -114,6 +114,9 @@ fn main() -> DaemonResult<()> {
             event_queue
                 .dispatch_pending(&mut daemon)
                 .expect("failed to dispatch events");
+            for w in &daemon.wallpapers {
+                w.notify_condvar();
+            }
         }
 
         if poll_handler.has_event(PollHandler::SOCKET_FD) {
@@ -226,7 +229,7 @@ struct Daemon {
     pool: Arc<Mutex<SlotPool>>,
 
     // swww stuff
-    wallpapers: Arc<Mutex<Vec<Wallpaper>>>,
+    wallpapers: Vec<Arc<Wallpaper>>,
     imgproc: Imgproc,
 }
 
@@ -252,7 +255,7 @@ impl Daemon {
             pool: Arc::new(Mutex::new(pool)),
             layer_shell,
 
-            wallpapers: Arc::new(Mutex::new(Vec::new())),
+            wallpapers: Vec::new(),
             imgproc: Imgproc::new(),
         }
     }
@@ -264,16 +267,16 @@ impl Daemon {
                 Request::Animation(animations) => {
                     let mut result = Answer::Ok;
                     for animation in animations {
-                        let ids = self.find_wallpapers_id_by_names(animation.1);
-                        result =
-                            self.imgproc
-                                .animate(&self.pool, animation.0, ids, &self.wallpapers);
+                        let wallpapers = self.find_wallpapers_by_names(animation.1);
+                        result = self.imgproc.animate(&self.pool, animation.0, wallpapers);
                     }
                     result
                 }
                 Request::Clear(clear) => {
-                    let ids = self.find_wallpapers_id_by_names(clear.outputs);
-                    self.clear_by_id(ids, clear.color);
+                    for wallpaper in self.find_wallpapers_by_names(clear.outputs).iter_mut() {
+                        wallpaper.set_end_animation_flag();
+                        wallpaper.clear(&self.pool, clear.color)
+                    }
                     Answer::Ok
                 }
                 Request::Init => Answer::Ok,
@@ -285,11 +288,13 @@ impl Daemon {
                 Request::Img((transition, imgs)) => {
                     let mut requests = Vec::new();
                     for img in imgs {
-                        let ids = self.find_wallpapers_id_by_names(img.1);
-                        requests.push((img.0, ids));
+                        let mut wallpapers = self.find_wallpapers_by_names(img.1);
+                        for wallpaper in wallpapers.iter_mut() {
+                            wallpaper.set_end_animation_flag();
+                        }
+                        requests.push((img.0, wallpapers));
                     }
-                    self.imgproc
-                        .transition(&self.pool, transition, requests, &self.wallpapers);
+                    self.imgproc.transition(&self.pool, transition, requests);
                     Answer::Ok
                 }
             },
@@ -301,12 +306,11 @@ impl Daemon {
     }
 
     fn wallpapers_info(&self) -> Vec<BgInfo> {
-        let (_pool, wallpapers) = lock_pool_and_wallpapers(&self.pool, &self.wallpapers);
         self.output_state
             .outputs()
             .filter_map(|output| {
                 if let Some(info) = self.output_state.info(&output) {
-                    if let Some(wallpaper) = wallpapers.iter().find(|w| w.output_id.0 == info.id) {
+                    if let Some(wallpaper) = self.wallpapers.iter().find(|w| w.has_id(info.id)) {
                         return Some(BgInfo {
                             name: info.name.unwrap_or("?".to_string()),
                             dim: info
@@ -314,7 +318,7 @@ impl Daemon {
                                 .map(|(width, height)| (width as u32, height as u32))
                                 .unwrap_or((0, 0)),
                             scale_factor: info.scale_factor,
-                            img: wallpaper.img.clone(),
+                            img: wallpaper.get_img_info(),
                         });
                     }
                 }
@@ -323,31 +327,24 @@ impl Daemon {
             .collect()
     }
 
-    fn find_wallpapers_id_by_names(&self, names: Vec<String>) -> Vec<OutputId> {
+    fn find_wallpapers_by_names(&self, names: Vec<String>) -> Vec<Arc<Wallpaper>> {
         self.output_state
             .outputs()
             .filter_map(|output| {
                 if let Some(info) = self.output_state.info(&output) {
                     if let Some(name) = info.name {
                         if names.is_empty() || names.contains(&name) {
-                            return Some(OutputId(info.id));
+                            if let Some(wallpaper) =
+                                self.wallpapers.iter().find(|w| w.has_id(info.id))
+                            {
+                                return Some(Arc::clone(wallpaper));
+                            }
                         }
                     }
                 }
                 None
             })
             .collect()
-    }
-
-    fn clear_by_id(&mut self, ids: Vec<OutputId>, color: [u8; 3]) {
-        let (mut pool, mut wallpapers) = lock_pool_and_wallpapers(&self.pool, &self.wallpapers);
-        for wallpaper in wallpapers.iter_mut() {
-            if ids.contains(&wallpaper.output_id) {
-                wallpaper.img = BgImg::Color(color);
-                wallpaper.clear(&mut pool, color);
-                wallpaper.draw(&mut pool);
-            }
-        }
     }
 }
 
@@ -359,16 +356,15 @@ impl CompositorHandler for Daemon {
         surface: &wl_surface::WlSurface,
         new_factor: i32,
     ) {
-        let (mut pool, mut wallpapers) = lock_pool_and_wallpapers(&self.pool, &self.wallpapers);
-        for wallpaper in wallpapers.iter_mut() {
-            if wallpaper.layer_surface.wl_surface() == surface {
+        for wallpaper in self.wallpapers.iter_mut() {
+            if wallpaper.has_surface(surface) {
+                let mut pool = wallpaper.lock_pool_to_get_canvas(&self.pool);
                 wallpaper.resize(
                     &mut pool,
-                    wallpaper.width,
-                    wallpaper.height,
-                    NonZeroI32::new(new_factor).unwrap(),
+                    None,
+                    None,
+                    Some(NonZeroI32::new(new_factor).unwrap()),
                 );
-                //wallpaper.draw(&mut pool);
                 return;
             }
         }
@@ -381,9 +377,9 @@ impl CompositorHandler for Daemon {
         surface: &wl_surface::WlSurface,
         _time: u32,
     ) {
-        let (mut pool, mut wallpapers) = lock_pool_and_wallpapers(&self.pool, &self.wallpapers);
-        for wallpaper in wallpapers.iter_mut() {
-            if wallpaper.layer_surface.wl_surface() == surface {
+        for wallpaper in self.wallpapers.iter_mut() {
+            if wallpaper.has_surface(surface) {
+                let mut pool = wallpaper.lock_pool_to_get_canvas(&self.pool);
                 wallpaper.draw(&mut pool);
                 return;
             }
@@ -419,11 +415,11 @@ impl OutputHandler for Daemon {
                 Some(&output),
             );
 
-            {
-                let (mut pool, mut wallpapers) =
-                    lock_pool_and_wallpapers(&self.pool, &self.wallpapers);
-                wallpapers.push(Wallpaper::new(output_info, layer_surface, &mut pool));
-            }
+            self.wallpapers.push(Arc::new(Wallpaper::new(
+                output_info,
+                layer_surface,
+                &self.pool,
+            )));
         }
     }
 
@@ -442,20 +438,15 @@ impl OutputHandler for Daemon {
                     );
                     return;
                 }
-                let (mut pool, mut wallpapers) =
-                    lock_pool_and_wallpapers(&self.pool, &self.wallpapers);
-                for wallpaper in wallpapers.iter_mut() {
-                    if wallpaper.output_id.0 == output_info.id {
+                for wallpaper in self.wallpapers.iter_mut() {
+                    if wallpaper.has_id(output_info.id) {
                         let (width, height) = (
-                            NonZeroI32::new(output_size.0).unwrap(),
-                            NonZeroI32::new(output_size.1).unwrap(),
+                            Some(NonZeroI32::new(output_size.0).unwrap()),
+                            Some(NonZeroI32::new(output_size.1).unwrap()),
                         );
-                        let scale_factor = NonZeroI32::new(output_info.scale_factor).unwrap();
-                        if (width, height, scale_factor)
-                            != (wallpaper.width, wallpaper.height, wallpaper.scale_factor)
-                        {
-                            wallpaper.resize(&mut pool, width, height, scale_factor);
-                        }
+                        let scale_factor = Some(NonZeroI32::new(output_info.scale_factor).unwrap());
+                        let mut pool = wallpaper.lock_pool_to_get_canvas(&self.pool);
+                        wallpaper.resize(&mut pool, width, height, scale_factor);
                         return;
                     }
                 }
@@ -470,9 +461,7 @@ impl OutputHandler for Daemon {
         output: wl_output::WlOutput,
     ) {
         if let Some(output_info) = self.output_state.info(&output) {
-            let (mut _pools, mut wallpapers) =
-                lock_pool_and_wallpapers(&self.pool, &self.wallpapers);
-            wallpapers.retain(|w| w.output_id.0 != output_info.id);
+            self.wallpapers.retain(|w| !w.has_id(output_info.id));
         }
     }
 }
@@ -485,8 +474,8 @@ impl ShmHandler for Daemon {
 
 impl LayerShellHandler for Daemon {
     fn closed(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, layer: &LayerSurface) {
-        let (mut _pools, mut wallpapers) = lock_pool_and_wallpapers(&self.pool, &self.wallpapers);
-        wallpapers.retain(|w| w.layer_surface != *layer)
+        self.wallpapers
+            .retain(|w| !w.has_surface(layer.wl_surface()));
     }
 
     fn configure(
@@ -498,30 +487,24 @@ impl LayerShellHandler for Daemon {
         _serial: u32,
     ) {
         // After configuring, we try to import the cache
-        let (pool, mut wallpapers) = lock_pool_and_wallpapers(&self.pool, &self.wallpapers);
-        for wallpaper in wallpapers.iter_mut() {
-            if wallpaper.layer_surface == *layer {
+        for wallpaper in self.wallpapers.iter_mut() {
+            if wallpaper.has_surface(layer.wl_surface()) {
                 if let Some(output_info) = self.output_state.outputs().find_map(|o| {
                     if let Some(info) = self.output_state.info(&o) {
-                        if info.id == wallpaper.output_id.0 {
+                        if wallpaper.has_id(info.id) {
                             return Some(info);
                         }
                     }
                     None
                 }) {
-                    let id = OutputId(output_info.id);
                     let output_name = output_info.name.clone().unwrap_or("?".to_string());
                     let logical_size = output_info
                         .logical_size
                         .map(|(width, height)| (width as usize, height as usize))
                         .unwrap_or((0, 0));
-
-                    drop(pool);
-                    drop(wallpapers);
                     self.imgproc.import_cached_img(
                         &self.pool,
-                        &self.wallpapers,
-                        id,
+                        wallpaper,
                         &output_name,
                         logical_size.0 * logical_size.1 * 4,
                     );
@@ -549,7 +532,7 @@ impl ProvidesRegistryState for Daemon {
 
 fn make_logger() {
     let config = simplelog::ConfigBuilder::new()
-        .set_thread_level(LevelFilter::Error) //let me see where the processing is happening
+        .set_thread_level(LevelFilter::Error) // let me see where the processing is happening
         .set_thread_mode(ThreadLogMode::Both)
         .build();
 
@@ -560,22 +543,4 @@ fn make_logger() {
         ColorChoice::AlwaysAnsi,
     )
     .expect("Failed to initialize logger. Cancelling...");
-}
-
-pub fn lock_pool_and_wallpapers<'a>(
-    pool: &'a Arc<Mutex<SlotPool>>,
-    wallpapers: &'a Arc<Mutex<Vec<Wallpaper>>>,
-) -> (MutexGuard<'a, SlotPool>, MutexGuard<'a, Vec<Wallpaper>>) {
-    use std::sync::TryLockError;
-    loop {
-        match (pool.try_lock(), wallpapers.try_lock()) {
-            (Ok(pool), Ok(wallpapers)) => return (pool, wallpapers),
-            (Err(TryLockError::WouldBlock), Ok(_))
-            | (Ok(_), Err(TryLockError::WouldBlock))
-            | (Err(TryLockError::WouldBlock), Err(TryLockError::WouldBlock)) => {
-                std::thread::yield_now()
-            }
-            _ => panic!("failed to lock"),
-        }
-    }
 }

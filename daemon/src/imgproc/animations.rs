@@ -1,6 +1,5 @@
 use std::{
     sync::{Arc, Mutex},
-    thread::ThreadId,
     time::{Duration, Instant},
 };
 
@@ -8,52 +7,11 @@ use log::debug;
 use smithay_client_toolkit::shm::slot::SlotPool;
 use utils::communication::{Position, TransitionType};
 
-use crate::{lock_pool_and_wallpapers, wallpaper::Wallpaper};
+use crate::wallpaper::Wallpaper;
 
 use keyframe::{
     functions::BezierCurve, keyframes, mint::Vector2, num_traits::Pow, AnimationSequence,
 };
-
-macro_rules! wallpaper_canvas {
-    ($wallpaper:ident, $pool:ident, $new_img:ident) => {{
-        let mut i = 0;
-        while $wallpaper.slot.has_active_buffers() && i < 100 {
-            i += 1;
-            std::thread::sleep(Duration::from_micros(100));
-        }
-        match $wallpaper.slot.canvas(&mut $pool) {
-            Some(canvas) => {
-                if canvas.len() == $new_img.len() {
-                    canvas
-                } else {
-                    continue;
-                }
-            }
-            None => continue,
-        }
-    }};
-}
-
-macro_rules! owned_wallpapers {
-    ($transition:ident, $wallpapers:ident) => {
-        $wallpapers
-            .iter_mut()
-            .filter(|w| w.is_owned_by($transition.thread_id))
-    };
-}
-
-macro_rules! draw_wallpapers {
-    ($transition:ident, $now:ident) => {{
-        let (mut pool, mut wallpapers) =
-            lock_pool_and_wallpapers(&$transition.pool, &$transition.wallpapers);
-        for wallpaper in owned_wallpapers!($transition, wallpapers) {
-            wallpaper.draw(&mut pool);
-        }
-    }
-    let timeout = $transition.fps.saturating_sub($now.elapsed());
-    std::thread::sleep(timeout);
-    nix::sys::signal::kill(nix::unistd::Pid::this(), nix::sys::signal::SIGUSR1).unwrap();};
-}
 
 macro_rules! change_cols {
     ($step:ident, $old:ident, $new:ident, $done:ident) => {
@@ -84,7 +42,7 @@ macro_rules! change_cols {
 }
 
 pub struct Transition {
-    wallpapers: Arc<Mutex<Vec<Wallpaper>>>,
+    wallpapers: Vec<Arc<Wallpaper>>,
     pool: Arc<Mutex<SlotPool>>,
     dimensions: (u32, u32),
     transition_type: TransitionType,
@@ -96,21 +54,19 @@ pub struct Transition {
     bezier: BezierCurve,
     wave: (f32, f32),
     invert_y: bool,
-    thread_id: ThreadId,
 }
 
 /// All transitions return whether or not they completed
 impl Transition {
     pub fn new(
-        wallpapers: &Arc<Mutex<Vec<Wallpaper>>>,
+        wallpapers: Vec<Arc<Wallpaper>>,
         dimensions: (u32, u32),
         transition: utils::communication::Transition,
-        pool: &Arc<Mutex<SlotPool>>,
+        pool: Arc<Mutex<SlotPool>>,
     ) -> Self {
-        let thread_id = std::thread::current().id();
         Transition {
-            wallpapers: Arc::clone(wallpapers),
-            pool: Arc::clone(pool),
+            wallpapers,
+            pool,
             dimensions,
             transition_type: transition.transition_type,
             duration: transition.duration,
@@ -130,11 +86,14 @@ impl Transition {
             ),
             wave: transition.wave,
             invert_y: transition.invert_y,
-            thread_id,
         }
     }
 
-    pub fn execute(self, new_img: &[u8]) {
+    pub fn execute(mut self, new_img: &[u8]) {
+        for wallpaper in self.wallpapers.iter_mut() {
+            wallpaper.begin_animation();
+        }
+
         debug!("Starting transition");
         match self.transition_type {
             TransitionType::Simple => self.simple(new_img),
@@ -144,7 +103,27 @@ impl Transition {
             TransitionType::Wave => self.wave(new_img),
             TransitionType::Fade => self.fade(new_img),
         };
-        debug!("Transition finished")
+        debug!("Transition finished");
+
+        for wallpaper in self.wallpapers.iter_mut() {
+            wallpaper.end_animation();
+        }
+    }
+
+    fn send_frame(&mut self, now: &mut Instant) {
+        let fps = self.fps;
+        self.wallpapers.retain(|w| {
+            if w.animation_should_stop() {
+                w.end_animation();
+                false
+            } else {
+                true
+            }
+        });
+        let timeout = fps.saturating_sub(now.elapsed());
+        std::thread::sleep(timeout);
+        nix::sys::signal::kill(nix::unistd::Pid::this(), nix::sys::signal::SIGUSR1).unwrap();
+        *now = Instant::now();
     }
 
     fn bezier_seq(&self, start: f32, end: f32) -> (AnimationSequence<f32>, Instant) {
@@ -154,51 +133,41 @@ impl Transition {
         )
     }
 
-    fn simple(self, new_img: &[u8]) {
+    fn simple(&mut self, new_img: &[u8]) {
         let step = self.step;
         let mut now = Instant::now();
         let mut done = false;
         while !done {
             done = true;
-            {
-                let (mut pool, mut wallpapers) =
-                    lock_pool_and_wallpapers(&self.pool, &self.wallpapers);
-                for wallpaper in owned_wallpapers!(self, wallpapers) {
-                    let canvas = wallpaper_canvas!(wallpaper, pool, new_img);
-                    for (old, new) in canvas.chunks_exact_mut(4).zip(new_img.chunks_exact(4)) {
-                        change_cols!(step, old, new, done);
-                    }
+            for wallpaper in self.wallpapers.iter_mut() {
+                let mut pool = wallpaper.lock_pool_to_get_canvas(&self.pool);
+                let canvas = wallpaper.get_canvas(&mut pool);
+                for (old, new) in canvas.chunks_exact_mut(4).zip(new_img.chunks_exact(4)) {
+                    change_cols!(step, old, new, done);
                 }
+                wallpaper.draw(&mut pool);
             }
-
-            draw_wallpapers!(self, now);
-            now = Instant::now();
+            self.send_frame(&mut now);
         }
     }
 
-    fn fade(mut self, new_img: &[u8]) {
+    fn fade(&mut self, new_img: &[u8]) {
         let mut step = 0.0;
         let (mut seq, start) = self.bezier_seq(0.0, 1.0);
 
         let mut now = Instant::now();
         while start.elapsed().as_secs_f64() < seq.duration() {
-            {
-                let (mut pool, mut wallpapers) =
-                    lock_pool_and_wallpapers(&self.pool, &self.wallpapers);
-                for wallpaper in owned_wallpapers!(self, wallpapers) {
-                    let canvas = wallpaper_canvas!(wallpaper, pool, new_img);
-                    for (old_pix, new_pix) in
-                        canvas.chunks_exact_mut(4).zip(new_img.chunks_exact(4))
-                    {
-                        for (old_col, new_col) in old_pix.iter_mut().zip(new_pix) {
-                            *old_col =
-                                (*old_col as f64 * (1.0 - step) + *new_col as f64 * step) as u8;
-                        }
+            for wallpaper in self.wallpapers.iter_mut() {
+                let mut pool = wallpaper.lock_pool_to_get_canvas(&self.pool);
+                let canvas = wallpaper.get_canvas(&mut pool);
+                for (old_pix, new_pix) in canvas.chunks_exact_mut(4).zip(new_img.chunks_exact(4)) {
+                    for (old_col, new_col) in old_pix.iter_mut().zip(new_pix) {
+                        *old_col = (*old_col as f64 * (1.0 - step) + *new_col as f64 * step) as u8;
                     }
                 }
+                wallpaper.draw(&mut pool);
             }
-            draw_wallpapers!(self, now);
-            now = Instant::now();
+            self.send_frame(&mut now);
             step = seq.now() as f64;
             seq.advance_to(start.elapsed().as_secs_f64());
         }
@@ -206,7 +175,7 @@ impl Transition {
         self.simple(new_img)
     }
 
-    fn wave(mut self, new_img: &[u8]) {
+    fn wave(&mut self, new_img: &[u8]) {
         let width = self.dimensions.0;
         let height = self.dimensions.1;
         let mut now = Instant::now();
@@ -252,28 +221,25 @@ impl Transition {
         let step = self.step;
 
         while start.elapsed().as_secs_f64() < seq.duration() {
-            {
-                let (mut pool, mut wallpapers) =
-                    lock_pool_and_wallpapers(&self.pool, &self.wallpapers);
-                for wallpaper in owned_wallpapers!(self, wallpapers) {
-                    let canvas = wallpaper_canvas!(wallpaper, pool, new_img);
-                    for (i, (old, new)) in canvas
-                        .chunks_exact_mut(4)
-                        .zip(new_img.chunks_exact(4))
-                        .enumerate()
-                    {
-                        let width = width as usize;
-                        let height = height as usize;
-                        let pix_x = i % width;
-                        let pix_y = height - i / width;
-                        if is_low(pix_x as f64, pix_y as f64, offset) {
-                            change_cols!(step, old, new);
-                        }
+            for wallpaper in self.wallpapers.iter_mut() {
+                let mut pool = wallpaper.lock_pool_to_get_canvas(&self.pool);
+                let canvas = wallpaper.get_canvas(&mut pool);
+                for (i, (old, new)) in canvas
+                    .chunks_exact_mut(4)
+                    .zip(new_img.chunks_exact(4))
+                    .enumerate()
+                {
+                    let width = width as usize;
+                    let height = height as usize;
+                    let pix_x = i % width;
+                    let pix_y = height - i / width;
+                    if is_low(pix_x as f64, pix_y as f64, offset) {
+                        change_cols!(step, old, new);
                     }
                 }
+                wallpaper.draw(&mut pool);
             }
-            draw_wallpapers!(self, now);
-            now = Instant::now();
+            self.send_frame(&mut now);
 
             offset = seq.now() as f64;
             seq.advance_to(start.elapsed().as_secs_f64());
@@ -282,7 +248,7 @@ impl Transition {
         self.simple(new_img)
     }
 
-    fn wipe(mut self, new_img: &[u8]) {
+    fn wipe(&mut self, new_img: &[u8]) {
         let width = self.dimensions.0;
         let height = self.dimensions.1;
         let mut now = Instant::now();
@@ -317,28 +283,25 @@ impl Transition {
         let step = self.step;
 
         while start.elapsed().as_secs_f64() < seq.duration() {
-            {
-                let (mut pool, mut wallpapers) =
-                    lock_pool_and_wallpapers(&self.pool, &self.wallpapers);
-                for wallpaper in owned_wallpapers!(self, wallpapers) {
-                    let canvas = wallpaper_canvas!(wallpaper, pool, new_img);
-                    for (i, (old, new)) in canvas
-                        .chunks_exact_mut(4)
-                        .zip(new_img.chunks_exact(4))
-                        .enumerate()
-                    {
-                        let width = width as usize;
-                        let height = height as usize;
-                        let pix_x = i % width;
-                        let pix_y = height - i / width;
-                        if is_low(pix_x as f64, pix_y as f64, offset, circle_radius) {
-                            change_cols!(step, old, new);
-                        }
+            for wallpaper in self.wallpapers.iter_mut() {
+                let mut pool = wallpaper.lock_pool_to_get_canvas(&self.pool);
+                let canvas = wallpaper.get_canvas(&mut pool);
+                for (i, (old, new)) in canvas
+                    .chunks_exact_mut(4)
+                    .zip(new_img.chunks_exact(4))
+                    .enumerate()
+                {
+                    let width = width as usize;
+                    let height = height as usize;
+                    let pix_x = i % width;
+                    let pix_y = height - i / width;
+                    if is_low(pix_x as f64, pix_y as f64, offset, circle_radius) {
+                        change_cols!(step, old, new);
                     }
                 }
+                wallpaper.draw(&mut pool);
             }
-            draw_wallpapers!(self, now);
-            now = Instant::now();
+            self.send_frame(&mut now);
 
             offset = seq.now() as f64;
             seq.advance_to(start.elapsed().as_secs_f64());
@@ -347,7 +310,7 @@ impl Transition {
         self.simple(new_img)
     }
 
-    fn grow(mut self, new_img: &[u8]) {
+    fn grow(&mut self, new_img: &[u8]) {
         let (width, height) = (self.dimensions.0 as f32, self.dimensions.1 as f32);
         let (center_x, center_y) = self.pos.to_pixel(self.dimensions, self.invert_y);
         let mut dist_center: f32 = 0.0;
@@ -367,33 +330,31 @@ impl Transition {
         let (mut seq, start) = self.bezier_seq(0.0, dist_end);
 
         while start.elapsed().as_secs_f64() < seq.duration() {
-            {
-                let (mut pool, mut wallpapers) =
-                    lock_pool_and_wallpapers(&self.pool, &self.wallpapers);
-                for wallpaper in owned_wallpapers!(self, wallpapers) {
-                    let canvas = wallpaper_canvas!(wallpaper, pool, new_img);
-                    for (i, (old, new)) in canvas
-                        .chunks_exact_mut(4)
-                        .zip(new_img.chunks_exact(4))
-                        .enumerate()
-                    {
-                        let (width, height) = (width as usize, height as usize);
-                        let pix_x = i % width;
-                        let pix_y = height - i / width;
-                        let diff_x = pix_x.abs_diff(center_x as usize) as f32;
-                        let diff_y = pix_y.abs_diff(center_y as usize) as f32;
-                        let pix_center_dist = f32::sqrt(diff_x.pow(2) + diff_y.pow(2));
-                        if pix_center_dist <= dist_center {
-                            let step = self
-                                .step
-                                .saturating_add((dist_center - pix_center_dist).log2() as u8);
-                            change_cols!(step, old, new);
-                        }
+            for wallpaper in self.wallpapers.iter_mut() {
+                let mut pool = wallpaper.lock_pool_to_get_canvas(&self.pool);
+                let canvas = wallpaper.get_canvas(&mut pool);
+                for (i, (old, new)) in canvas
+                    .chunks_exact_mut(4)
+                    .zip(new_img.chunks_exact(4))
+                    .enumerate()
+                {
+                    let (width, height) = (width as usize, height as usize);
+                    let pix_x = i % width;
+                    let pix_y = height - i / width;
+                    let diff_x = pix_x.abs_diff(center_x as usize) as f32;
+                    let diff_y = pix_y.abs_diff(center_y as usize) as f32;
+                    let pix_center_dist = f32::sqrt(diff_x.pow(2) + diff_y.pow(2));
+                    if pix_center_dist <= dist_center {
+                        let step = self
+                            .step
+                            .saturating_add((dist_center - pix_center_dist).log2() as u8);
+                        change_cols!(step, old, new);
                     }
                 }
+                wallpaper.draw(&mut pool);
             }
-            draw_wallpapers!(self, now);
-            now = Instant::now();
+            self.send_frame(&mut now);
+
             dist_center = seq.now();
             seq.advance_to(start.elapsed().as_secs_f64());
         }
@@ -401,7 +362,7 @@ impl Transition {
         self.simple(new_img)
     }
 
-    fn outer(mut self, new_img: &[u8]) {
+    fn outer(&mut self, new_img: &[u8]) {
         let (width, height) = (self.dimensions.0 as f32, self.dimensions.1 as f32);
         let (center_x, center_y) = self.pos.to_pixel(self.dimensions, self.invert_y);
         let mut dist_center = {
@@ -420,33 +381,30 @@ impl Transition {
         let (mut seq, start) = self.bezier_seq(dist_center, 0.0);
 
         while start.elapsed().as_secs_f64() < seq.duration() {
-            {
-                let (mut pool, mut wallpapers) =
-                    lock_pool_and_wallpapers(&self.pool, &self.wallpapers);
-                for wallpaper in owned_wallpapers!(self, wallpapers) {
-                    let canvas = wallpaper_canvas!(wallpaper, pool, new_img);
-                    for (i, (old, new)) in canvas
-                        .chunks_exact_mut(4)
-                        .zip(new_img.chunks_exact(4))
-                        .enumerate()
-                    {
-                        let (width, height) = (width as usize, height as usize);
-                        let pix_x = i % width;
-                        let pix_y = height - i / width;
-                        let diff_x = pix_x.abs_diff(center_x as usize) as f32;
-                        let diff_y = pix_y.abs_diff(center_y as usize) as f32;
-                        let pix_center_dist = f32::sqrt(diff_x.pow(2) + diff_y.pow(2));
-                        if pix_center_dist >= dist_center {
-                            let step = self
-                                .step
-                                .saturating_add((pix_center_dist - dist_center).log2() as u8);
-                            change_cols!(step, old, new);
-                        }
+            for wallpaper in self.wallpapers.iter_mut() {
+                let mut pool = wallpaper.lock_pool_to_get_canvas(&self.pool);
+                let canvas = wallpaper.get_canvas(&mut pool);
+                for (i, (old, new)) in canvas
+                    .chunks_exact_mut(4)
+                    .zip(new_img.chunks_exact(4))
+                    .enumerate()
+                {
+                    let (width, height) = (width as usize, height as usize);
+                    let pix_x = i % width;
+                    let pix_y = height - i / width;
+                    let diff_x = pix_x.abs_diff(center_x as usize) as f32;
+                    let diff_y = pix_y.abs_diff(center_y as usize) as f32;
+                    let pix_center_dist = f32::sqrt(diff_x.pow(2) + diff_y.pow(2));
+                    if pix_center_dist >= dist_center {
+                        let step = self
+                            .step
+                            .saturating_add((pix_center_dist - dist_center).log2() as u8);
+                        change_cols!(step, old, new);
                     }
                 }
+                wallpaper.draw(&mut pool);
             }
-            draw_wallpapers!(self, now);
-            now = Instant::now();
+            self.send_frame(&mut now);
 
             dist_center = seq.now();
             seq.advance_to(start.elapsed().as_secs_f64());
