@@ -37,7 +37,6 @@ struct WallpaperInner {
     layer_surface: LayerSurface,
 
     animation_state: AnimationState,
-    cache_loading: bool,
 }
 
 pub struct Wallpaper {
@@ -90,7 +89,6 @@ impl Wallpaper {
                 slot,
                 img: BgImg::Color([0, 0, 0]),
                 animation_state: AnimationState::Idle,
-                cache_loading: false,
             }),
             condvar: Condvar::new(),
         }
@@ -127,21 +125,6 @@ impl Wallpaper {
 
     pub fn get_img_info(&self) -> BgImg {
         self.inner.lock().unwrap().img.clone()
-    }
-
-    pub fn start_cache_load(&self) {
-        let mut lock = self.inner.lock().unwrap();
-        lock.cache_loading = true;
-    }
-
-    pub fn end_cache_load(&self) {
-        let mut lock = self.inner.lock().unwrap();
-        lock.cache_loading = false;
-    }
-
-    pub fn is_loading_cache(&self) -> bool {
-        let lock = self.inner.lock().unwrap();
-        lock.cache_loading
     }
 
     pub fn begin_animation(&self) {
@@ -184,13 +167,6 @@ impl Wallpaper {
             pixel[1] = color[1];
             pixel[0] = color[2];
         }
-    }
-
-    pub fn set_img(&self, pool: &Mutex<SlotPool>, img: &[u8], img_info: BgImg) {
-        let mut pool = self.lock_pool_to_get_canvas(pool);
-        self.get_canvas(&mut pool).copy_from_slice(img);
-        self.set_img_info(img_info);
-        self.draw(&mut pool);
     }
 
     pub fn set_img_info(&self, img_info: BgImg) {

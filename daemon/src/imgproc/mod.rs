@@ -1,9 +1,9 @@
-use log::{error, info};
+use log::error;
 use smithay_client_toolkit::shm::slot::SlotPool;
 
 use std::{sync::Arc, sync::Mutex, thread};
 
-use utils::communication::{Animation, Answer, BgImg, Img};
+use utils::communication::{Answer, BgImg, Img};
 
 use crate::wallpaper::Wallpaper;
 
@@ -129,105 +129,5 @@ impl Imgproc {
         };
 
         answer
-    }
-
-    pub fn import_cached_img(
-        &mut self,
-        pool: &Arc<Mutex<SlotPool>>,
-        wallpaper: &Arc<Wallpaper>,
-        output_name: &str,
-        output_size: usize,
-    ) {
-        if let Some((Img { img, path }, anim)) = get_cached_bg(output_name) {
-            if output_size != img.len() {
-                info!(
-                    "{output_name} monitor's buffer size ({output_size}) is different than cache's image ({})",
-                    img.len(),
-                );
-                return;
-            }
-
-            let pool = Arc::clone(pool);
-            let wallpaper = Arc::clone(wallpaper);
-            if let Err(e) = thread::Builder::new()
-                .name("cache importing".to_string()) //Name our threads  for better log messages
-                .stack_size(TSTACK_SIZE) //the default of 2MB is way too overkill for this
-                .spawn(move || {
-                    if wallpaper.is_loading_cache() {
-                        return;
-                    }
-                    wallpaper.start_cache_load();
-                    wallpaper.set_img(&pool, &img, BgImg::Img(path));
-                    wallpaper.end_cache_load();
-                    if let Some(anim) = anim {
-                        if anim.animation.len() <= 1 {
-                            return;
-                        }
-                        wallpaper.begin_animation();
-                        let mut now = std::time::Instant::now();
-                        for (frame, duration) in anim.animation.iter().cycle() {
-                            {
-                                let mut pool = wallpaper.lock_pool_to_get_canvas(&pool);
-                                let canvas = wallpaper.get_canvas(&mut pool);
-                                frame.ready(canvas.len()).unpack(canvas);
-                                wallpaper.draw(&mut pool);
-                            }
-
-                            if wallpaper.animation_should_stop() {
-                                wallpaper.end_animation();
-                                return;
-                            }
-                            let timeout = duration.saturating_sub(now.elapsed());
-                            thread::sleep(timeout);
-                            nix::sys::signal::kill(
-                                nix::unistd::Pid::this(),
-                                nix::sys::signal::SIGUSR1,
-                            )
-                            .unwrap();
-                            now = std::time::Instant::now();
-                        }
-                    }
-                })
-            {
-                error!("failed to spawn 'cache importing' thread: {}", e);
-            }
-        } else {
-            info!("did not find cached image for monitor '{}'", output_name);
-        }
-    }
-}
-
-fn get_cached_bg(output: &str) -> Option<(Img, Option<Animation>)> {
-    let cache_path = match utils::communication::get_cache_path() {
-        Ok(mut path) => {
-            path.push(output);
-            path
-        }
-        Err(e) => {
-            error!("failed to get bgs cache's path: {e}");
-            return None;
-        }
-    };
-
-    let cache_file = match std::fs::File::open(cache_path) {
-        Ok(file) => file,
-        Err(e) => {
-            if e.kind() != std::io::ErrorKind::NotFound {
-                error!("failed to open bgs cache's file: {e}");
-            }
-            return None;
-        }
-    };
-
-    let mut reader = std::io::BufReader::new(cache_file);
-    match Img::try_from(&mut reader) {
-        Ok(img) => match Animation::try_from(&mut reader) {
-            Ok(anim) => Some((img, Some(anim))),
-            Err(_) => Some((img, None)),
-        },
-        Err(e) => {
-            error!("failed to read bgs cache's file: {e}");
-            None
-        }
     }
 }

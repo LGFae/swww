@@ -482,36 +482,11 @@ impl LayerShellHandler for Daemon {
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        layer: &LayerSurface,
+        _layer: &LayerSurface,
         _configure: LayerSurfaceConfigure,
         _serial: u32,
     ) {
-        // After configuring, we try to import the cache
-        for wallpaper in self.wallpapers.iter_mut() {
-            if wallpaper.has_surface(layer.wl_surface()) {
-                if let Some(output_info) = self.output_state.outputs().find_map(|o| {
-                    if let Some(info) = self.output_state.info(&o) {
-                        if wallpaper.has_id(info.id) {
-                            return Some(info);
-                        }
-                    }
-                    None
-                }) {
-                    let output_name = output_info.name.clone().unwrap_or("?".to_string());
-                    let logical_size = output_info
-                        .logical_size
-                        .map(|(width, height)| (width as usize, height as usize))
-                        .unwrap_or((0, 0));
-                    self.imgproc.import_cached_img(
-                        &self.pool,
-                        wallpaper,
-                        &output_name,
-                        logical_size.0 * logical_size.1 * 4,
-                    );
-                }
-                return;
-            }
-        }
+        // we only care about output configs
     }
 }
 
