@@ -142,7 +142,7 @@ impl Transition {
             for wallpaper in self.wallpapers.iter_mut() {
                 let mut pool = wallpaper.lock_pool_to_get_canvas(&self.pool);
                 let canvas = wallpaper.get_canvas(&mut pool);
-                for (old, new) in canvas.chunks_exact_mut(4).zip(new_img.chunks_exact(4)) {
+                for (old, new) in canvas.chunks_exact_mut(4).zip(new_img.chunks_exact(3)) {
                     change_cols!(step, old, new, done);
                 }
                 wallpaper.draw(&mut pool);
@@ -226,7 +226,7 @@ impl Transition {
                 let canvas = wallpaper.get_canvas(&mut pool);
                 for (i, (old, new)) in canvas
                     .chunks_exact_mut(4)
-                    .zip(new_img.chunks_exact(4))
+                    .zip(new_img.chunks_exact(3))
                     .enumerate()
                 {
                     let width = width as usize;
@@ -288,7 +288,7 @@ impl Transition {
                 let canvas = wallpaper.get_canvas(&mut pool);
                 for (i, (old, new)) in canvas
                     .chunks_exact_mut(4)
-                    .zip(new_img.chunks_exact(4))
+                    .zip(new_img.chunks_exact(3))
                     .enumerate()
                 {
                     let width = width as usize;
@@ -335,7 +335,7 @@ impl Transition {
                 let canvas = wallpaper.get_canvas(&mut pool);
                 for (i, (old, new)) in canvas
                     .chunks_exact_mut(4)
-                    .zip(new_img.chunks_exact(4))
+                    .zip(new_img.chunks_exact(3))
                     .enumerate()
                 {
                     let (width, height) = (width as usize, height as usize);
@@ -386,7 +386,7 @@ impl Transition {
                 let canvas = wallpaper.get_canvas(&mut pool);
                 for (i, (old, new)) in canvas
                     .chunks_exact_mut(4)
-                    .zip(new_img.chunks_exact(4))
+                    .zip(new_img.chunks_exact(3))
                     .enumerate()
                 {
                     let (width, height) = (width as usize, height as usize);

@@ -29,22 +29,18 @@ lazy_static::lazy_static! {
 /// The closure you pass is run at every difference. It dictates the update logic of the current
 /// frame. With that, you can control whether all different pixels changed are updated, or only the
 /// ones at a certain position. It is meant to be used primarily when writing transitions
-fn pack_bytes<F>(cur: &mut [u8], goal: &[u8], mut f: F) -> Box<[u8]>
-where
-    F: FnMut(&mut [u8; 4], &[u8; 4], usize),
-{
-    let mut v = Vec::with_capacity((goal.len() * 5) / 8);
+fn pack_bytes(cur: &[u8], goal: &[u8]) -> Box<[u8]> {
+    let mut v = Vec::with_capacity(goal.len());
 
-    let mut iter = zip_eq(pixels_mut(cur), pixels(goal)).enumerate();
+    let mut iter = zip_eq(pixels(cur), pixels(goal));
     let mut to_add = Vec::with_capacity(333); // 100 pixels
-    while let Some((mut i, (mut cur, mut goal))) = iter.next() {
+    while let Some((mut cur, mut goal)) = iter.next() {
         let mut equals = 0;
         while cur == goal {
             equals += 1;
             match iter.next() {
                 None => return v.into_boxed_slice(),
-                Some((j, (c, g))) => {
-                    i = j;
+                Some((c, g)) => {
                     cur = c;
                     goal = g;
                 }
@@ -53,13 +49,11 @@ where
 
         let mut diffs = 0;
         while cur != goal {
-            f(cur, goal, i);
-            to_add.extend_from_slice(&cur[0..3]);
+            to_add.extend_from_slice(goal);
             diffs += 1;
             match iter.next() {
                 None => break,
-                Some((j, (c, g))) => {
-                    i = j;
+                Some((c, g)) => {
                     cur = c;
                     goal = g;
                 }
@@ -112,78 +106,45 @@ fn unpack_bytes(buf: &mut [u8], diff: &[u8]) {
 #[derive(Serialize, Deserialize)]
 pub struct BitPack {
     inner: Box<[u8]>,
+    /// This field will ensure we won't ever try to unpack the images on a buffer of the wrong size,
+    /// which ultimately is what allows us to use unsafe in the unpack_bytes function
+    expected_buf_size: usize,
 }
 
 impl BitPack {
     /// Compresses a frame of animation by getting the difference between the previous and the
     /// current frame.
     /// IMPORTANT: this will change `prev` into `cur`, that's why it needs to be 'mut'
-    pub fn pack(prev: &mut [u8], cur: &[u8]) -> Result<Self, String> {
-        let bit_pack = pack_bytes(prev, cur, |old, new, _| *old = *new);
+    pub fn pack(prev: &[u8], cur: &[u8]) -> Result<Self, String> {
+        let bit_pack = pack_bytes(prev, cur);
+        if bit_pack.is_empty() {
+            return Ok(BitPack {
+                inner: Box::new([]),
+                expected_buf_size: (cur.len() / 3) * 4,
+            });
+        }
+
         let mut v = Vec::with_capacity(bit_pack.len() / 2);
         match lzzzz::lz4f::compress_to_vec(&bit_pack, &mut v, &COMPRESSION_PREFERENCES) {
             Ok(_) => Ok(BitPack {
                 inner: v.into_boxed_slice(),
+                expected_buf_size: (cur.len() / 3) * 4,
             }),
             Err(e) => Err(e.to_string()),
         }
     }
 
-    /// Produces a `ReadiedPack`, which can be sent through a channel to be unpacked later
-    #[must_use]
-    pub fn ready(&self, expected_buf_size: usize) -> ReadiedPack {
-        let mut v = Vec::with_capacity(self.inner.len() * 3);
-        // Note: panics will never happen because BitPacked is *always* only produced with
-        // correct lz4 compression
-        lz4f::decompress_to_vec(&self.inner, &mut v).unwrap();
-        ReadiedPack {
-            inner: v.into_boxed_slice(),
-            expected_buf_size,
-        }
-    }
-}
-
-/// This is what we send through the channel to be drawn
-pub struct ReadiedPack {
-    inner: Box<[u8]>,
-    /// This field will ensure we won't ever try to unpack the images on a buffer of the wrong size,
-    /// which ultimately is what allows us to use unsafe in the unpack_bytes function
-    expected_buf_size: usize,
-}
-
-impl ReadiedPack {
-    /// This should only be used in the transitions. For caching the animation frames, use the
-    /// Bitpack struct
-    ///
-    /// The `f` runs at every different pixel found, iterating through the three colors BGR. Its
-    /// parameters are:
-    ///
-    /// * First -> old img byte, that has to change to the new one according to the transition logic
-    /// * Second -> new img byte. This stays constant
-    /// * Third -> the pixel's position in the image. This can be used to make more complex
-    ///   transition logic
-    #[must_use]
-    pub fn new<F>(cur: &mut [u8], goal: &[u8], f: F) -> Self
-    where
-        F: FnMut(&mut [u8; 4], &[u8; 4], usize),
-    {
-        let bit_pack = pack_bytes(cur, goal, f);
-        ReadiedPack {
-            inner: bit_pack,
-            expected_buf_size: cur.len(),
-        }
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.inner.is_empty()
-    }
-
     ///return whether unpacking was successful. Note it can only fail if `buf.len() !=
     ///expected_buf_size`
+    #[must_use]
     pub fn unpack(&self, buf: &mut [u8]) -> bool {
-        if buf.len() >= self.expected_buf_size {
+        if buf.len() == self.expected_buf_size {
             if !self.inner.is_empty() {
-                unpack_bytes(buf, &self.inner);
+                let mut v = Vec::with_capacity(self.inner.len() * 3);
+                // Note: panics will never happen because BitPacked is *always* only produced
+                // with correct lz4 compression
+                lz4f::decompress_to_vec(&self.inner, &mut v).unwrap();
+                unpack_bytes(buf, &v);
             }
             true
         } else {
@@ -198,11 +159,11 @@ impl ReadiedPack {
 /// Copy pasted from the Iterator crate, and adapted for our purposes
 #[must_use = "iterator adaptors are lazy and do nothing unless consumed"]
 struct ZipEq<'a, I> {
-    a: std::slice::IterMut<'a, I>,
+    a: std::slice::Iter<'a, I>,
     b: std::slice::Iter<'a, I>,
 }
 
-fn zip_eq<'a, I>(i: &'a mut [I], j: &'a [I]) -> ZipEq<'a, I> {
+fn zip_eq<'a, I>(i: &'a [I], j: &'a [I]) -> ZipEq<'a, I> {
     if i.len() != j.len() {
         unreachable!(
             "Iterators of zip_eq have different sizes: {}, {}",
@@ -211,13 +172,13 @@ fn zip_eq<'a, I>(i: &'a mut [I], j: &'a [I]) -> ZipEq<'a, I> {
         );
     }
     ZipEq {
-        a: i.iter_mut(),
+        a: i.iter(),
         b: j.iter(),
     }
 }
 
 impl<'a, I> Iterator for ZipEq<'a, I> {
-    type Item = (&'a mut I, &'a I);
+    type Item = (&'a I, &'a I);
 
     fn next(&mut self) -> Option<Self::Item> {
         match (self.a.next(), self.b.next()) {
@@ -231,11 +192,11 @@ impl<'a, I> Iterator for ZipEq<'a, I> {
 // The functions below were copy pasted and adapted from the bytemuck crate:
 
 #[inline]
-fn pixels(img: &[u8]) -> &[[u8; 4]] {
-    if img.len() % 4 != 0 {
+fn pixels(img: &[u8]) -> &[[u8; 3]] {
+    if img.len() % 3 != 0 {
         unreachable!("Calling pixels with a wrongly formatted image");
     }
-    unsafe { core::slice::from_raw_parts(img.as_ptr().cast::<[u8; 4]>(), img.len() / 4) }
+    unsafe { core::slice::from_raw_parts(img.as_ptr().cast::<[u8; 3]>(), img.len() / 3) }
 }
 
 #[inline]
@@ -251,20 +212,28 @@ mod tests {
     use super::BitPack;
     use rand::prelude::random;
 
+    fn buf_from(slice: &[u8]) -> Vec<u8> {
+        let mut v = Vec::new();
+        for pix in slice.chunks_exact(3) {
+            v.extend_from_slice(pix);
+            v.push(255);
+        }
+        v
+    }
+
     #[test]
     //Use this when annoying problems show up
     fn should_compress_and_decompress_to_same_info_small() {
-        let frame1 = [1, 2, 3, 4, 5, 6, 7, 8];
-        let frame2 = [1, 2, 3, 4, 8, 7, 6, 5];
-        let compressed = BitPack::pack(&mut frame1.clone(), &frame2).unwrap();
+        let frame1 = [1, 2, 3, 4, 5, 6];
+        let frame2 = [1, 2, 3, 6, 5, 4];
+        let compressed = BitPack::pack(&frame1, &frame2).unwrap();
 
-        let mut buf = frame1;
-        let readied = compressed.ready(8);
-        readied.unpack(&mut buf);
+        let mut buf = buf_from(&frame1);
+        assert!(compressed.unpack(&mut buf));
         for i in 0..2 {
             for j in 0..3 {
                 assert_eq!(
-                    frame2[i * 4 + j],
+                    frame2[i * 3 + j],
                     buf[i * 4 + j],
                     "\nframe2: {frame2:?}, buf: {buf:?}\n"
                 );
@@ -277,30 +246,35 @@ mod tests {
         for _ in 0..10 {
             let mut original = Vec::with_capacity(20);
             for _ in 0..20 {
-                let mut v = Vec::with_capacity(4000);
-                for _ in 0..4000 {
+                let mut v = Vec::with_capacity(3000);
+                for _ in 0..3000 {
                     v.push(random::<u8>());
                 }
                 original.push(v);
             }
 
             let mut compressed = Vec::with_capacity(20);
-            compressed
-                .push(BitPack::pack(&mut original.last().unwrap().clone(), &original[0]).unwrap());
+            compressed.push(BitPack::pack(original.last().unwrap(), &original[0]).unwrap());
             for i in 1..20 {
-                compressed.push(BitPack::pack(&mut original[i - 1].clone(), &original[i]).unwrap());
+                compressed.push(BitPack::pack(&original[i - 1], &original[i]).unwrap());
             }
 
-            let mut buf = original.last().unwrap().clone();
+            let mut buf = buf_from(original.last().unwrap());
             for i in 0..20 {
-                let readied = compressed[i].ready(4000);
-                readied.unpack(&mut buf);
+                assert!(compressed[i].unpack(&mut buf));
                 let mut j = 0;
-                while j < 4000 {
+                let mut l = 0;
+                while j < 3000 {
                     for k in 0..3 {
-                        assert_eq!(buf[j + k], original[i][j + k], "Failed at index: {}", j + k);
+                        assert_eq!(
+                            buf[j + l + k],
+                            original[i][j + k],
+                            "Failed at index: {}",
+                            j + k
+                        );
                     }
-                    j += 4;
+                    j += 3;
+                    l += 1;
                 }
             }
         }
@@ -311,8 +285,8 @@ mod tests {
         for _ in 0..10 {
             let mut original = Vec::with_capacity(20);
             for _ in 0..20 {
-                let mut v = Vec::with_capacity(4000);
-                for _ in 0..3000 {
+                let mut v = Vec::with_capacity(3000);
+                for _ in 0..2000 {
                     v.push(random::<u8>());
                 }
                 for i in 0..1000 {
@@ -322,22 +296,27 @@ mod tests {
             }
 
             let mut compressed = Vec::with_capacity(20);
-            compressed
-                .push(BitPack::pack(&mut original.last().unwrap().clone(), &original[0]).unwrap());
+            compressed.push(BitPack::pack(original.last().unwrap(), &original[0]).unwrap());
             for i in 1..20 {
-                compressed.push(BitPack::pack(&mut original[i - 1].clone(), &original[i]).unwrap());
+                compressed.push(BitPack::pack(&original[i - 1], &original[i]).unwrap());
             }
 
-            let mut buf = original.last().unwrap().clone();
+            let mut buf = buf_from(original.last().unwrap());
             for i in 0..20 {
-                let readied = compressed[i].ready(4000);
-                readied.unpack(&mut buf);
+                assert!(compressed[i].unpack(&mut buf));
                 let mut j = 0;
-                while j < 4000 {
+                let mut l = 0;
+                while j < 3000 {
                     for k in 0..3 {
-                        assert_eq!(buf[j + k], original[i][j + k], "Failed at index: {}", j + k);
+                        assert_eq!(
+                            buf[j + l + k],
+                            original[i][j + k],
+                            "Failed at index: {}",
+                            j + k
+                        );
                     }
-                    j += 4;
+                    j += 3;
+                    l += 1;
                 }
             }
         }
