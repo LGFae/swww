@@ -26,7 +26,6 @@ pub struct LockedPool<'a>(MutexGuard<'a, SlotPool>);
 
 /// Owns all the necessary information for drawing.
 struct WallpaperInner {
-    output_id: u32,
     width: NonZeroI32,
     height: NonZeroI32,
     scale_factor: NonZeroI32,
@@ -34,13 +33,13 @@ struct WallpaperInner {
     slot: Slot,
     img: BgImg,
 
-    layer_surface: LayerSurface,
-
     animation_state: AnimationState,
 }
 
 pub struct Wallpaper {
+    output_id: u32,
     inner: Mutex<WallpaperInner>,
+    layer_surface: LayerSurface,
     condvar: Condvar,
 }
 
@@ -50,11 +49,13 @@ impl Wallpaper {
         layer_surface: LayerSurface,
         pool: &Mutex<SlotPool>,
     ) -> Self {
-        let (width, height) = if let Some(output_size) = output_info.logical_size {
-            (
-                NonZeroI32::new(output_size.0).unwrap(),
-                NonZeroI32::new(output_size.1).unwrap(),
-            )
+        let (width, height): (NonZeroI32, NonZeroI32) = if let Some(size) = output_info.logical_size
+        {
+            if size.0 == 0 || size.1 == 0 {
+                (256.try_into().unwrap(), 256.try_into().unwrap())
+            } else {
+                (size.0.try_into().unwrap(), size.1.try_into().unwrap())
+            }
         } else {
             (256.try_into().unwrap(), 256.try_into().unwrap())
         };
@@ -80,12 +81,12 @@ impl Wallpaper {
         layer_surface.commit();
 
         Self {
+            output_id: output_info.id,
+            layer_surface,
             inner: Mutex::new(WallpaperInner {
-                output_id: output_info.id,
                 width,
                 height,
                 scale_factor,
-                layer_surface,
                 slot,
                 img: BgImg::Color([0, 0, 0]),
                 animation_state: AnimationState::Idle,
@@ -95,11 +96,11 @@ impl Wallpaper {
     }
 
     pub fn has_id(&self, id: u32) -> bool {
-        self.inner.lock().unwrap().output_id == id
+        self.output_id == id
     }
 
     pub fn has_surface(&self, surface: &WlSurface) -> bool {
-        self.inner.lock().unwrap().layer_surface.wl_surface() == surface
+        self.layer_surface.wl_surface() == surface
     }
 
     pub fn get_dimensions(&self) -> (u32, u32) {
@@ -189,7 +190,8 @@ impl Wallpaper {
             .0
             .create_buffer_in(&lock.slot, width, height, stride, wl_shm::Format::Xrgb8888)
             .unwrap();
-        let surface = lock.layer_surface.wl_surface();
+        drop(lock);
+        let surface = self.layer_surface.wl_surface();
         buf.attach_to(surface).unwrap();
         surface.damage_buffer(0, 0, width, height);
         surface.commit();
@@ -222,11 +224,11 @@ impl Wallpaper {
                     * 4,
             )
             .expect("failed to create slot");
-        lock.layer_surface.set_size(
+        self.layer_surface.set_size(
             lock.width.get() as u32 * lock.scale_factor.get() as u32,
             lock.height.get() as u32 * lock.scale_factor.get() as u32,
         );
-        lock.layer_surface.commit();
         lock.img = BgImg::Color([0, 0, 0]);
+        self.layer_surface.commit();
     }
 }

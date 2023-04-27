@@ -85,7 +85,7 @@ impl Animator {
             .stack_size(TSTACK_SIZE) //the default of 2MB is way too overkill for this
             .spawn(move || {
                 /* We only need to animate if we have > 1 frame */
-                if animation.animation.len() == 1 || wallpapers.is_empty() {
+                if animation.animation.len() == 1 {
                     return;
                 }
 
@@ -119,6 +119,9 @@ impl Animator {
                             true
                         }
                     });
+                    if wallpapers.is_empty() {
+                        return;
+                    }
                     let timeout = duration.saturating_sub(now.elapsed());
                     thread::sleep(timeout);
                     nix::sys::signal::kill(nix::unistd::Pid::this(), nix::sys::signal::SIGUSR1)

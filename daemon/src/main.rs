@@ -77,7 +77,7 @@ fn main() -> DaemonResult<()> {
         Signal::SIGTERM,
         Signal::SIGUSR1,
     ] {
-        unsafe { signal::signal(signal, handler).expect("Failed to install signal handler") };
+        unsafe { signal::signal(signal, handler).expect("failed to install signal handler") };
     }
 
     let conn = Connection::connect_to_env().expect("failed to connect to the wayland server");
