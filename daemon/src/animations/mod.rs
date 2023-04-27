@@ -7,17 +7,18 @@ use utils::communication::{Answer, BgImg, Img};
 
 use crate::wallpaper::Wallpaper;
 
-mod animations;
 mod sync_barrier;
+mod transitions;
+use transitions::Transition;
 
 ///The default thread stack size of 2MiB is way too overkill for our purposes
 const TSTACK_SIZE: usize = 1 << 17; //128KiB
 
-pub struct Imgproc {
+pub struct Animator {
     sync_barrier: Arc<sync_barrier::SyncBarrier>,
 }
 
-impl Imgproc {
+impl Animator {
     pub fn new() -> Self {
         Self {
             sync_barrier: Arc::new(sync_barrier::SyncBarrier::new(0)),
@@ -52,8 +53,7 @@ impl Imgproc {
                     let dimensions = wallpapers[0].get_dimensions();
 
                     if img.len() == dimensions.0 as usize * dimensions.1 as usize * 3 {
-                        animations::Transition::new(wallpapers, dimensions, transition, pool)
-                            .execute(&img);
+                        Transition::new(wallpapers, dimensions, transition, pool).execute(&img);
                     } else {
                         error!(
                             "image is of wrong size! Image len: {}, expected size: {}",

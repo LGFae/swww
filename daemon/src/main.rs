@@ -2,7 +2,7 @@
 //! them fail there is no point in continuing. All of the initialization code, for example, is full
 //! of `expects`, **on purpose**, because we **want** to unwind and exit when they happen
 
-mod imgproc;
+mod animations;
 mod wallpaper;
 use log::{debug, error, info, LevelFilter};
 use nix::{
@@ -43,7 +43,7 @@ use wayland_client::{
 
 use utils::communication::{get_socket_path, Answer, BgInfo, Request};
 
-use imgproc::Imgproc;
+use animations::Animator;
 
 // We need this because this might be set by signals, so we can't keep it in the daemon
 static EXIT: RwLock<bool> = RwLock::new(false);
@@ -230,7 +230,7 @@ struct Daemon {
 
     // swww stuff
     wallpapers: Vec<Arc<Wallpaper>>,
-    imgproc: Imgproc,
+    animator: Animator,
 }
 
 impl Daemon {
@@ -256,7 +256,7 @@ impl Daemon {
             layer_shell,
 
             wallpapers: Vec::new(),
-            imgproc: Imgproc::new(),
+            animator: Animator::new(),
         }
     }
 
@@ -268,7 +268,7 @@ impl Daemon {
                     let mut result = Answer::Ok;
                     for animation in animations {
                         let wallpapers = self.find_wallpapers_by_names(animation.1);
-                        result = self.imgproc.animate(&self.pool, animation.0, wallpapers);
+                        result = self.animator.animate(&self.pool, animation.0, wallpapers);
                     }
                     result
                 }
@@ -294,7 +294,7 @@ impl Daemon {
                         }
                         requests.push((img.0, wallpapers));
                     }
-                    self.imgproc.transition(&self.pool, transition, requests);
+                    self.animator.transition(&self.pool, transition, requests);
                     Answer::Ok
                 }
             },
