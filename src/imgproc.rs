@@ -53,6 +53,23 @@ pub fn frame_to_rgb(frame: image::Frame) -> RgbImage {
     DynamicImage::ImageRgba8(frame.into_buffer()).into_rgb8()
 }
 
+/// This is a fairly complicated function. It compresses the animation frames in a pipeline:
+///
+/// ```
+///       READ_FRAME (SEQUENTIAL)
+///              |     
+///      RESIZE_IMAGE (PARALLEL)
+///              |     
+///   COLLECT_RESIZED_IMAGES (SEQUENTIAL)
+///              |
+///   BIT_PACK_THE_RESIZED_IMAGES (PARALLEL)
+///              |
+///   COLLECT_PACKED_FRAMES (SEQUENTIAL)
+/// ```
+///
+/// While this has improved performance, ultimately our biggest bottleneck is actually the very
+/// first step, `READ_FRAME`. This means that significant speed gains can only be had through
+/// improvements in the `image` crate itself.
 pub fn compress_frames(
     gif: GifDecoder<BufReader<File>>,
     dim: (u32, u32),
@@ -60,41 +77,103 @@ pub fn compress_frames(
     resize: ResizeStrategy,
     color: &[u8; 3],
 ) -> Result<Vec<(BitPack, Duration)>, String> {
-    // TODO: use a pipeline to speed this up
-    let mut compressed_frames = Vec::new();
-    let mut frames = gif.into_frames();
+    let mut rgb_frames = Vec::new();
+    std::thread::scope(|s| {
+        let (fr_snd, fr_recv) = std::sync::mpsc::channel();
+        // This will contain all of the final 3 stages
+        let compressor = s.spawn(move || {
+            let (comp_snd, comp_recv) = std::sync::mpsc::channel();
+            let mut durs = Vec::new();
+            let mut tags = Vec::new();
+            // COLLECT_RESIZED_IMAGES STAGE
+            while let Ok((img, dur, tag)) = fr_recv.recv() {
+                let len = tags.len();
+                let mut i = 0;
+                while i <= len {
+                    if i == len || tag < tags[i] {
+                        rgb_frames.insert(i, img);
+                        durs.insert(i, dur);
+                        tags.insert(i, tag);
+                        break;
+                    }
+                    i += 1;
+                }
+                // BIT_PACK_THE_RESIZED_IMAGES STAGE
+                if i > 0 && tags[i - 1] == tag - 1 {
+                    let tag = tags[i - 1];
+                    let dur = durs[i - 1];
+                    let comp_snd = comp_snd.clone();
+                    let prev_cur: &[Vec<u8>] =
+                        unsafe { std::mem::transmute(&rgb_frames[i - 1..i + 1]) };
+                    s.spawn(move || {
+                        comp_snd
+                            .send((BitPack::pack(&prev_cur[0], &prev_cur[1]).unwrap(), dur, tag))
+                            .unwrap();
+                    });
+                }
+                if i < len && tags[i + 1] == tag + 1 {
+                    let comp_snd = comp_snd.clone();
+                    let prev_cur: &[Vec<u8>] =
+                        unsafe { std::mem::transmute(&rgb_frames[i..i + 2]) };
+                    s.spawn(move || {
+                        comp_snd
+                            .send((BitPack::pack(&prev_cur[0], &prev_cur[1]).unwrap(), dur, tag))
+                            .unwrap();
+                    });
+                }
+            }
+            // Send the last frame to loop around
+            let prev: &Vec<u8> = unsafe { std::mem::transmute(rgb_frames.last().unwrap()) };
+            let cur: &Vec<u8> = unsafe { std::mem::transmute(rgb_frames.first().unwrap()) };
+            let tag = *tags.last().unwrap();
+            let dur = *durs.last().unwrap();
+            s.spawn(move || {
+                comp_snd
+                    .send((BitPack::pack(prev, cur).unwrap(), dur, tag))
+                    .unwrap();
+            });
 
-    // The first frame should always exist
-    let first = frames.next().unwrap().unwrap();
-    let first_duration = first.delay().numer_denom_ms();
-    let first_duration = Duration::from_millis((first_duration.0 / first_duration.1).into());
-    let first_img = match resize {
-        ResizeStrategy::No => img_pad(frame_to_rgb(first), dim, color)?,
-        ResizeStrategy::Crop => img_resize_crop(frame_to_rgb(first), dim, filter)?,
-        ResizeStrategy::Fit => img_resize_fit(frame_to_rgb(first), dim, filter, color)?,
-    };
+            // COLLECT_PACKED_FRAMES STAGE
+            let mut packs = Vec::with_capacity(rgb_frames.len());
+            let mut tags = Vec::with_capacity(rgb_frames.len());
+            while let Ok((pack, dur, tag)) = comp_recv.recv() {
+                let len = tags.len();
+                for i in 0..len + 1 {
+                    if i == len || tag < tags[i] {
+                        packs.insert(i, (pack, dur));
+                        tags.insert(i, tag);
+                        break;
+                    }
+                }
+            }
+            // return the collected packs
+            packs
+        });
 
-    let mut canvas: Option<Vec<u8>> = None;
-    while let Some(Ok(frame)) = frames.next() {
-        let (dur_num, dur_div) = frame.delay().numer_denom_ms();
-        let duration = Duration::from_millis((dur_num / dur_div).into());
+        // READ_FRAME STAGE
+        let mut frames = gif.into_frames().enumerate();
+        while let Some((i, Ok(frame))) = frames.next() {
+            let fr_snd = fr_snd.clone();
+            // RESIZE_IMAGE STAGE
+            s.spawn(move || {
+                let (dur_num, dur_div) = frame.delay().numer_denom_ms();
+                let duration = Duration::from_millis((dur_num / dur_div).into());
+                let img = match resize {
+                    ResizeStrategy::No => img_pad(frame_to_rgb(frame), dim, color)?,
+                    ResizeStrategy::Crop => img_resize_crop(frame_to_rgb(frame), dim, filter)?,
+                    ResizeStrategy::Fit => img_resize_fit(frame_to_rgb(frame), dim, filter, color)?,
+                };
+                fr_snd.send((img, duration, i)).unwrap();
+                Ok::<(), String>(())
+            });
+        }
+        drop(fr_snd);
 
-        let img = match resize {
-            ResizeStrategy::No => img_pad(frame_to_rgb(frame), dim, color)?,
-            ResizeStrategy::Crop => img_resize_crop(frame_to_rgb(frame), dim, filter)?,
-            ResizeStrategy::Fit => img_resize_fit(frame_to_rgb(frame), dim, filter, color)?,
-        };
-
-        compressed_frames.push((
-            BitPack::pack(canvas.as_ref().unwrap_or(&first_img), &img)?,
-            duration,
-        ));
-        canvas = Some(img);
-    }
-    //Add the first frame we got earlier:
-    compressed_frames.push((BitPack::pack(&canvas.unwrap(), &first_img)?, first_duration));
-
-    Ok(compressed_frames)
+        match compressor.join() {
+            Ok(compressed_frames) => Ok(compressed_frames),
+            Err(e) => Err(format!("error compressing animation frames: {e:?}")),
+        }
+    })
 }
 
 pub fn make_filter(filter: &cli::Filter) -> fast_image_resize::FilterType {
