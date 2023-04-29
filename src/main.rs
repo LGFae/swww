@@ -2,7 +2,9 @@ use clap::Parser;
 use image::codecs::gif::GifDecoder;
 use std::{os::unix::net::UnixStream, path::PathBuf, process::Stdio, time::Duration};
 
-use utils::communication::{self, get_socket_path, read_socket, AnimationRequest, Answer, Request};
+use utils::communication::{
+    self, get_socket_path, read_socket, AnimationRequest, Answer, ArchivedAnswer, Request,
+};
 
 mod imgproc;
 use imgproc::*;
@@ -52,10 +54,10 @@ fn main() -> Result<(), String> {
     request.send(&socket)?;
     let bytes = read_socket(&socket)?;
     drop(socket);
-    match Answer::receive(&bytes)? {
-        Answer::Err(msg) => return Err(msg),
-        Answer::Info(info) => info.into_iter().for_each(|i| println!("{}", i)),
-        Answer::Ok => {
+    match Answer::receive(&bytes) {
+        ArchivedAnswer::Err(msg) => return Err(msg.to_string()),
+        ArchivedAnswer::Info(info) => info.iter().for_each(|i| println!("{}", i)),
+        ArchivedAnswer::Ok => {
             if let Swww::Kill = swww {
                 #[cfg(debug_assertions)]
                 let tries = 20;
@@ -99,7 +101,9 @@ fn make_request(args: &Swww) -> Result<Request, String> {
                     Request::Img(img_request).send(&socket)?;
                     let bytes = read_socket(&socket)?;
                     drop(socket);
-                    Answer::receive(&bytes)?;
+                    if let ArchivedAnswer::Err(e) = Answer::receive(&bytes) {
+                        return Err(format!("daemon error when sending image: {e}"));
+                    }
                     animations
                 }) {
                     Ok(animations) => Ok(Request::Animation(animations)),
@@ -170,30 +174,30 @@ fn get_dimensions_and_outputs(
     Request::Query.send(&socket)?;
     let bytes = read_socket(&socket)?;
     drop(socket);
-    let answer = Answer::receive(&bytes)?;
+    let answer = Answer::receive(&bytes);
     match answer {
-        Answer::Info(infos) => {
-            for info in infos {
-                if !requested_outputs.is_empty() && !requested_outputs.contains(&info.name) {
+        ArchivedAnswer::Info(infos) => {
+            for info in infos.iter() {
+                let info_img = info.img.de();
+                let name = info.name.to_string();
+                if !requested_outputs.is_empty() && !requested_outputs.contains(&name) {
                     continue;
                 }
-                let mut should_add = true;
                 let real_dim = (
                     info.dim.0 * info.scale_factor as u32,
                     info.dim.1 * info.scale_factor as u32,
                 );
-                for (i, (dim, img)) in dims.iter().zip(&imgs).enumerate() {
-                    if real_dim == *dim && info.img == *img {
-                        outputs[i].push(info.name.clone());
-                        should_add = false;
-                        break;
-                    }
-                }
-
-                if should_add {
-                    outputs.push(vec![info.name]);
+                if let Some((_, output)) = dims
+                    .iter_mut()
+                    .zip(&imgs)
+                    .zip(&mut outputs)
+                    .find(|((dim, img), _)| real_dim == **dim && info_img == **img)
+                {
+                    output.push(name);
+                } else {
+                    outputs.push(vec![name]);
                     dims.push(real_dim);
-                    imgs.push(info.img);
+                    imgs.push(info_img);
                 }
             }
             if outputs.is_empty() {
@@ -202,7 +206,7 @@ fn get_dimensions_and_outputs(
                 Ok((dims, outputs))
             }
         }
-        Answer::Err(e) => Err(format!("failed to query swww-daemon: {e}")),
+        ArchivedAnswer::Err(e) => Err(format!("daemon error when sending query: {e}")),
         _ => unreachable!(),
     }
 }

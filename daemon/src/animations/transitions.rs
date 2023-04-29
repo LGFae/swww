@@ -244,7 +244,7 @@ impl Transition {
             offset = seq.now() as f64;
             seq.advance_to(start.elapsed().as_secs_f64());
         }
-        self.step = 255;
+        self.step = 4;
         self.simple(new_img)
     }
 
@@ -306,7 +306,7 @@ impl Transition {
             offset = seq.now() as f64;
             seq.advance_to(start.elapsed().as_secs_f64());
         }
-        self.step = 255;
+        self.step = 4;
         self.simple(new_img)
     }
 
@@ -358,7 +358,7 @@ impl Transition {
             dist_center = seq.now();
             seq.advance_to(start.elapsed().as_secs_f64());
         }
-        self.step = 255;
+        self.step = 4;
         self.simple(new_img)
     }
 
@@ -409,7 +409,7 @@ impl Transition {
             dist_center = seq.now();
             seq.advance_to(start.elapsed().as_secs_f64());
         }
-        self.step = 255;
+        self.step = 4;
         self.simple(new_img)
     }
 }
