@@ -9,6 +9,7 @@ use nix::{
     poll::{poll, PollFd, PollFlags},
     sys::signal::{self, SigHandler, Signal},
 };
+use rkyv::{string::ArchivedString, vec::ArchivedVec};
 use simplelog::{ColorChoice, TermLogger, TerminalMode, ThreadLogMode};
 use wallpaper::Wallpaper;
 
@@ -41,7 +42,7 @@ use wayland_client::{
     Connection, QueueHandle,
 };
 
-use utils::communication::{get_socket_path, Answer, BgInfo, Request};
+use utils::communication::{get_socket_path, Answer, ArchivedRequest, BgInfo, Request};
 
 use animations::Animator;
 
@@ -261,44 +262,48 @@ impl Daemon {
     }
 
     fn recv_socket_msg(&mut self, stream: UnixStream) {
-        let request = Request::receive(&stream);
+        let bytes = match utils::communication::read_socket(&stream) {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                error!("FATAL: cannot read socket: {e}. Exiting...");
+                exit_daemon();
+                return;
+            }
+        };
+        let request = Request::receive(&bytes);
         let answer = match request {
-            Ok(request) => match request {
-                Request::Animation(animations) => {
-                    let mut result = Answer::Ok;
-                    for animation in animations {
-                        let wallpapers = self.find_wallpapers_by_names(animation.1);
-                        result = self.animator.animate(&self.pool, animation.0, wallpapers);
-                    }
-                    result
+            ArchivedRequest::Animation(animations) => {
+                let mut wallpapers = Vec::new();
+                for (_, names) in animations.iter() {
+                    wallpapers.push(self.find_wallpapers_by_names(names));
                 }
-                Request::Clear(clear) => {
-                    for wallpaper in self.find_wallpapers_by_names(clear.outputs).iter_mut() {
+                self.animator.animate(&self.pool, bytes, wallpapers)
+            }
+            ArchivedRequest::Clear(clear) => {
+                for wallpaper in self.find_wallpapers_by_names(&clear.outputs).iter_mut() {
+                    wallpaper.set_end_animation_flag();
+                    wallpaper.clear(&self.pool, clear.color)
+                }
+                Answer::Ok
+            }
+            ArchivedRequest::Init => Answer::Ok,
+            ArchivedRequest::Kill => {
+                exit_daemon();
+                Answer::Ok
+            }
+            ArchivedRequest::Query => Answer::Info(self.wallpapers_info()),
+            ArchivedRequest::Img((_, imgs)) => {
+                let mut used_wallpapers = Vec::new();
+                for img in imgs.iter() {
+                    let mut wallpapers = self.find_wallpapers_by_names(&img.1);
+                    for wallpaper in wallpapers.iter_mut() {
                         wallpaper.set_end_animation_flag();
-                        wallpaper.clear(&self.pool, clear.color)
                     }
-                    Answer::Ok
+                    used_wallpapers.push(wallpapers);
                 }
-                Request::Init => Answer::Ok,
-                Request::Kill => {
-                    exit_daemon();
-                    Answer::Ok
-                }
-                Request::Query => Answer::Info(self.wallpapers_info()),
-                Request::Img((transition, imgs)) => {
-                    let mut requests = Vec::new();
-                    for img in imgs {
-                        let mut wallpapers = self.find_wallpapers_by_names(img.1);
-                        for wallpaper in wallpapers.iter_mut() {
-                            wallpaper.set_end_animation_flag();
-                        }
-                        requests.push((img.0, wallpapers));
-                    }
-                    self.animator.transition(&self.pool, transition, requests);
-                    Answer::Ok
-                }
-            },
-            Err(e) => Answer::Err(e),
+                self.animator.transition(&self.pool, bytes, used_wallpapers);
+                Answer::Ok
+            }
         };
         if let Err(e) = answer.send(&stream) {
             error!("error sending answer to client: {e}");
@@ -327,13 +332,13 @@ impl Daemon {
             .collect()
     }
 
-    fn find_wallpapers_by_names(&self, names: Vec<String>) -> Vec<Arc<Wallpaper>> {
+    fn find_wallpapers_by_names(&self, names: &ArchivedVec<ArchivedString>) -> Vec<Arc<Wallpaper>> {
         self.output_state
             .outputs()
             .filter_map(|output| {
                 if let Some(info) = self.output_state.info(&output) {
                     if let Some(name) = info.name {
-                        if names.is_empty() || names.contains(&name) {
+                        if names.is_empty() || names.iter().any(|n| n.as_str() == name) {
                             if let Some(wallpaper) =
                                 self.wallpapers.iter().find(|w| w.has_id(info.id))
                             {

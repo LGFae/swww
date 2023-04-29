@@ -1,8 +1,7 @@
-use serde::{Deserialize, Serialize};
+use rkyv::{Archive, Deserialize, Serialize};
 use std::{
     fmt,
-    fs::File,
-    io::{BufReader, BufWriter},
+    io::{BufReader, BufWriter, Read, Write},
     os::unix::net::UnixStream,
     path::{Path, PathBuf},
     time::Duration,
@@ -10,13 +9,15 @@ use std::{
 
 use crate::comp_decomp::BitPack;
 
-#[derive(PartialEq, Clone, Serialize, Deserialize, Debug)]
+#[derive(PartialEq, Clone, Archive, Serialize, Deserialize, Debug)]
+#[archive_attr(derive(Clone))]
 pub enum Coord {
     Pixel(f32),
     Percent(f32),
 }
 
-#[derive(PartialEq, Clone, Serialize, Deserialize, Debug)]
+#[derive(PartialEq, Clone, Archive, Serialize, Deserialize, Debug)]
+#[archive_attr(derive(Clone))]
 pub struct Position {
     pub x: Coord,
     pub y: Coord,
@@ -40,14 +41,14 @@ impl Position {
                 } else {
                     y
                 }
-            },
+            }
             Coord::Percent(y) => {
                 if invert_y {
                     (1.0 - y) * dim.1 as f32
                 } else {
                     y * dim.1 as f32
                 }
-            },
+            }
         };
 
         (x, y)
@@ -68,10 +69,38 @@ impl Position {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Serialize, Deserialize)]
+impl ArchivedPosition {
+    pub fn to_pixel(&self, dim: (u32, u32), invert_y: bool) -> (f32, f32) {
+        let x = match self.x {
+            ArchivedCoord::Pixel(x) => x,
+            ArchivedCoord::Percent(x) => x * dim.0 as f32,
+        };
+
+        let y = match self.y {
+            ArchivedCoord::Pixel(y) => {
+                if invert_y {
+                    dim.1 as f32 - y
+                } else {
+                    y
+                }
+            }
+            ArchivedCoord::Percent(y) => {
+                if invert_y {
+                    (1.0 - y) * dim.1 as f32
+                } else {
+                    y * dim.1 as f32
+                }
+            }
+        };
+
+        (x, y)
+    }
+}
+
+#[derive(PartialEq, Eq, Clone, Archive, Serialize, Deserialize)]
 pub enum BgImg {
     Color([u8; 3]),
-    Img(PathBuf),
+    Img(String),
 }
 
 impl fmt::Display for BgImg {
@@ -80,16 +109,12 @@ impl fmt::Display for BgImg {
             BgImg::Color(color) => {
                 write!(f, "color: {:02X}{:02X}{:02X}", color[0], color[1], color[2])
             }
-            BgImg::Img(p) => write!(
-                f,
-                "image: {:#?}",
-                p.file_name().unwrap_or_else(|| std::ffi::OsStr::new("?"))
-            ),
+            BgImg::Img(p) => write!(f, "image: {p}",),
         }
     }
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Archive, Serialize, Deserialize)]
 pub struct BgInfo {
     pub name: String,
     pub dim: (u32, u32),
@@ -117,7 +142,8 @@ impl fmt::Display for BgInfo {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Archive, Serialize, Deserialize, Debug)]
+#[archive_attr(derive(Clone))]
 pub enum TransitionType {
     Simple,
     Fade,
@@ -127,7 +153,8 @@ pub enum TransitionType {
     Wave,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Archive, Serialize, Deserialize)]
+#[archive_attr(derive(Clone))]
 pub struct Transition {
     pub transition_type: TransitionType,
     pub duration: f32,
@@ -140,48 +167,28 @@ pub struct Transition {
     pub invert_y: bool,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Archive, Serialize, Deserialize)]
 pub struct Clear {
     pub color: [u8; 3],
     pub outputs: Vec<String>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Archive, Serialize, Deserialize)]
 pub struct Img {
-    pub path: PathBuf,
+    pub path: String,
     pub img: Vec<u8>,
 }
 
-impl TryFrom<&mut BufReader<File>> for Img {
-    type Error = String;
-    fn try_from(file_reader: &mut BufReader<File>) -> Result<Self, Self::Error> {
-        match bincode::deserialize_from(file_reader) {
-            Ok(i) => Ok(i),
-            Err(e) => Err(format!("Failed to deserialize request: {e}")),
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize)]
+#[derive(Archive, Serialize, Deserialize)]
 pub struct Animation {
     pub animation: Box<[(BitPack, Duration)]>,
     pub sync: bool,
 }
 
-impl TryFrom<&mut BufReader<File>> for Animation {
-    type Error = String;
-    fn try_from(file_reader: &mut BufReader<File>) -> Result<Self, Self::Error> {
-        match bincode::deserialize_from(file_reader) {
-            Ok(i) => Ok(i),
-            Err(e) => Err(format!("Failed to deserialize request: {e}")),
-        }
-    }
-}
-
 pub type AnimationRequest = Vec<(Animation, Vec<String>)>;
 pub type ImageRequest = (Transition, Vec<(Img, Vec<String>)>);
 
-#[derive(Serialize, Deserialize)]
+#[derive(Archive, Serialize, Deserialize)]
 pub enum Request {
     Animation(AnimationRequest),
     Clear(Clear),
@@ -193,30 +200,25 @@ pub enum Request {
 
 impl Request {
     pub fn send(&self, stream: &UnixStream) -> Result<(), String> {
-        let writer = BufWriter::new(stream);
-        std::thread::scope(|s| {
-            let serializer = s.spawn(|| match bincode::serialize_into(writer, self) {
-                Ok(()) => Ok(()),
-                Err(e) => Err(format!("Failed to serialize request: {e}")),
-            });
-
-            match serializer.join() {
-                Ok(result) => result,
-                Err(e) => Err(format!("{e:?}")),
-            }
-        })
+        let bytes = match rkyv::to_bytes::<_, 1024>(self) {
+            Ok(bytes) => bytes,
+            Err(e) => return Err(format!("Failed to serialize request: {e}")),
+        };
+        let mut writer = BufWriter::new(stream);
+        writer.write_all(&bytes.len().to_ne_bytes());
+        if let Err(e) = writer.write_all(&bytes) {
+            Err(format!("Failed to write serialized request: {e}"))
+        } else {
+            Ok(())
+        }
     }
 
-    pub fn receive(stream: &UnixStream) -> Result<Self, String> {
-        let reader = BufReader::new(stream);
-        match bincode::deserialize_from(reader) {
-            Ok(i) => Ok(i),
-            Err(e) => Err(format!("Failed to deserialize request: {e}")),
-        }
+    pub fn receive(bytes: &[u8]) -> &ArchivedRequest {
+        unsafe { rkyv::archived_root::<Self>(bytes) }
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Archive, Serialize, Deserialize)]
 pub enum Answer {
     Ok,
     Err(String),
@@ -225,27 +227,41 @@ pub enum Answer {
 
 impl Answer {
     pub fn send(&self, stream: &UnixStream) -> Result<(), String> {
-        match bincode::serialize_into(stream, self) {
-            Ok(()) => Ok(()),
-            Err(e) => Err(format!("Failed to send answer: {e}")),
-        }
-    }
-
-    pub fn receive(stream: UnixStream) -> Result<Self, String> {
-        #[cfg(debug_assertions)]
-        let timeout = Duration::from_secs(30); //Some operations take a while to respond in debug mode
-        #[cfg(not(debug_assertions))]
-        let timeout = Duration::from_secs(5);
-
-        if let Err(e) = stream.set_read_timeout(Some(timeout)) {
-            return Err(format!("Failed to set read timeout: {e}"));
+        let bytes = match rkyv::to_bytes::<_, 256>(self) {
+            Ok(bytes) => bytes,
+            Err(e) => return Err(format!("Failed to serialize answer: {e}")),
         };
-
-        match bincode::deserialize_from(stream) {
-            Ok(i) => Ok(i),
-            Err(e) => Err(format!("Failed to receive answer: {e}")),
+        let mut writer = BufWriter::new(stream);
+        writer.write_all(&bytes.len().to_ne_bytes());
+        if let Err(e) = writer.write_all(&bytes) {
+            Err(format!("Failed to write serialized anwser: {e}"))
+        } else {
+            Ok(())
         }
     }
+
+    pub fn receive(bytes: &[u8]) -> Result<Self, String> {
+        match unsafe { rkyv::archived_root::<Self>(bytes) }.deserialize(&mut rkyv::Infallible) {
+            Ok(answer) => Ok(answer),
+            Err(e) => Err(format!("failed to receive answer: {e}")),
+        }
+    }
+}
+
+pub fn read_socket(stream: &UnixStream) -> Result<Vec<u8>, String> {
+    let mut reader = BufReader::new(stream);
+    let mut buf = vec![0; 8];
+    reader
+        .read_exact(&mut buf[0..std::mem::size_of::<usize>()])
+        .unwrap();
+    let len = usize::from_ne_bytes(buf[0..std::mem::size_of::<usize>()].try_into().unwrap());
+    buf.clear();
+    buf.resize(len, 0);
+
+    if let Err(e) = reader.read_exact(&mut buf) {
+        return Err(format!("Failed to read request: {e}"));
+    }
+    Ok(buf)
 }
 
 #[must_use]

@@ -2,7 +2,7 @@ use clap::Parser;
 use image::codecs::gif::GifDecoder;
 use std::{os::unix::net::UnixStream, path::PathBuf, process::Stdio, time::Duration};
 
-use utils::communication::{self, get_socket_path, AnimationRequest, Answer, Request};
+use utils::communication::{self, get_socket_path, read_socket, AnimationRequest, Answer, Request};
 
 mod imgproc;
 use imgproc::*;
@@ -50,9 +50,11 @@ fn main() -> Result<(), String> {
     let request = make_request(&swww)?;
     let socket = connect_to_socket(5, 100)?;
     request.send(&socket)?;
-    match Answer::receive(socket)? {
+    let bytes = read_socket(&socket)?;
+    drop(socket);
+    match Answer::receive(&bytes)? {
         Answer::Err(msg) => return Err(msg),
-        Answer::Info(info) => info.into_iter().for_each(|i| println!("{i}")),
+        Answer::Info(info) => info.into_iter().for_each(|i| println!("{}", i)),
         Answer::Ok => {
             if let Swww::Kill = swww {
                 #[cfg(debug_assertions)]
@@ -95,7 +97,9 @@ fn make_request(args: &Swww) -> Result<Request, String> {
                     };
                     let socket = connect_to_socket(5, 100)?;
                     Request::Img(img_request).send(&socket)?;
-                    Answer::receive(socket)?;
+                    let bytes = read_socket(&socket)?;
+                    drop(socket);
+                    Answer::receive(&bytes)?;
                     animations
                 }) {
                     Ok(animations) => Ok(Request::Animation(animations)),
@@ -137,10 +141,10 @@ fn make_img_request(
                     )?,
                 },
                 path: match img.path.canonicalize() {
-                    Ok(p) => p,
+                    Ok(p) => p.to_string_lossy().to_string(),
                     Err(e) => {
                         if let Some("-") = img.path.to_str() {
-                            PathBuf::from("STDIN")
+                            "STDIN".to_string()
                         } else {
                             return Err(format!("failed no canonicalize image path: {e}"));
                         }
@@ -164,7 +168,9 @@ fn get_dimensions_and_outputs(
 
     let socket = connect_to_socket(5, 100)?;
     Request::Query.send(&socket)?;
-    let answer = Answer::receive(socket)?;
+    let bytes = read_socket(&socket)?;
+    drop(socket);
+    let answer = Answer::receive(&bytes)?;
     match answer {
         Answer::Info(infos) => {
             for info in infos {
@@ -271,6 +277,15 @@ fn connect_to_socket(tries: u8, interval: u64) -> Result<UnixStream, String> {
                 if let Err(e) = socket.set_nonblocking(false) {
                     return Err(format!("Failed to set blocking connection: {e}"));
                 }
+                #[cfg(debug_assertions)]
+                let timeout = Duration::from_secs(30); //Some operations take a while to respond in debug mode
+                #[cfg(not(debug_assertions))]
+                let timeout = Duration::from_secs(5);
+
+                if let Err(e) = socket.set_read_timeout(Some(timeout)) {
+                    return Err(format!("failed to set read timeout for socket: {e}"));
+                }
+
                 return Ok(socket);
             }
             Err(e) => error = Some(e),

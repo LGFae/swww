@@ -5,7 +5,7 @@ use std::{
 
 use log::debug;
 use smithay_client_toolkit::shm::slot::SlotPool;
-use utils::communication::{Position, TransitionType};
+use utils::communication::{ArchivedPosition, ArchivedTransitionType};
 
 use crate::wallpaper::Wallpaper;
 
@@ -45,12 +45,12 @@ pub struct Transition {
     wallpapers: Vec<Arc<Wallpaper>>,
     pool: Arc<Mutex<SlotPool>>,
     dimensions: (u32, u32),
-    transition_type: TransitionType,
+    transition_type: ArchivedTransitionType,
     duration: f32,
     step: u8,
     fps: Duration,
     angle: f64,
-    pos: Position,
+    pos: ArchivedPosition,
     bezier: BezierCurve,
     wave: (f32, f32),
     invert_y: bool,
@@ -61,7 +61,7 @@ impl Transition {
     pub fn new(
         wallpapers: Vec<Arc<Wallpaper>>,
         dimensions: (u32, u32),
-        transition: utils::communication::Transition,
+        transition: utils::communication::ArchivedTransition,
         pool: Arc<Mutex<SlotPool>>,
     ) -> Self {
         Transition {
@@ -96,12 +96,12 @@ impl Transition {
 
         debug!("Starting transition");
         match self.transition_type {
-            TransitionType::Simple => self.simple(new_img),
-            TransitionType::Wipe => self.wipe(new_img),
-            TransitionType::Grow => self.grow(new_img),
-            TransitionType::Outer => self.outer(new_img),
-            TransitionType::Wave => self.wave(new_img),
-            TransitionType::Fade => self.fade(new_img),
+            ArchivedTransitionType::Simple => self.simple(new_img),
+            ArchivedTransitionType::Wipe => self.wipe(new_img),
+            ArchivedTransitionType::Grow => self.grow(new_img),
+            ArchivedTransitionType::Outer => self.outer(new_img),
+            ArchivedTransitionType::Wave => self.wave(new_img),
+            ArchivedTransitionType::Fade => self.fade(new_img),
         };
         debug!("Transition finished");
 

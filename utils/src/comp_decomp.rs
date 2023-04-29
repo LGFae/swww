@@ -16,7 +16,7 @@
 //!
 
 use lzzzz::lz4f;
-use serde::{Deserialize, Serialize};
+use rkyv::{Archive, Deserialize, Serialize};
 
 lazy_static::lazy_static! {
     static ref COMPRESSION_PREFERENCES: lz4f::Preferences = lz4f::PreferencesBuilder::new()
@@ -103,7 +103,7 @@ fn unpack_bytes(buf: &mut [u8], diff: &[u8]) {
 }
 
 /// This struct represents the cached difference between the previous frame and the next
-#[derive(Serialize, Deserialize)]
+#[derive(Archive, Serialize, Deserialize)]
 pub struct BitPack {
     inner: Box<[u8]>,
     /// This field will ensure we won't ever try to unpack the images on a buffer of the wrong size,
@@ -139,6 +139,31 @@ impl BitPack {
     #[must_use]
     pub fn unpack(&self, buf: &mut [u8]) -> bool {
         if buf.len() == self.expected_buf_size {
+            if !self.inner.is_empty() {
+                let mut v = Vec::with_capacity(self.inner.len() * 3);
+                // Note: panics will never happen because BitPacked is *always* only produced
+                // with correct lz4 compression
+                lz4f::decompress_to_vec(&self.inner, &mut v).unwrap();
+                unpack_bytes(buf, &v);
+            }
+            true
+        } else {
+            false
+        }
+    }
+}
+
+impl ArchivedBitPack {
+    ///return whether unpacking was successful. Note it can only fail if `buf.len() !=
+    ///expected_buf_size`
+    #[must_use]
+    pub fn unpack(&self, buf: &mut [u8]) -> bool {
+        if buf.len()
+            == self
+                .expected_buf_size
+                .deserialize(&mut rkyv::Infallible)
+                .unwrap()
+        {
             if !self.inner.is_empty() {
                 let mut v = Vec::with_capacity(self.inner.len() * 3);
                 // Note: panics will never happen because BitPacked is *always* only produced
