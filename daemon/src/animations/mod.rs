@@ -127,27 +127,25 @@ impl Animator {
                         barrier.inc_and_wait(duration);
                     }
 
-                    for wallpaper in wallpapers.iter_mut() {
+                    wallpapers.retain(|wallpaper| {
+                        if wallpaper.animation_should_stop() {
+                            wallpaper.end_animation();
+                            return false;
+                        }
                         let mut pool = wallpaper.lock_pool_to_get_canvas(&pool);
                         let canvas = wallpaper.get_canvas(&mut pool);
                         if !frame.unpack(canvas) {
                             error!("failed to unpack frame, canvas has the wrong size");
-                            return;
+                            return false;
                         }
                         wallpaper.draw(&mut pool);
-                    }
-
-                    wallpapers.retain(|w| {
-                        if w.animation_should_stop() {
-                            w.end_animation();
-                            false
-                        } else {
-                            true
-                        }
+                        true
                     });
+
                     if wallpapers.is_empty() {
                         return;
                     }
+
                     let timeout = duration.saturating_sub(now.elapsed());
                     thread::sleep(timeout);
                     nix::sys::signal::kill(nix::unistd::Pid::this(), nix::sys::signal::SIGUSR1)
