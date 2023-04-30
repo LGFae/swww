@@ -25,12 +25,5 @@ there is no prepended '#'. Defaults to *000000*.
 # DESCRIPTION
 Fills the specified outputs with the given color.
 
-Currently, we *do not* cache this, so if you want a color to be set at
-initialization, you must set it every time:
-
-```
-swww init && swww clear 1a804a
-```
-
 # SEE ALSO
 *swww-query*(1)

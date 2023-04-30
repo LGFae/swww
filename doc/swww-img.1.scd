@@ -213,10 +213,5 @@ swww-img
 Sends an image (or animated gif) for the daemon to display. You can also use `-`
 to read from stdin instead.
 
-The images sent will be cached at _$XDG_CACHE_HOME/swww_ or _$HOME/.cache/swww_
-if $XDG_CACHE_HOME does not exist. For each monitor, there will be a file in
-those locations corresponding to the current image/animation being displayed.
-Next time you run *swww init*, the *swww-daemon* will load those files.
-
 # SEE ALSO
 *swww-daemon*(1) *swww-query*(1)

@@ -146,7 +146,7 @@ which selects a transition effect at random.
 
 ## Troubleshooting
 
-#### High cpu usage during caching of a gif's frames
+### High cpu usage during caching of a gif's frames
 
 `swww` will use a non-insignificant amount of cpu power while caching the
 images. This will be specially noticeable if the images need to be resized
@@ -154,6 +154,18 @@ before being displayed. So, if you have a very large gif, I would recommend
 resizing it **before** sending it to `swww`. That would make the caching phase
 much faster, and thus ultimately reduce power consumption. I can personally
 recommend [`gifsicle`](https://github.com/kohler/gifsicle) for this purpose.
+
+### Wallpaper disappears when reconnecting monitor
+
+`swww` used to cache its images so that it could reload the current the last
+displayed image automatically. This lead to many problems and also proved to be
+very annoying to keep working with when we updated to
+[`sctk 0.17`](https://github.com/Smithay/client-toolkit). So I decided to nuke
+it.
+
+If you want a wallpaper to be set automatically when you reconnect to a monitor,
+you should use a combination of scripts and a program that lets you run commands
+when a new output is connected, like [`kanshi`](https://sr.ht/~emersion/kanshi/).
 
 ## About new features
 

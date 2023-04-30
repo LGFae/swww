@@ -1,12 +1,51 @@
 ### Unreleased
 
+#### Update to [`sctk 0.17`](https://github.com/Smithay/client-toolkit):
+
+Updating to [`sctk 0.17`](https://github.com/Smithay/client-toolkit) unlocked
+many, many improvements:
+  * We managed to ditch and extra `clone` when calculating the transitions
+  * We now draw the images directly into the wayland buffer, instead of having
+  to send an intermidiary buffer through a channel.
+  * Because of the above, we can now send from the client a `bgr` image, instead
+  of a `bgra` one. This lets us seriaze and write roughly 3/4 of what we were
+  doing previously.
+
+#### Moving from `serde` to `rkyv`:
+
+We have changed our serialization strategy from
+[`serde`](https://github.com/serde-rs/serde) to
+[`rkyv`](https://github.com/rkyv/rkyv). This lead to even further memory usage
+reductions, since `rkyv` does not use an intermidate buffer to deserialize its
+structures.
+
+#### BREAKING CHANGE: CACHE HAS BEEN NUKED:
+
+We have nuked the cache. It was causing far too many problems and it would be
+more problematic to implement with all of the above changes. In the end, I
+thought it just wasn't worth it. I will later make an example about how you can
+configure `kanshi` with some scripts to set an image automatically when
+connecting a new output.
+
+
+#### Summary:
+
+With all of the changes above, **I've managed to reduce memory consumption
+almost by a factor of 3**. The price to pay was nuking our cache, a full
+rewrite of the wayland implementation part of the daemon, a partial rewrite of
+the way we do ipc, and all the code adaptions necessary to make all that work.
+
+Unfortunately, because I had to rewrite so much stuff, it is possible that old
+bugs will resurface. I've tried my best to test and validate it with every thing
+that blew up in the past, but it is probably inevitable that some stuff slipped
+by. Apologies in advance, and keep this in mind when upgrading.
 
 ### 0.7.3
 
 Fixes:
   * Missing `/` when using `$HOME/.cache/swww`, by @max-ishere
   * `--transition-step` with `simple` has saner defaults
-  * correctly spliting outputs argument with ',', by @potatoattack
+  * correctly splitting outputs argument with ',', by @potatoattack
 
 Improvements:
   * we only send the image after we've finished processing the whole animation.

@@ -230,7 +230,7 @@ impl Request {
         };
         let mut writer = BufWriter::new(stream);
         if let Err(e) = writer.write_all(&bytes.len().to_ne_bytes()) {
-            return Err(format!("failed to write serialized request's lenght: {e}"));
+            return Err(format!("failed to write serialized request's length: {e}"));
         }
         if let Err(e) = writer.write_all(&bytes) {
             Err(format!("failed to write serialized request: {e}"))
@@ -263,7 +263,7 @@ impl Answer {
             return Err(format!("failed to write serialized answer's length: {e}"));
         }
         if let Err(e) = writer.write_all(&bytes) {
-            Err(format!("Failed to write serialized anwser: {e}"))
+            Err(format!("Failed to write serialized answer: {e}"))
         } else {
             Ok(())
         }
