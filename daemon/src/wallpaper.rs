@@ -1,4 +1,4 @@
-use utils::communication::BgImg;
+use utils::ipc::BgImg;
 
 use std::{
     num::NonZeroI32,

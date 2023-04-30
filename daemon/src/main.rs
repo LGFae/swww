@@ -9,7 +9,7 @@ use nix::{
     poll::{poll, PollFd, PollFlags},
     sys::signal::{self, SigHandler, Signal},
 };
-use rkyv::{string::ArchivedString, boxed::ArchivedBox};
+use rkyv::{boxed::ArchivedBox, string::ArchivedString};
 use simplelog::{ColorChoice, TermLogger, TerminalMode, ThreadLogMode};
 use wallpaper::Wallpaper;
 
@@ -42,7 +42,7 @@ use wayland_client::{
     Connection, QueueHandle,
 };
 
-use utils::communication::{get_socket_path, Answer, ArchivedRequest, BgInfo, Request};
+use utils::ipc::{get_socket_path, Answer, ArchivedRequest, BgInfo, Request};
 
 use animations::Animator;
 
@@ -262,7 +262,7 @@ impl Daemon {
     }
 
     fn recv_socket_msg(&mut self, stream: UnixStream) {
-        let bytes = match utils::communication::read_socket(&stream) {
+        let bytes = match utils::ipc::read_socket(&stream) {
             Ok(bytes) => bytes,
             Err(e) => {
                 error!("FATAL: cannot read socket: {e}. Exiting...");
@@ -332,7 +332,10 @@ impl Daemon {
             .collect()
     }
 
-    fn find_wallpapers_by_names(&self, names: &ArchivedBox<[ArchivedString]>) -> Vec<Arc<Wallpaper>> {
+    fn find_wallpapers_by_names(
+        &self,
+        names: &ArchivedBox<[ArchivedString]>,
+    ) -> Vec<Arc<Wallpaper>> {
         self.output_state
             .outputs()
             .filter_map(|output| {

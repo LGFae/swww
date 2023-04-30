@@ -2,7 +2,7 @@ use clap::Parser;
 use image::codecs::gif::GifDecoder;
 use std::{os::unix::net::UnixStream, path::PathBuf, process::Stdio, time::Duration};
 
-use utils::communication::{
+use utils::ipc::{
     self, get_socket_path, read_socket, AnimationRequest, Answer, ArchivedAnswer, Request,
 };
 
@@ -81,7 +81,7 @@ fn main() -> Result<(), String> {
 
 fn make_request(args: &Swww) -> Result<Request, String> {
     match args {
-        Swww::Clear(c) => Ok(Request::Clear(communication::Clear {
+        Swww::Clear(c) => Ok(Request::Clear(ipc::Clear {
             color: c.color,
             outputs: split_cmdline_outputs(&c.outputs),
         })),
@@ -126,12 +126,12 @@ fn make_img_request(
     img_raw: image::RgbImage,
     dims: &[(u32, u32)],
     outputs: &[Vec<String>],
-) -> Result<communication::ImageRequest, String> {
+) -> Result<ipc::ImageRequest, String> {
     let transition = make_transition(img);
     let mut unique_requests = Vec::with_capacity(dims.len());
     for (dim, outputs) in dims.iter().zip(outputs) {
         unique_requests.push((
-            communication::Img {
+            ipc::Img {
                 img: match img.resize {
                     ResizeStrategy::No => img_pad(img_raw.clone(), *dim, &img.fill_color)?,
                     ResizeStrategy::Crop => {
@@ -168,7 +168,7 @@ fn get_dimensions_and_outputs(
 ) -> Result<(Vec<(u32, u32)>, Vec<Vec<String>>), String> {
     let mut outputs: Vec<Vec<String>> = Vec::new();
     let mut dims: Vec<(u32, u32)> = Vec::new();
-    let mut imgs: Vec<communication::BgImg> = Vec::new();
+    let mut imgs: Vec<ipc::BgImg> = Vec::new();
 
     let socket = connect_to_socket(5, 100)?;
     Request::Query.send(&socket)?;
@@ -228,7 +228,7 @@ fn make_animation_request(
             Err(e) => return Err(format!("failed to decode gif during animation: {e}")),
         };
         animations.push((
-            communication::Animation {
+            ipc::Animation {
                 animation: compress_frames(gif, *dim, filter, img.resize, &img.fill_color)?
                     .into_boxed_slice(),
                 sync: img.sync,
