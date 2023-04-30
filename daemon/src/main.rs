@@ -428,6 +428,7 @@ impl OutputHandler for Daemon {
                 layer_surface,
                 &self.pool,
             )));
+            self.animator.set_output_count(self.wallpapers.len() as u8);
         }
     }
 
@@ -470,6 +471,7 @@ impl OutputHandler for Daemon {
     ) {
         if let Some(output_info) = self.output_state.info(&output) {
             self.wallpapers.retain(|w| !w.has_id(output_info.id));
+            self.animator.set_output_count(self.wallpapers.len() as u8);
         }
     }
 }
