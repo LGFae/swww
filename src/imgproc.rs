@@ -103,8 +103,8 @@ pub fn compress_frames(
                     let tag = tags[i - 1];
                     let dur = durs[i - 1];
                     let comp_snd = comp_snd.clone();
-                    let prev_cur: &[Vec<u8>] =
-                        unsafe { std::mem::transmute(&rgb_frames[i - 1..i + 1]) };
+                    let prev_cur: &[Vec<u8>] = &rgb_frames[i - 1..i + 1];
+                    let prev_cur: &[Vec<u8>] = unsafe { std::mem::transmute(prev_cur) };
                     s.spawn(move || {
                         comp_snd
                             .send((BitPack::pack(&prev_cur[0], &prev_cur[1]).unwrap(), dur, tag))
@@ -113,8 +113,8 @@ pub fn compress_frames(
                 }
                 if i < len && tags[i + 1] == tag + 1 {
                     let comp_snd = comp_snd.clone();
-                    let prev_cur: &[Vec<u8>] =
-                        unsafe { std::mem::transmute(&rgb_frames[i..i + 2]) };
+                    let prev_cur: &[Vec<u8>] = &rgb_frames[i..i + 2];
+                    let prev_cur: &[Vec<u8>] = unsafe { std::mem::transmute(prev_cur) };
                     s.spawn(move || {
                         comp_snd
                             .send((BitPack::pack(&prev_cur[0], &prev_cur[1]).unwrap(), dur, tag))
@@ -190,7 +190,7 @@ pub fn img_pad(
     mut img: RgbImage,
     dimensions: (u32, u32),
     color: &[u8; 3],
-) -> Result<Box<[u8]>, String> {
+) -> Result<Vec<u8>, String> {
     let (padded_w, padded_h) = dimensions;
     let (padded_w, padded_h) = (padded_w as usize, padded_h as usize);
     let mut padded = Vec::with_capacity(padded_w * padded_w * 3);
@@ -236,7 +236,7 @@ pub fn img_pad(
         padded.push(color[0]);
     }
 
-    Ok(padded.into_boxed_slice())
+    Ok(padded)
 }
 
 /// Convert an ARGB &[u8] to BRGA in-place by swapping bytes
@@ -254,7 +254,7 @@ pub fn img_resize_fit(
     dimensions: (u32, u32),
     filter: FilterType,
     padding_color: &[u8; 3],
-) -> Result<Box<[u8]>, String> {
+) -> Result<Vec<u8>, String> {
     let (width, height) = dimensions;
     let (img_w, img_h) = img.dimensions();
     if (img_w, img_h) != (width, height) {
@@ -304,7 +304,7 @@ pub fn img_resize_fit(
         // The ARGB is 'little endian', so here we must  put the order
         // of bytes 'in reverse', so it needs to be BGRA.
         argb_to_brga(&mut res);
-        Ok(res.into_boxed_slice())
+        Ok(res)
     }
 }
 
@@ -312,7 +312,7 @@ pub fn img_resize_crop(
     img: RgbImage,
     dimensions: (u32, u32),
     filter: FilterType,
-) -> Result<Box<[u8]>, String> {
+) -> Result<Vec<u8>, String> {
     let (width, height) = dimensions;
     let (img_w, img_h) = img.dimensions();
     let mut resized_img = if (img_w, img_h) != (width, height) {
@@ -341,9 +341,9 @@ pub fn img_resize_crop(
             return Err(e.to_string());
         }
 
-        dst.into_vec().into_boxed_slice()
+        dst.into_vec()
     } else {
-        img.into_vec().into_boxed_slice()
+        img.into_vec()
     };
 
     // The ARGB is 'little endian', so here we must  put the order

@@ -143,7 +143,8 @@ fn make_img_request(
                         make_filter(&img.filter),
                         &img.fill_color,
                     )?,
-                },
+                }
+                .into_boxed_slice(),
                 path: match img.path.canonicalize() {
                     Ok(p) => p.to_string_lossy().to_string(),
                     Err(e) => {
