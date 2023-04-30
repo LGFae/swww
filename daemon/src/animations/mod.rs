@@ -1,5 +1,5 @@
 use log::error;
-use rkyv::{string::ArchivedString, vec::ArchivedVec, Deserialize};
+use rkyv::{string::ArchivedString, boxed::ArchivedBox, Deserialize};
 use smithay_client_toolkit::shm::slot::SlotPool;
 
 use std::{
@@ -39,7 +39,7 @@ impl Animator {
     fn spawn_transition_thread<'a, 'b>(
         scope: &'a Scope<'b, '_>,
         transition: &'b ArchivedTransition,
-        img: &'b ArchivedVec<u8>,
+        img: &'b ArchivedBox<[u8]>,
         path: &'b ArchivedString,
         mut wallpapers: Vec<Arc<Wallpaper>>,
         pool: Arc<Mutex<SlotPool>>,

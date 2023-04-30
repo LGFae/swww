@@ -87,7 +87,7 @@ fn make_request(args: &Swww) -> Result<Request, String> {
         })),
         Swww::Img(img) => {
             let requested_outputs = split_cmdline_outputs(&img.outputs);
-            let (dims, outputs) = get_dimensions_and_outputs(requested_outputs)?;
+            let (dims, outputs) = get_dimensions_and_outputs(&requested_outputs)?;
             let (img_raw, is_gif) = read_img(&img.path)?;
             if is_gif {
                 match std::thread::scope(|s| {
@@ -155,16 +155,16 @@ fn make_img_request(
                     }
                 },
             },
-            outputs.to_owned(),
+            outputs.to_owned().into_boxed_slice(),
         ));
     }
 
-    Ok((transition, unique_requests))
+    Ok((transition, unique_requests.into_boxed_slice()))
 }
 
 #[allow(clippy::type_complexity)]
 fn get_dimensions_and_outputs(
-    requested_outputs: Vec<String>,
+    requested_outputs: &[String],
 ) -> Result<(Vec<(u32, u32)>, Vec<Vec<String>>), String> {
     let mut outputs: Vec<Vec<String>> = Vec::new();
     let mut dims: Vec<(u32, u32)> = Vec::new();
@@ -233,13 +233,13 @@ fn make_animation_request(
                     .into_boxed_slice(),
                 sync: img.sync,
             },
-            outputs.to_owned(),
+            outputs.to_owned().into_boxed_slice(),
         ));
     }
-    Ok(animations)
+    Ok(animations.into_boxed_slice())
 }
 
-fn split_cmdline_outputs(outputs: &str) -> Vec<String> {
+fn split_cmdline_outputs(outputs: &str) -> Box<[String]> {
     outputs
         .split(',')
         .map(|s| s.to_owned())

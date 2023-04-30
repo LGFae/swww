@@ -194,13 +194,13 @@ pub struct Transition {
 #[derive(Archive, Serialize)]
 pub struct Clear {
     pub color: [u8; 3],
-    pub outputs: Vec<String>,
+    pub outputs: Box<[String]>,
 }
 
 #[derive(Archive, Serialize)]
 pub struct Img {
     pub path: String,
-    pub img: Vec<u8>,
+    pub img: Box<[u8]>,
 }
 
 #[derive(Archive, Serialize)]
@@ -209,8 +209,8 @@ pub struct Animation {
     pub sync: bool,
 }
 
-pub type AnimationRequest = Vec<(Animation, Vec<String>)>;
-pub type ImageRequest = (Transition, Vec<(Img, Vec<String>)>);
+pub type AnimationRequest = Box<[(Animation, Box<[String]>)]>;
+pub type ImageRequest = (Transition, Box<[(Img, Box<[String]>)]>);
 
 #[derive(Archive, Serialize)]
 pub enum Request {
@@ -249,7 +249,7 @@ impl Request {
 pub enum Answer {
     Ok,
     Err(String),
-    Info(Vec<BgInfo>),
+    Info(Box<[BgInfo]>),
 }
 
 impl Answer {
