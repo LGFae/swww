@@ -280,11 +280,28 @@ impl Daemon {
                 self.animator.animate(&self.pool, bytes, wallpapers)
             }
             ArchivedRequest::Clear(clear) => {
-                for wallpaper in self.find_wallpapers_by_names(&clear.outputs).iter_mut() {
-                    wallpaper.set_end_animation_flag();
-                    wallpaper.clear(&self.pool, clear.color)
+                let wallpapers = self.find_wallpapers_by_names(&clear.outputs);
+                let pool = Arc::clone(&self.pool);
+                let color = clear.color;
+                match std::thread::Builder::new()
+                    .stack_size(1 << 15)
+                    .name("clear".to_string())
+                    .spawn(move || {
+                        for wallpaper in &wallpapers {
+                            wallpaper.set_end_animation_flag();
+                        }
+                        for wallpaper in wallpapers {
+                            wallpaper.wait_for_animation();
+                            wallpaper.set_img_info(utils::ipc::BgImg::Color(color));
+                            let mut pool = wallpaper.lock_pool_to_get_canvas(&pool);
+                            wallpaper.clear(&mut pool, color);
+                            wallpaper.draw(&mut pool);
+                        }
+                        signal::kill(nix::unistd::Pid::this(), signal::SIGUSR1).unwrap();
+                    }) {
+                    Ok(_) => Answer::Ok,
+                    Err(e) => Answer::Err(format!("failed to spawn `clear` thread: {e}")),
                 }
-                Answer::Ok
             }
             ArchivedRequest::Init => Answer::Ok,
             ArchivedRequest::Kill => {

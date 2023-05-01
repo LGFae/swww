@@ -161,9 +161,8 @@ impl Wallpaper {
         }
     }
 
-    pub fn clear(&self, pool: &Mutex<SlotPool>, color: [u8; 3]) {
-        let mut pool = self.lock_pool_to_get_canvas(pool);
-        for pixel in self.get_canvas(&mut pool).chunks_exact_mut(4) {
+    pub fn clear(&self, pool: &mut LockedPool<'_>, color: [u8; 3]) {
+        for pixel in self.get_canvas(pool).chunks_exact_mut(4) {
             pixel[2] = color[0];
             pixel[1] = color[1];
             pixel[0] = color[2];
