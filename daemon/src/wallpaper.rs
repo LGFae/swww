@@ -65,7 +65,11 @@ impl Wallpaper {
             .lock()
             .unwrap()
             .new_slot(
-                width.get() as usize * height.get() as usize * scale_factor.get() as usize * 4,
+                width.get() as usize
+                    * height.get() as usize
+                    * scale_factor.get() as usize
+                    * scale_factor.get() as usize
+                    * 4,
             )
             .expect("failed to create slot in pool");
 
@@ -73,10 +77,10 @@ impl Wallpaper {
         layer_surface.set_anchor(Anchor::all());
         layer_surface.set_margin(0, 0, 0, 0);
         layer_surface.set_keyboard_interactivity(KeyboardInteractivity::None);
-        layer_surface.set_size(
-            width.get() as u32 * scale_factor.get() as u32,
-            height.get() as u32 * scale_factor.get() as u32,
-        );
+        layer_surface.set_size(width.get() as u32, height.get() as u32);
+        layer_surface
+            .set_buffer_scale(scale_factor.get() as u32)
+            .unwrap();
         // commit so that the compositor send the initial configuration
         layer_surface.commit();
 
@@ -203,9 +207,12 @@ impl Wallpaper {
         height: Option<NonZeroI32>,
         scale_factor: Option<NonZeroI32>,
     ) {
+        if let Some(s) = scale_factor {
+            self.layer_surface.set_buffer_scale(s.get() as u32).unwrap();
+        }
         let mut lock = self.inner.lock().unwrap();
         let width = width.unwrap_or(lock.width);
-        let height = height.unwrap_or(lock.width);
+        let height = height.unwrap_or(lock.height);
         let scale_factor = scale_factor.unwrap_or(lock.scale_factor);
         if (width, height, scale_factor) == (lock.width, lock.height, lock.scale_factor) {
             return;
@@ -220,13 +227,12 @@ impl Wallpaper {
                 lock.width.get() as usize
                     * lock.height.get() as usize
                     * lock.scale_factor.get() as usize
+                    * lock.scale_factor.get() as usize
                     * 4,
             )
             .expect("failed to create slot");
-        self.layer_surface.set_size(
-            lock.width.get() as u32 * lock.scale_factor.get() as u32,
-            lock.height.get() as u32 * lock.scale_factor.get() as u32,
-        );
+        self.layer_surface
+            .set_size(lock.width.get() as u32, lock.height.get() as u32);
         lock.img = BgImg::Color([0, 0, 0]);
         self.layer_surface.commit();
     }
