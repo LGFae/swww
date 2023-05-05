@@ -2,8 +2,9 @@ use clap::Parser;
 use image::codecs::gif::GifDecoder;
 use std::{os::unix::net::UnixStream, path::PathBuf, process::Stdio, time::Duration};
 
-use utils::ipc::{
-    self, get_socket_path, read_socket, AnimationRequest, Answer, ArchivedAnswer, Request,
+use utils::{
+    cache,
+    ipc::{self, get_socket_path, read_socket, AnimationRequest, Answer, ArchivedAnswer, Request},
 };
 
 mod imgproc;
@@ -76,6 +77,7 @@ fn main() -> Result<(), String> {
             }
         }
     }
+
     Ok(())
 }
 
@@ -90,13 +92,14 @@ fn make_request(args: &Swww) -> Result<Request, String> {
             let (dims, outputs) = get_dimensions_and_outputs(&requested_outputs)?;
             let (img_raw, is_gif) = read_img(&img.path)?;
             if is_gif {
-                match std::thread::scope(|s| {
-                    let animations = s.spawn(|| make_animation_request(img, &dims, &outputs));
+                match std::thread::scope(|s1| {
+                    let animations = s1.spawn(|| make_animation_request(img, &dims, &outputs));
                     let img_request = make_img_request(img, img_raw, &dims, &outputs)?;
                     let animations = match animations.join() {
                         Ok(a) => a,
                         Err(e) => Err(format!("{e:?}")),
                     };
+
                     let socket = connect_to_socket(5, 100)?;
                     Request::Img(img_request).send(&socket)?;
                     let bytes = read_socket(&socket)?;
@@ -220,6 +223,16 @@ fn make_animation_request(
     let filter = make_filter(&img.filter);
     let mut animations = Vec::with_capacity(dims.len());
     for (dim, outputs) in dims.iter().zip(outputs) {
+        match cache::load_animation_frames(&img.path, *dim) {
+            Ok(Some(mut animation)) => {
+                animation.sync = img.sync;
+                animations.push((animation, outputs.to_owned().into_boxed_slice()));
+                continue;
+            }
+            Ok(None) => (),
+            Err(e) => eprintln!("Error loading cache for {:?}: {e}", img.path),
+        }
+
         let imgbuf = match image::io::Reader::open(&img.path) {
             Ok(img) => img.into_inner(),
             Err(e) => return Err(format!("error opening image during animation: {e}")),
@@ -228,14 +241,14 @@ fn make_animation_request(
             Ok(gif) => gif,
             Err(e) => return Err(format!("failed to decode gif during animation: {e}")),
         };
-        animations.push((
-            ipc::Animation {
-                animation: compress_frames(gif, *dim, filter, img.resize, &img.fill_color)?
-                    .into_boxed_slice(),
-                sync: img.sync,
-            },
-            outputs.to_owned().into_boxed_slice(),
-        ));
+        let animation = ipc::Animation {
+            path: img.path.to_string_lossy().to_string(),
+            dimensions: *dim,
+            animation: compress_frames(gif, *dim, filter, img.resize, &img.fill_color)?
+                .into_boxed_slice(),
+            sync: img.sync,
+        };
+        animations.push((animation, outputs.to_owned().into_boxed_slice()));
     }
     Ok(animations.into_boxed_slice())
 }
@@ -249,18 +262,14 @@ fn split_cmdline_outputs(outputs: &str) -> Box<[String]> {
 }
 
 fn spawn_daemon(no_daemon: bool) -> Result<(), String> {
-    let cmd = "swww-daemon";
+    let mut cmd = std::process::Command::new("swww-daemon");
     if no_daemon {
-        match std::process::Command::new(cmd).status() {
+        match cmd.status() {
             Ok(_) => Ok(()),
             Err(e) => Err(format!("error spawning swww-daemon: {e}")),
         }
     } else {
-        match std::process::Command::new(cmd)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-        {
+        match cmd.stdout(Stdio::null()).stderr(Stdio::null()).spawn() {
             Ok(_) => Ok(()),
             Err(e) => Err(format!("error spawning swww-daemon: {e}")),
         }

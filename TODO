@@ -1,3 +1,6 @@
 Fully automated, complete testing, for every option
+	This is annoying because it would involve changing the output scaling and
+	testing many things with different setups. Maybe we can script it somehow?
 
-Example script + kanshi configuration to implement loading an image on output connection
+DEADLOCK - gif play on monitor 1, turn on monitor 2, gif play on monitor 2, turn off monitor 2
+	- doesn't always happen (seems to happen after I first turn on my pc)

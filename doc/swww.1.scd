@@ -52,6 +52,9 @@ protocol*. Typically, _wlr-roots_ based compositors.
 *swww* will create the following files in your system:
 	- A socket in _$XDG_RUNTIME_DIR/swww.socket_ or _/tmp/swww/swww.socket_, if
 	  $XDG_RUNTIME_DIR does not exist.
+	- Cache files in _$XDG_CACHE_HOME/swww_ or _$HOME/.cache/swww_ if
+	  $XDG_CACHE_HOME does not exist. These are used to set the wallpaper to the
+	  previous image when a monitor is (re)connected or turned on.
 
 # SEE ALSO
 *swww-daemon*(1) *swww-clear*(1) *swww-img*(1) *swww-init*(1) *swww-kill*(1)

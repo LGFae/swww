@@ -7,7 +7,7 @@ use std::{
     time::Duration,
 };
 
-use crate::comp_decomp::BitPack;
+use crate::{cache, comp_decomp::BitPack};
 
 #[derive(PartialEq, Archive, Serialize)]
 #[archive_attr(derive(Clone))]
@@ -203,9 +203,11 @@ pub struct Img {
     pub img: Box<[u8]>,
 }
 
-#[derive(Archive, Serialize)]
+#[derive(Archive, Serialize, Deserialize)]
 pub struct Animation {
     pub animation: Box<[(BitPack, Duration)]>,
+    pub path: String,
+    pub dimensions: (u32, u32),
     pub sync: bool,
 }
 
@@ -228,15 +230,36 @@ impl Request {
             Ok(bytes) => bytes,
             Err(e) => return Err(format!("Failed to serialize request: {e}")),
         };
-        let mut writer = BufWriter::new(stream);
-        if let Err(e) = writer.write_all(&bytes.len().to_ne_bytes()) {
-            return Err(format!("failed to write serialized request's length: {e}"));
-        }
-        if let Err(e) = writer.write_all(&bytes) {
-            Err(format!("failed to write serialized request: {e}"))
-        } else {
-            Ok(())
-        }
+
+        std::thread::scope(|s| {
+            if let Self::Animation(animations) = self {
+                s.spawn(|| {
+                    for (animation, _) in animations.iter() {
+                        if let Err(e) = cache::store_animation_frames(animation) {
+                            eprintln!("Error storing cache for {}: {e}", animation.path);
+                        }
+                    }
+                });
+            }
+            let mut writer = BufWriter::new(stream);
+            if let Err(e) = writer.write_all(&bytes.len().to_ne_bytes()) {
+                return Err(format!("failed to write serialized request's length: {e}"));
+            }
+            if let Err(e) = writer.write_all(&bytes) {
+                Err(format!("failed to write serialized request: {e}"))
+            } else {
+                if let Self::Img((_, imgs)) = self {
+                    for (Img { path, .. }, outputs) in imgs.iter() {
+                        for output in outputs.iter() {
+                            if let Err(e) = super::cache::store(output, path) {
+                                eprintln!("ERROR: failed to store cache: {e}");
+                            }
+                        }
+                    }
+                }
+                Ok(())
+            }
+        })
     }
 
     #[must_use]

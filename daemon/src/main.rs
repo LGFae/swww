@@ -4,7 +4,7 @@
 
 mod animations;
 mod wallpaper;
-use log::{debug, error, info, LevelFilter};
+use log::{debug, error, info, warn, LevelFilter};
 use nix::{
     poll::{poll, PollFd, PollFlags},
     sys::signal::{self, SigHandler, Signal},
@@ -232,6 +232,7 @@ struct Daemon {
     // swww stuff
     wallpapers: Vec<Arc<Wallpaper>>,
     animator: Animator,
+    initializing: bool,
 }
 
 impl Daemon {
@@ -258,6 +259,7 @@ impl Daemon {
 
             wallpapers: Vec::new(),
             animator: Animator::new(),
+            initializing: true,
         }
     }
 
@@ -280,6 +282,7 @@ impl Daemon {
                 self.animator.animate(&self.pool, bytes, wallpapers)
             }
             ArchivedRequest::Clear(clear) => {
+                self.initializing = false;
                 let wallpapers = self.find_wallpapers_by_names(&clear.outputs);
                 let pool = Arc::clone(&self.pool);
                 let color = clear.color;
@@ -310,6 +313,7 @@ impl Daemon {
             }
             ArchivedRequest::Query => Answer::Info(self.wallpapers_info()),
             ArchivedRequest::Img((_, imgs)) => {
+                self.initializing = false;
                 let mut used_wallpapers = Vec::new();
                 for img in imgs.iter() {
                     let mut wallpapers = self.find_wallpapers_by_names(&img.1);
@@ -439,6 +443,26 @@ impl OutputHandler for Daemon {
                 Some("swww"),
                 Some(&output),
             );
+
+            if !self.initializing {
+                if let Some(name) = &output_info.name {
+                    let name = name.to_owned();
+                    if let Err(e) = std::thread::Builder::new()
+                        .name("cache loader".to_string())
+                        .stack_size(1 << 14)
+                        .spawn(move || {
+                            // Wait for a bit for the output to be properly configured and stuff
+                            // this is obviously not ideal, but it solves the vast majority of problems
+                            std::thread::sleep(std::time::Duration::from_millis(100));
+                            if let Err(e) = utils::cache::load(&name) {
+                                warn!("failed to load cache: {e}");
+                            }
+                        })
+                    {
+                        warn!("failed to spawn `cache loader` thread: {e}");
+                    }
+                }
+            }
 
             self.wallpapers.push(Arc::new(Wallpaper::new(
                 output_info,

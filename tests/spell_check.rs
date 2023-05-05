@@ -25,7 +25,11 @@ fn spell_check_code_and_man_pages() {
     {
         Ok(output) => {
             if !output.status.success() {
-                panic!("\n{}", String::from_utf8_lossy(&output.stdout));
+                panic!(
+                    "\nstdout:{}\nstderr:{}\n",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr)
+                );
             }
         }
         Err(e) => match e.kind() {

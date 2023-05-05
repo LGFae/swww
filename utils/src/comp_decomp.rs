@@ -103,7 +103,7 @@ fn unpack_bytes(buf: &mut [u8], diff: &[u8]) {
 }
 
 /// This struct represents the cached difference between the previous frame and the next
-#[derive(Archive, Serialize)]
+#[derive(Archive, Serialize, Deserialize)]
 pub struct BitPack {
     inner: Box<[u8]>,
     /// This field will ensure we won't ever try to unpack the images on a buffer of the wrong size,

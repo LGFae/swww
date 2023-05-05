@@ -13,6 +13,7 @@ pkill swww-daemon
 set -e
 
 # don't forget testing everything
+cargo build
 cargo test -- --include-ignored
 ./doc/gen.sh # make sure the docs "compile"
 

@@ -198,7 +198,7 @@ recommend:
 
 ## Acknowledgments
 
-A huge thanks to everyone involed in the [smithay](https://github.com/Smithay)
+A huge thanks to everyone involved in the [smithay](https://github.com/Smithay)
 project. Making this program would not have been possible without it. In fact,
 the first versions of swww were quite literally copy pasted from the
 [layer shell example in the client-toolkit
