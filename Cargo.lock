@@ -1292,7 +1292,6 @@ dependencies = [
  "log",
  "rand",
  "sd-notify",
- "simplelog",
  "smithay-client-toolkit",
  "utils",
 ]
@@ -1442,6 +1441,7 @@ dependencies = [
  "lzzzz",
  "rand",
  "serde",
+ "simplelog",
 ]
 
 [[package]]

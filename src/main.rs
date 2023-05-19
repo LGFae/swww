@@ -14,12 +14,14 @@ use std::{
 use utils::{
     communication::{self, get_socket_path, AnimationRequest, Answer, Coord, Position, Request},
     comp_decomp::BitPack,
+    make_logger,
 };
 
 mod cli;
 use cli::Swww;
 
 fn main() -> Result<(), String> {
+    make_logger();
     let swww = Swww::parse();
     if let Swww::Init { no_daemon } = &swww {
         match is_daemon_running() {

@@ -1,5 +1,4 @@
 use log::{debug, error, info, warn};
-use simplelog::{ColorChoice, LevelFilter, TermLogger, TerminalMode, ThreadLogMode};
 
 use smithay_client_toolkit::{
     environment::Environment,
@@ -32,6 +31,7 @@ use std::{
 use utils::{
     communication::{get_socket_path, Answer, BgImg, BgInfo, Clear, Img, Request},
     comp_decomp::ReadiedPack,
+    make_logger,
 };
 
 mod processor;
@@ -258,21 +258,6 @@ fn main() -> Result<(), String> {
 
     info!("Goodbye!");
     Ok(())
-}
-
-fn make_logger() {
-    let config = simplelog::ConfigBuilder::new()
-        .set_thread_level(LevelFilter::Info) //let me see where the processing is happening
-        .set_thread_mode(ThreadLogMode::Both)
-        .build();
-
-    TermLogger::init(
-        LevelFilter::Debug,
-        config,
-        TerminalMode::Stderr,
-        ColorChoice::AlwaysAnsi,
-    )
-    .expect("Failed to initialize logger. Cancelling...");
 }
 
 fn create_backgrounds(

@@ -8,7 +8,6 @@ edition = "2021"
 [dependencies]
 smithay-client-toolkit = { version = "0.16", default-features = false, features = ["calloop"] }
 log = { version = "0.4", features = ["max_level_debug", "release_max_level_info"] }
-simplelog = "0.12"
 keyframe = "1.1"
 
 utils = { path = "../utils" }
