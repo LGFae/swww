@@ -1276,11 +1276,14 @@ name = "swww"
 version = "0.7.3"
 dependencies = [
  "assert_cmd",
+ "bincode",
  "clap 4.2.1",
  "clap_complete",
  "fast_image_resize",
  "image",
+ "log",
  "rand",
+ "serde",
  "utils",
 ]
 

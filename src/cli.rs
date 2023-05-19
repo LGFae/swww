@@ -36,7 +36,7 @@ fn from_hex(hex: &str) -> Result<[u8; 3], String> {
     Ok(color)
 }
 
-#[derive(Clone)]
+#[derive(Clone, Hash)]
 pub enum Filter {
     Nearest,
     Bilinear,

@@ -11,12 +11,14 @@ use std::{
     time::Duration,
 };
 
+use animation_cache::AnimationCache;
 use utils::{
     communication::{self, get_socket_path, AnimationRequest, Answer, Coord, Position, Request},
     comp_decomp::BitPack,
     make_logger,
 };
 
+mod animation_cache;
 mod cli;
 use cli::Swww;
 
@@ -251,7 +253,18 @@ fn make_animation_request(
 ) -> Result<AnimationRequest, String> {
     let filter = make_filter(&img.filter);
     let mut animations = Vec::with_capacity(dims.len());
+    let animation_cache = AnimationCache::init()?;
     for (dim, outputs) in dims.iter().zip(outputs) {
+        if let Some(cache) = animation_cache.load(img, dim)? {
+            animations.push((
+                communication::Animation {
+                    animation: cache.animation,
+                    sync: img.sync,
+                },
+                outputs.to_owned(),
+            ));
+            continue;
+        }
         let imgbuf = match image::io::Reader::open(&img.path) {
             Ok(img) => img.into_inner(),
             Err(e) => return Err(format!("error opening image during animation: {e}")),
@@ -260,10 +273,12 @@ fn make_animation_request(
             Ok(gif) => gif,
             Err(e) => return Err(format!("failed to decode gif during animation: {e}")),
         };
+        let animation =
+            compress_frames(gif, *dim, filter, img.no_resize, &img.fill_color)?.into_boxed_slice();
+        animation_cache.save(img, dim, &animation)?;
         animations.push((
             communication::Animation {
-                animation: compress_frames(gif, *dim, filter, img.no_resize, &img.fill_color)?
-                    .into_boxed_slice(),
+                animation,
                 sync: img.sync,
             },
             outputs.to_owned(),
