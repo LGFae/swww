@@ -23,7 +23,7 @@ strip = false
 [dependencies]
 image = "0.24"
 fast_image_resize = "2.7"
-clap = { version = "4.2", features = ["derive", "wrap_help", "env"] }
+clap = { version = "4.3", features = ["derive", "wrap_help", "env"] }
 rand = "0.8"
 utils = { path = "utils" }
 
@@ -31,5 +31,5 @@ utils = { path = "utils" }
 assert_cmd = "2.0"
 
 [build-dependencies]
-clap = { version = "4.2", features = ["derive", "env"] }
-clap_complete = "4.2"
+clap = { version = "4.3", features = ["derive", "env"] }
+clap_complete = "4.3"

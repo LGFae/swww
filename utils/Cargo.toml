@@ -10,7 +10,7 @@ rkyv = "0.7"
 
 [dev-dependencies]
 rand = "0.8"
-criterion = "0.4"
+criterion = "0.5"
 
 [[bench]]
 name = "compression"
