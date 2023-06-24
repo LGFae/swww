@@ -14,26 +14,24 @@ use utils::ipc::{
 
 use crate::wallpaper::Wallpaper;
 
-mod sync_barrier;
+mod anim_barrier;
 mod transitions;
 use transitions::Transition;
+
+use self::anim_barrier::ArcAnimBarrier;
 
 ///The default thread stack size of 2MiB is way too overkill for our purposes
 const STACK_SIZE: usize = 1 << 17; //128KiB
 
 pub struct Animator {
-    sync_barrier: Arc<sync_barrier::SyncBarrier>,
+    anim_barrier: ArcAnimBarrier,
 }
 
 impl Animator {
     pub fn new() -> Self {
         Self {
-            sync_barrier: Arc::new(sync_barrier::SyncBarrier::new(0)),
+            anim_barrier: ArcAnimBarrier::new(),
         }
-    }
-
-    pub fn set_output_count(&mut self, outputs_count: u8) {
-        self.sync_barrier.set_goal(outputs_count);
     }
 
     fn spawn_transition_thread<'a, 'b>(
@@ -101,7 +99,7 @@ impl Animator {
         animation: &'b ArchivedAnimation,
         mut wallpapers: Vec<Arc<Wallpaper>>,
         pool: Arc<Mutex<SlotPool>>,
-        barrier: Arc<sync_barrier::SyncBarrier>,
+        barrier: ArcAnimBarrier,
     ) where
         'a: 'b,
     {
@@ -123,9 +121,7 @@ impl Animator {
 
                 for (frame, duration) in animation.animation.iter().cycle() {
                     let duration = duration.deserialize(&mut rkyv::Infallible).unwrap();
-                    if animation.sync {
-                        barrier.inc_and_wait(duration);
-                    }
+                    barrier.wait(duration);
 
                     wallpapers.retain(|wallpaper| {
                         if wallpaper.animation_should_stop() {
@@ -165,13 +161,13 @@ impl Animator {
         wallpapers: Vec<Vec<Arc<Wallpaper>>>,
     ) -> Answer {
         let pool = Arc::clone(pool);
-        let barrier = Arc::clone(&self.sync_barrier);
+        let barrier = self.anim_barrier.clone();
         match thread::Builder::new().stack_size(1 << 15).spawn(move || {
             thread::scope(|s| {
                 if let ArchivedRequest::Animation(animations) = Request::receive(&bytes) {
                     for ((animation, _), wallpapers) in animations.iter().zip(wallpapers) {
                         let pool = Arc::clone(&pool);
-                        let barrier = Arc::clone(&barrier);
+                        let barrier = barrier.clone();
                         Self::spawn_animation_thread(s, animation, wallpapers, pool, barrier);
                     }
                 }

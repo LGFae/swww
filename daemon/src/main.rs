@@ -464,12 +464,13 @@ impl OutputHandler for Daemon {
                 }
             }
 
+            debug!("New output: {output_info:?}");
             self.wallpapers.push(Arc::new(Wallpaper::new(
                 output_info,
                 layer_surface,
                 &self.pool,
             )));
-            self.animator.set_output_count(self.wallpapers.len() as u8);
+            debug!("Output count: {}", self.wallpapers.len());
         }
     }
 
@@ -512,7 +513,7 @@ impl OutputHandler for Daemon {
     ) {
         if let Some(output_info) = self.output_state.info(&output) {
             self.wallpapers.retain(|w| !w.has_id(output_info.id));
-            self.animator.set_output_count(self.wallpapers.len() as u8);
+            debug!("Destroyed output: {output_info:?}");
         }
     }
 }

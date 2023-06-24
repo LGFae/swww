@@ -30,6 +30,11 @@ rm -r $XDG_CACHE_HOME/swww # OR
 rm -r $HOME/.cache/swww
 ```
 
+#### Aditions:
+
+We have reworked the way we do syncronization between monitors. It should sync
+all monitors animations automatically.
+
 #### Summary:
 
 With all of the changes above, **I've managed to reduce memory consumption

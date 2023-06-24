@@ -192,20 +192,6 @@ swww-img
 
 	Default is : 20,20
 
-*--sync*
-	Sync the animations' frames between the monitors.
-
-	Activating this will cause a monitor's animation to wait until all other
-	monitor's are ready to update, and then update them all at once. Note if you
-	want to send different `gif`s to different monitors and have them synced,
-	you will have to call `swww img --sync` *every time*.
-
-	Furthermore, if you only set `--sync` to one monitor and not the others,
-	that monitor will not animate anything, while the others will animate
-	out-of-sync.
-
-	Finally, note this only applies to `gif` animations, not the transitions.
-
 *-h*, *--help*
 	Print help (see a summary with '-h')
 

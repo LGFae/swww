@@ -4,3 +4,6 @@ Fully automated, complete testing, for every option
 
 DEADLOCK - gif play on monitor 1, turn on monitor 2, gif play on monitor 2, turn off monitor 2
 	- doesn't always happen (seems to happen after I first turn on my pc)
+
+DEADLOCK - gif play, we resize the monitor with wlr-randr -> freezzes
+	- maybe related to the above
