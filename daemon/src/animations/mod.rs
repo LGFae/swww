@@ -6,6 +6,7 @@ use std::{
     sync::Arc,
     sync::Mutex,
     thread::{self, Scope},
+    time::Duration,
 };
 
 use utils::ipc::{
@@ -78,17 +79,23 @@ impl Animator {
         wallpapers: Vec<Vec<Arc<Wallpaper>>>,
     ) -> Answer {
         let pool = Arc::clone(pool);
-        match thread::Builder::new().stack_size(1 << 15).spawn(move || {
-            if let ArchivedRequest::Img((transition, imgs)) = Request::receive(&bytes) {
-                thread::scope(|s| {
-                    for ((ArchivedImg { img, path }, _), wallpapers) in imgs.iter().zip(wallpapers)
-                    {
-                        let pool = Arc::clone(&pool);
-                        Self::spawn_transition_thread(s, transition, img, path, wallpapers, pool);
-                    }
-                });
-            }
-        }) {
+        match thread::Builder::new()
+            .stack_size(1 << 15)
+            .name("animaiton spawner".to_string())
+            .spawn(move || {
+                if let ArchivedRequest::Img((transition, imgs)) = Request::receive(&bytes) {
+                    thread::scope(|s| {
+                        for ((ArchivedImg { img, path }, _), wallpapers) in
+                            imgs.iter().zip(wallpapers)
+                        {
+                            let pool = Arc::clone(&pool);
+                            Self::spawn_transition_thread(
+                                s, transition, img, path, wallpapers, pool,
+                            );
+                        }
+                    });
+                }
+            }) {
             Ok(_) => Answer::Ok,
             Err(e) => Answer::Err(e.to_string()),
         }
@@ -111,6 +118,7 @@ impl Animator {
                 if animation.animation.len() == 1 {
                     return;
                 }
+                log::debug!("Starting animation");
 
                 for wallpaper in &wallpapers {
                     wallpaper.wait_for_animation();
@@ -120,8 +128,8 @@ impl Animator {
                 let mut now = std::time::Instant::now();
 
                 for (frame, duration) in animation.animation.iter().cycle() {
-                    let duration = duration.deserialize(&mut rkyv::Infallible).unwrap();
-                    barrier.wait(duration);
+                    let duration: Duration = duration.deserialize(&mut rkyv::Infallible).unwrap();
+                    barrier.wait(duration.div_f32(2.0));
 
                     wallpapers.retain(|wallpaper| {
                         if wallpaper.animation_should_stop() {
@@ -162,17 +170,20 @@ impl Animator {
     ) -> Answer {
         let pool = Arc::clone(pool);
         let barrier = self.anim_barrier.clone();
-        match thread::Builder::new().stack_size(1 << 15).spawn(move || {
-            thread::scope(|s| {
-                if let ArchivedRequest::Animation(animations) = Request::receive(&bytes) {
-                    for ((animation, _), wallpapers) in animations.iter().zip(wallpapers) {
-                        let pool = Arc::clone(&pool);
-                        let barrier = barrier.clone();
-                        Self::spawn_animation_thread(s, animation, wallpapers, pool, barrier);
+        match thread::Builder::new()
+            .stack_size(1 << 15)
+            .name("animaiton spawner".to_string())
+            .spawn(move || {
+                thread::scope(|s| {
+                    if let ArchivedRequest::Animation(animations) = Request::receive(&bytes) {
+                        for ((animation, _), wallpapers) in animations.iter().zip(wallpapers) {
+                            let pool = Arc::clone(&pool);
+                            let barrier = barrier.clone();
+                            Self::spawn_animation_thread(s, animation, wallpapers, pool, barrier);
+                        }
                     }
-                }
-            });
-        }) {
+                });
+            }) {
             Ok(_) => Answer::Ok,
             Err(e) => Answer::Err(e.to_string()),
         }

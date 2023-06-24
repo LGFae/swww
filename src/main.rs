@@ -92,7 +92,7 @@ fn make_request(args: &Swww) -> Result<Request, String> {
             let (dims, outputs) = get_dimensions_and_outputs(&requested_outputs)?;
             let (img_raw, is_gif) = read_img(&img.path)?;
             if is_gif {
-                match std::thread::scope(|s1| {
+                match std::thread::scope::<_, Result<_, String>>(|s1| {
                     let animations = s1.spawn(|| make_animation_request(img, &dims, &outputs));
                     let img_request = make_img_request(img, img_raw, &dims, &outputs)?;
                     let animations = match animations.join() {
