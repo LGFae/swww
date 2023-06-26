@@ -16,6 +16,7 @@ use smithay_client_toolkit::{
 
 use wayland_client::protocol::{wl_shm, wl_surface::WlSurface};
 
+#[derive(Debug)]
 pub enum AnimationState {
     Animating,
     ShouldStop,
@@ -124,9 +125,16 @@ impl Wallpaper {
     where
         F: FnOnce(&mut [u8]) -> T,
     {
-        let (inner, mut pool) = self.lock();
-        let canvas = inner.slot.canvas(&mut pool).unwrap();
-        f(canvas)
+        loop {
+            let (inner, mut pool) = self.lock();
+            if let Some(canvas) = inner.slot.canvas(&mut pool) {
+                log::debug!("got canvas! - output {}", self.output_id);
+                return f(canvas);
+            }
+            log::debug!("failed to get canvas - output {}", self.output_id);
+            // sleep to mitigate busy waiting
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
     }
 
     pub fn get_img_info(&self) -> BgImg {
@@ -135,6 +143,7 @@ impl Wallpaper {
 
     pub fn begin_animation(&self) {
         let mut lock = self.lock().0;
+        log::debug!("beginning animation for output: {}", self.output_id);
         while !matches!(lock.animation_state, AnimationState::Idle) {
             lock = self.condvar.wait(lock).unwrap();
         }
@@ -144,6 +153,7 @@ impl Wallpaper {
     pub fn set_end_animation_flag(&self) {
         let mut lock = self.lock().0;
         if !matches!(lock.animation_state, AnimationState::Idle) {
+            log::debug!("setting end animation flags for output: {}", self.output_id,);
             lock.animation_state = AnimationState::ShouldStop;
         }
     }
@@ -155,15 +165,18 @@ impl Wallpaper {
 
     pub fn end_animation(&self) {
         let mut lock = self.lock().0;
+        log::debug!("ending animation for output: {}", self.output_id);
         lock.animation_state = AnimationState::Idle;
         self.condvar.notify_all();
     }
 
     pub fn wait_for_animation(&self) {
         let mut lock = self.lock().0;
+        log::debug!("wait for output {} animation to finish...", self.output_id);
         while !matches!(lock.animation_state, AnimationState::Idle) {
             lock = self.condvar.wait(lock).unwrap();
         }
+        log::debug!("output {} animation to finished!", self.output_id);
     }
 
     pub fn clear(&self, color: [u8; 3]) {
@@ -177,6 +190,7 @@ impl Wallpaper {
     }
 
     pub fn set_img_info(&self, img_info: BgImg) {
+        log::debug!("output {} - drawing: {}", self.output_id, img_info);
         self.lock().0.img = img_info;
     }
 
@@ -186,7 +200,6 @@ impl Wallpaper {
 
     pub fn draw(&self) {
         let (inner, mut pool) = self.lock();
-        log::debug!("drawing: {}", inner.img);
 
         let width = inner.width.get() * inner.scale_factor.get();
         let height = inner.height.get() * inner.scale_factor.get();
@@ -218,7 +231,10 @@ impl Wallpaper {
         if (width, height, scale_factor) == (inner.width, inner.height, inner.scale_factor) {
             return;
         }
-        inner.animation_state = AnimationState::ShouldStop;
+
+        if matches!(inner.animation_state, AnimationState::Animating) {
+            inner.animation_state = AnimationState::ShouldStop;
+        }
         inner.width = width;
         inner.height = height;
         inner.scale_factor = scale_factor;

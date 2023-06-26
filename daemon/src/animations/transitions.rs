@@ -90,7 +90,7 @@ impl Transition {
             wallpaper.begin_animation();
         }
 
-        debug!("Starting transition");
+        debug!("Starting transitions");
         match self.transition_type {
             ArchivedTransitionType::Simple => self.simple(new_img),
             ArchivedTransitionType::Wipe => self.wipe(new_img),
@@ -99,7 +99,7 @@ impl Transition {
             ArchivedTransitionType::Wave => self.wave(new_img),
             ArchivedTransitionType::Fade => self.fade(new_img),
         };
-        debug!("Transition finished");
+        debug!("Transitions finished");
 
         for wallpaper in self.wallpapers.iter_mut() {
             wallpaper.end_animation();
