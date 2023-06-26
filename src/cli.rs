@@ -1,6 +1,6 @@
 /// Note: this file only has basic declarations and some definitions in order to be possible to
 /// import it in the build script, to automate shell completion
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use std::path::PathBuf;
 
 fn from_hex(hex: &str) -> Result<[u8; 3], String> {
@@ -180,6 +180,21 @@ pub struct Clear {
     pub outputs: String,
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, ValueEnum)]
+pub enum ResizeStrategy {
+    /// Do not resize the image
+    ///
+    /// If this is set, the image won't be resized, and will be centralized in the middle of the
+    /// screen instead. If it is smaller than the screen's size, it will be padded with the value
+    /// of `fill_color`, below.
+    No,
+    #[default]
+    /// Resize the image to fill the whole screen, cropping out parts that don't fit
+    Crop,
+    /// Resize the image to fit inside the screen, preserving the original aspect ratio
+    Fit,
+}
+
 #[derive(Parser)]
 pub struct Img {
     /// Path to the image to display
@@ -191,15 +206,24 @@ pub struct Img {
     #[arg(short, long, default_value = "")]
     pub outputs: String,
 
-    /// Do not resize the image
+    /// Do not resize the image. Equivalent to `--resize=no`
     ///
     /// If this is set, the image won't be resized, and will be centralized in the middle of the
     /// screen instead. If it is smaller than the screen's size, it will be padded with the value
     /// of `fill_color`, below.
+    #[deprecated(since = "0.7.3", note = "use `resize` instead")]
     #[arg(long)]
     pub no_resize: bool,
 
-    /// Which color to fill the padding with when not resizing
+    /// Whether to resize the image and the method by which to resize it
+    #[arg(
+        long,
+        default_value = "crop",
+        default_value_if("no_resize", "true", "no")
+    )]
+    pub resize: ResizeStrategy,
+
+    /// Which color to fill the padding with when output image does not fill screen
     #[arg(value_parser = from_hex, long, default_value = "000000")]
     pub fill_color: [u8; 3],
 
