@@ -1,10 +1,8 @@
 use log::error;
 use rkyv::{boxed::ArchivedBox, string::ArchivedString, Deserialize};
-use smithay_client_toolkit::shm::slot::SlotPool;
 
 use std::{
     sync::Arc,
-    sync::Mutex,
     thread::{self, Scope},
     time::Duration,
 };
@@ -41,7 +39,6 @@ impl Animator {
         img: &'b ArchivedBox<[u8]>,
         path: &'b ArchivedString,
         mut wallpapers: Vec<Arc<Wallpaper>>,
-        pool: Arc<Mutex<SlotPool>>,
     ) where
         'a: 'b,
     {
@@ -58,7 +55,7 @@ impl Animator {
                 let dimensions = wallpapers[0].get_dimensions();
 
                 if img.len() == dimensions.0 as usize * dimensions.1 as usize * 3 {
-                    Transition::new(wallpapers, dimensions, transition.clone(), pool).execute(img);
+                    Transition::new(wallpapers, dimensions, transition.clone()).execute(img);
                 } else {
                     error!(
                         "image is of wrong size! Image len: {}, expected size: {}",
@@ -72,13 +69,7 @@ impl Animator {
         }
     }
 
-    pub fn transition(
-        &mut self,
-        pool: &Arc<Mutex<SlotPool>>,
-        bytes: Vec<u8>,
-        wallpapers: Vec<Vec<Arc<Wallpaper>>>,
-    ) -> Answer {
-        let pool = Arc::clone(pool);
+    pub fn transition(&mut self, bytes: Vec<u8>, wallpapers: Vec<Vec<Arc<Wallpaper>>>) -> Answer {
         match thread::Builder::new()
             .stack_size(1 << 15)
             .name("animaiton spawner".to_string())
@@ -88,10 +79,7 @@ impl Animator {
                         for ((ArchivedImg { img, path }, _), wallpapers) in
                             imgs.iter().zip(wallpapers)
                         {
-                            let pool = Arc::clone(&pool);
-                            Self::spawn_transition_thread(
-                                s, transition, img, path, wallpapers, pool,
-                            );
+                            Self::spawn_transition_thread(s, transition, img, path, wallpapers);
                         }
                     });
                 }
@@ -105,7 +93,6 @@ impl Animator {
         scope: &'a Scope<'b, '_>,
         animation: &'b ArchivedAnimation,
         mut wallpapers: Vec<Arc<Wallpaper>>,
-        pool: Arc<Mutex<SlotPool>>,
         barrier: ArcAnimBarrier,
     ) where
         'a: 'b,
@@ -136,13 +123,11 @@ impl Animator {
                             wallpaper.end_animation();
                             return false;
                         }
-                        let mut pool = wallpaper.lock_pool_to_get_canvas(&pool);
-                        let canvas = wallpaper.get_canvas(&mut pool);
-                        if !frame.unpack(canvas) {
+                        if !wallpaper.canvas_change(|canvas| frame.unpack(canvas)) {
                             error!("failed to unpack frame, canvas has the wrong size");
                             return false;
                         }
-                        wallpaper.draw(&mut pool);
+                        wallpaper.draw();
                         true
                     });
 
@@ -162,13 +147,7 @@ impl Animator {
         }
     }
 
-    pub fn animate(
-        &mut self,
-        pool: &Arc<Mutex<SlotPool>>,
-        bytes: Vec<u8>,
-        wallpapers: Vec<Vec<Arc<Wallpaper>>>,
-    ) -> Answer {
-        let pool = Arc::clone(pool);
+    pub fn animate(&mut self, bytes: Vec<u8>, wallpapers: Vec<Vec<Arc<Wallpaper>>>) -> Answer {
         let barrier = self.anim_barrier.clone();
         match thread::Builder::new()
             .stack_size(1 << 15)
@@ -177,9 +156,8 @@ impl Animator {
                 thread::scope(|s| {
                     if let ArchivedRequest::Animation(animations) = Request::receive(&bytes) {
                         for ((animation, _), wallpapers) in animations.iter().zip(wallpapers) {
-                            let pool = Arc::clone(&pool);
                             let barrier = barrier.clone();
-                            Self::spawn_animation_thread(s, animation, wallpapers, pool, barrier);
+                            Self::spawn_animation_thread(s, animation, wallpapers, barrier);
                         }
                     }
                 });

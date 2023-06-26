@@ -2,7 +2,7 @@ use utils::ipc::BgImg;
 
 use std::{
     num::NonZeroI32,
-    sync::{Condvar, Mutex, MutexGuard},
+    sync::{Arc, Condvar, Mutex, MutexGuard},
 };
 
 use smithay_client_toolkit::{
@@ -22,8 +22,6 @@ pub enum AnimationState {
     Idle,
 }
 
-pub struct LockedPool<'a>(MutexGuard<'a, SlotPool>);
-
 /// Owns all the necessary information for drawing.
 struct WallpaperInner {
     width: NonZeroI32,
@@ -41,13 +39,14 @@ pub struct Wallpaper {
     inner: Mutex<WallpaperInner>,
     layer_surface: LayerSurface,
     condvar: Condvar,
+    pool: Arc<Mutex<SlotPool>>,
 }
 
 impl Wallpaper {
     pub fn new(
         output_info: OutputInfo,
         layer_surface: LayerSurface,
-        pool: &Mutex<SlotPool>,
+        pool: Arc<Mutex<SlotPool>>,
     ) -> Self {
         let (width, height): (NonZeroI32, NonZeroI32) = if let Some(size) = output_info.logical_size
         {
@@ -87,6 +86,7 @@ impl Wallpaper {
         Self {
             output_id: output_info.id,
             layer_surface,
+            pool,
             inner: Mutex::new(WallpaperInner {
                 width,
                 height,
@@ -108,32 +108,33 @@ impl Wallpaper {
     }
 
     pub fn get_dimensions(&self) -> (u32, u32) {
-        let lock = self.inner.lock().unwrap();
-        let width = lock.width.get() as u32;
-        let height = lock.height.get() as u32;
-        let scale_factor = lock.scale_factor.get() as u32;
+        let (inner, _) = self.lock();
+        let width = inner.width.get() as u32;
+        let height = inner.height.get() as u32;
+        let scale_factor = inner.scale_factor.get() as u32;
         (width * scale_factor, height * scale_factor)
     }
 
-    pub fn lock_pool_to_get_canvas<'a>(&self, pool: &'a Mutex<SlotPool>) -> LockedPool<'a> {
-        let mut lock = self.inner.lock().unwrap();
-        while lock.slot.has_active_buffers() {
-            lock = self.condvar.wait(lock).unwrap();
-        }
-        LockedPool(pool.lock().unwrap())
+    #[inline]
+    fn lock(&self) -> (MutexGuard<WallpaperInner>, MutexGuard<SlotPool>) {
+        (self.inner.lock().unwrap(), self.pool.lock().unwrap())
     }
 
-    pub fn get_canvas<'a>(&'a self, pool: &'a mut LockedPool<'_>) -> &'a mut [u8] {
-        let lock = self.inner.lock().unwrap();
-        lock.slot.canvas(&mut pool.0).unwrap()
+    pub fn canvas_change<F, T>(&self, f: F) -> T
+    where
+        F: FnOnce(&mut [u8]) -> T,
+    {
+        let (inner, mut pool) = self.lock();
+        let canvas = inner.slot.canvas(&mut pool).unwrap();
+        f(canvas)
     }
 
     pub fn get_img_info(&self) -> BgImg {
-        self.inner.lock().unwrap().img.clone()
+        self.lock().0.img.clone()
     }
 
     pub fn begin_animation(&self) {
-        let mut lock = self.inner.lock().unwrap();
+        let mut lock = self.lock().0;
         while !matches!(lock.animation_state, AnimationState::Idle) {
             lock = self.condvar.wait(lock).unwrap();
         }
@@ -141,59 +142,60 @@ impl Wallpaper {
     }
 
     pub fn set_end_animation_flag(&self) {
-        let mut lock = self.inner.lock().unwrap();
+        let mut lock = self.lock().0;
         if !matches!(lock.animation_state, AnimationState::Idle) {
             lock.animation_state = AnimationState::ShouldStop;
         }
     }
 
     pub fn animation_should_stop(&self) -> bool {
-        let lock = self.inner.lock().unwrap();
+        let lock = self.lock().0;
         matches!(lock.animation_state, AnimationState::ShouldStop)
     }
 
     pub fn end_animation(&self) {
-        let mut lock = self.inner.lock().unwrap();
+        let mut lock = self.lock().0;
         lock.animation_state = AnimationState::Idle;
         self.condvar.notify_all();
     }
 
     pub fn wait_for_animation(&self) {
-        let mut lock = self.inner.lock().unwrap();
+        let mut lock = self.lock().0;
         while !matches!(lock.animation_state, AnimationState::Idle) {
             lock = self.condvar.wait(lock).unwrap();
         }
     }
 
-    pub fn clear(&self, pool: &mut LockedPool<'_>, color: [u8; 3]) {
-        for pixel in self.get_canvas(pool).chunks_exact_mut(4) {
-            pixel[2] = color[0];
-            pixel[1] = color[1];
-            pixel[0] = color[2];
-        }
+    pub fn clear(&self, color: [u8; 3]) {
+        self.canvas_change(|canvas| {
+            for pixel in canvas.chunks_exact_mut(4) {
+                pixel[2] = color[0];
+                pixel[1] = color[1];
+                pixel[0] = color[2];
+            }
+        });
     }
 
     pub fn set_img_info(&self, img_info: BgImg) {
-        self.inner.lock().unwrap().img = img_info;
+        self.lock().0.img = img_info;
     }
 
     pub fn notify_condvar(&self) {
         self.condvar.notify_all()
     }
 
-    pub fn draw(&self, pool: &mut LockedPool<'_>) {
-        let lock = self.inner.lock().unwrap();
-        log::debug!("drawing: {}", lock.img);
+    pub fn draw(&self) {
+        let (inner, mut pool) = self.lock();
+        log::debug!("drawing: {}", inner.img);
 
-        let width = lock.width.get() * lock.scale_factor.get();
-        let height = lock.height.get() * lock.scale_factor.get();
+        let width = inner.width.get() * inner.scale_factor.get();
+        let height = inner.height.get() * inner.scale_factor.get();
         let stride = width * 4;
 
         let buf = pool
-            .0
-            .create_buffer_in(&lock.slot, width, height, stride, wl_shm::Format::Xrgb8888)
+            .create_buffer_in(&inner.slot, width, height, stride, wl_shm::Format::Xrgb8888)
             .unwrap();
-        drop(lock);
+        drop(inner);
         let surface = self.layer_surface.wl_surface();
         buf.attach_to(surface).unwrap();
         surface.damage_buffer(0, 0, width, height);
@@ -202,7 +204,6 @@ impl Wallpaper {
 
     pub fn resize(
         &self,
-        pool: &mut LockedPool<'_>,
         width: Option<NonZeroI32>,
         height: Option<NonZeroI32>,
         scale_factor: Option<NonZeroI32>,
@@ -210,30 +211,29 @@ impl Wallpaper {
         if let Some(s) = scale_factor {
             self.layer_surface.set_buffer_scale(s.get() as u32).unwrap();
         }
-        let mut lock = self.inner.lock().unwrap();
-        let width = width.unwrap_or(lock.width);
-        let height = height.unwrap_or(lock.height);
-        let scale_factor = scale_factor.unwrap_or(lock.scale_factor);
-        if (width, height, scale_factor) == (lock.width, lock.height, lock.scale_factor) {
+        let (mut inner, mut pool) = self.lock();
+        let width = width.unwrap_or(inner.width);
+        let height = height.unwrap_or(inner.height);
+        let scale_factor = scale_factor.unwrap_or(inner.scale_factor);
+        if (width, height, scale_factor) == (inner.width, inner.height, inner.scale_factor) {
             return;
         }
-        lock.animation_state = AnimationState::ShouldStop;
-        lock.width = width;
-        lock.height = height;
-        lock.scale_factor = scale_factor;
-        lock.slot = pool
-            .0
+        inner.animation_state = AnimationState::ShouldStop;
+        inner.width = width;
+        inner.height = height;
+        inner.scale_factor = scale_factor;
+        inner.slot = pool
             .new_slot(
-                lock.width.get() as usize
-                    * lock.height.get() as usize
-                    * lock.scale_factor.get() as usize
-                    * lock.scale_factor.get() as usize
+                inner.width.get() as usize
+                    * inner.height.get() as usize
+                    * inner.scale_factor.get() as usize
+                    * inner.scale_factor.get() as usize
                     * 4,
             )
             .expect("failed to create slot");
         self.layer_surface
-            .set_size(lock.width.get() as u32, lock.height.get() as u32);
-        lock.img = BgImg::Color([0, 0, 0]);
+            .set_size(inner.width.get() as u32, inner.height.get() as u32);
+        inner.img = BgImg::Color([0, 0, 0]);
         self.layer_surface.commit();
     }
 }

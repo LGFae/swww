@@ -1,10 +1,9 @@
 use std::{
-    sync::{Arc, Mutex},
+    sync::Arc,
     time::{Duration, Instant},
 };
 
 use log::debug;
-use smithay_client_toolkit::shm::slot::SlotPool;
 use utils::ipc::{ArchivedPosition, ArchivedTransitionType};
 
 use crate::wallpaper::Wallpaper;
@@ -43,7 +42,6 @@ macro_rules! change_cols {
 
 pub struct Transition {
     wallpapers: Vec<Arc<Wallpaper>>,
-    pool: Arc<Mutex<SlotPool>>,
     dimensions: (u32, u32),
     transition_type: ArchivedTransitionType,
     duration: f32,
@@ -62,11 +60,9 @@ impl Transition {
         wallpapers: Vec<Arc<Wallpaper>>,
         dimensions: (u32, u32),
         transition: utils::ipc::ArchivedTransition,
-        pool: Arc<Mutex<SlotPool>>,
     ) -> Self {
         Transition {
             wallpapers,
-            pool,
             dimensions,
             transition_type: transition.transition_type,
             duration: transition.duration,
@@ -140,12 +136,12 @@ impl Transition {
         while !done {
             done = true;
             for wallpaper in self.wallpapers.iter_mut() {
-                let mut pool = wallpaper.lock_pool_to_get_canvas(&self.pool);
-                let canvas = wallpaper.get_canvas(&mut pool);
-                for (old, new) in canvas.chunks_exact_mut(4).zip(new_img.chunks_exact(3)) {
-                    change_cols!(step, old, new, done);
-                }
-                wallpaper.draw(&mut pool);
+                wallpaper.canvas_change(|canvas| {
+                    for (old, new) in canvas.chunks_exact_mut(4).zip(new_img.chunks_exact(3)) {
+                        change_cols!(step, old, new, done);
+                    }
+                });
+                wallpaper.draw();
             }
             self.send_frame(&mut now);
         }
@@ -222,22 +218,22 @@ impl Transition {
 
         while start.elapsed().as_secs_f64() < seq.duration() {
             for wallpaper in self.wallpapers.iter_mut() {
-                let mut pool = wallpaper.lock_pool_to_get_canvas(&self.pool);
-                let canvas = wallpaper.get_canvas(&mut pool);
-                for (i, (old, new)) in canvas
-                    .chunks_exact_mut(4)
-                    .zip(new_img.chunks_exact(3))
-                    .enumerate()
-                {
-                    let width = width as usize;
-                    let height = height as usize;
-                    let pix_x = i % width;
-                    let pix_y = height - i / width;
-                    if is_low(pix_x as f64, pix_y as f64, offset) {
-                        change_cols!(step, old, new);
+                wallpaper.canvas_change(|canvas| {
+                    for (i, (old, new)) in canvas
+                        .chunks_exact_mut(4)
+                        .zip(new_img.chunks_exact(3))
+                        .enumerate()
+                    {
+                        let width = width as usize;
+                        let height = height as usize;
+                        let pix_x = i % width;
+                        let pix_y = height - i / width;
+                        if is_low(pix_x as f64, pix_y as f64, offset) {
+                            change_cols!(step, old, new);
+                        }
                     }
-                }
-                wallpaper.draw(&mut pool);
+                });
+                wallpaper.draw();
             }
             self.send_frame(&mut now);
 
@@ -284,22 +280,22 @@ impl Transition {
 
         while start.elapsed().as_secs_f64() < seq.duration() {
             for wallpaper in self.wallpapers.iter_mut() {
-                let mut pool = wallpaper.lock_pool_to_get_canvas(&self.pool);
-                let canvas = wallpaper.get_canvas(&mut pool);
-                for (i, (old, new)) in canvas
-                    .chunks_exact_mut(4)
-                    .zip(new_img.chunks_exact(3))
-                    .enumerate()
-                {
-                    let width = width as usize;
-                    let height = height as usize;
-                    let pix_x = i % width;
-                    let pix_y = height - i / width;
-                    if is_low(pix_x as f64, pix_y as f64, offset, circle_radius) {
-                        change_cols!(step, old, new);
+                wallpaper.canvas_change(|canvas| {
+                    for (i, (old, new)) in canvas
+                        .chunks_exact_mut(4)
+                        .zip(new_img.chunks_exact(3))
+                        .enumerate()
+                    {
+                        let width = width as usize;
+                        let height = height as usize;
+                        let pix_x = i % width;
+                        let pix_y = height - i / width;
+                        if is_low(pix_x as f64, pix_y as f64, offset, circle_radius) {
+                            change_cols!(step, old, new);
+                        }
                     }
-                }
-                wallpaper.draw(&mut pool);
+                });
+                wallpaper.draw();
             }
             self.send_frame(&mut now);
 
@@ -331,27 +327,27 @@ impl Transition {
 
         while start.elapsed().as_secs_f64() < seq.duration() {
             for wallpaper in self.wallpapers.iter_mut() {
-                let mut pool = wallpaper.lock_pool_to_get_canvas(&self.pool);
-                let canvas = wallpaper.get_canvas(&mut pool);
-                for (i, (old, new)) in canvas
-                    .chunks_exact_mut(4)
-                    .zip(new_img.chunks_exact(3))
-                    .enumerate()
-                {
-                    let (width, height) = (width as usize, height as usize);
-                    let pix_x = i % width;
-                    let pix_y = height - i / width;
-                    let diff_x = pix_x.abs_diff(center_x as usize) as f32;
-                    let diff_y = pix_y.abs_diff(center_y as usize) as f32;
-                    let pix_center_dist = f32::sqrt(diff_x.pow(2) + diff_y.pow(2));
-                    if pix_center_dist <= dist_center {
-                        let step = self
-                            .step
-                            .saturating_add((dist_center - pix_center_dist).log2() as u8);
-                        change_cols!(step, old, new);
+                wallpaper.canvas_change(|canvas| {
+                    for (i, (old, new)) in canvas
+                        .chunks_exact_mut(4)
+                        .zip(new_img.chunks_exact(3))
+                        .enumerate()
+                    {
+                        let (width, height) = (width as usize, height as usize);
+                        let pix_x = i % width;
+                        let pix_y = height - i / width;
+                        let diff_x = pix_x.abs_diff(center_x as usize) as f32;
+                        let diff_y = pix_y.abs_diff(center_y as usize) as f32;
+                        let pix_center_dist = f32::sqrt(diff_x.pow(2) + diff_y.pow(2));
+                        if pix_center_dist <= dist_center {
+                            let step = self
+                                .step
+                                .saturating_add((dist_center - pix_center_dist).log2() as u8);
+                            change_cols!(step, old, new);
+                        }
                     }
-                }
-                wallpaper.draw(&mut pool);
+                });
+                wallpaper.draw();
             }
             self.send_frame(&mut now);
 
@@ -382,27 +378,27 @@ impl Transition {
 
         while start.elapsed().as_secs_f64() < seq.duration() {
             for wallpaper in self.wallpapers.iter_mut() {
-                let mut pool = wallpaper.lock_pool_to_get_canvas(&self.pool);
-                let canvas = wallpaper.get_canvas(&mut pool);
-                for (i, (old, new)) in canvas
-                    .chunks_exact_mut(4)
-                    .zip(new_img.chunks_exact(3))
-                    .enumerate()
-                {
-                    let (width, height) = (width as usize, height as usize);
-                    let pix_x = i % width;
-                    let pix_y = height - i / width;
-                    let diff_x = pix_x.abs_diff(center_x as usize) as f32;
-                    let diff_y = pix_y.abs_diff(center_y as usize) as f32;
-                    let pix_center_dist = f32::sqrt(diff_x.pow(2) + diff_y.pow(2));
-                    if pix_center_dist >= dist_center {
-                        let step = self
-                            .step
-                            .saturating_add((pix_center_dist - dist_center).log2() as u8);
-                        change_cols!(step, old, new);
+                wallpaper.canvas_change(|canvas| {
+                    for (i, (old, new)) in canvas
+                        .chunks_exact_mut(4)
+                        .zip(new_img.chunks_exact(3))
+                        .enumerate()
+                    {
+                        let (width, height) = (width as usize, height as usize);
+                        let pix_x = i % width;
+                        let pix_y = height - i / width;
+                        let diff_x = pix_x.abs_diff(center_x as usize) as f32;
+                        let diff_y = pix_y.abs_diff(center_y as usize) as f32;
+                        let pix_center_dist = f32::sqrt(diff_x.pow(2) + diff_y.pow(2));
+                        if pix_center_dist >= dist_center {
+                            let step = self
+                                .step
+                                .saturating_add((pix_center_dist - dist_center).log2() as u8);
+                            change_cols!(step, old, new);
+                        }
                     }
-                }
-                wallpaper.draw(&mut pool);
+                });
+                wallpaper.draw();
             }
             self.send_frame(&mut now);
 

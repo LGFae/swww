@@ -279,12 +279,11 @@ impl Daemon {
                 for (_, names) in animations.iter() {
                     wallpapers.push(self.find_wallpapers_by_names(names));
                 }
-                self.animator.animate(&self.pool, bytes, wallpapers)
+                self.animator.animate(bytes, wallpapers)
             }
             ArchivedRequest::Clear(clear) => {
                 self.initializing = false;
                 let wallpapers = self.find_wallpapers_by_names(&clear.outputs);
-                let pool = Arc::clone(&self.pool);
                 let color = clear.color;
                 match std::thread::Builder::new()
                     .stack_size(1 << 15)
@@ -296,9 +295,8 @@ impl Daemon {
                         for wallpaper in wallpapers {
                             wallpaper.wait_for_animation();
                             wallpaper.set_img_info(utils::ipc::BgImg::Color(color));
-                            let mut pool = wallpaper.lock_pool_to_get_canvas(&pool);
-                            wallpaper.clear(&mut pool, color);
-                            wallpaper.draw(&mut pool);
+                            wallpaper.clear(color);
+                            wallpaper.draw();
                         }
                         signal::kill(nix::unistd::Pid::this(), signal::SIGUSR1).unwrap();
                     }) {
@@ -322,7 +320,7 @@ impl Daemon {
                     }
                     used_wallpapers.push(wallpapers);
                 }
-                self.animator.transition(&self.pool, bytes, used_wallpapers);
+                self.animator.transition(bytes, used_wallpapers);
                 Answer::Ok
             }
         };
@@ -387,13 +385,7 @@ impl CompositorHandler for Daemon {
     ) {
         for wallpaper in self.wallpapers.iter_mut() {
             if wallpaper.has_surface(surface) {
-                let mut pool = wallpaper.lock_pool_to_get_canvas(&self.pool);
-                wallpaper.resize(
-                    &mut pool,
-                    None,
-                    None,
-                    Some(NonZeroI32::new(new_factor).unwrap()),
-                );
+                wallpaper.resize(None, None, Some(NonZeroI32::new(new_factor).unwrap()));
                 return;
             }
         }
@@ -408,8 +400,7 @@ impl CompositorHandler for Daemon {
     ) {
         for wallpaper in self.wallpapers.iter_mut() {
             if wallpaper.has_surface(surface) {
-                let mut pool = wallpaper.lock_pool_to_get_canvas(&self.pool);
-                wallpaper.draw(&mut pool);
+                wallpaper.draw();
                 return;
             }
         }
@@ -468,7 +459,7 @@ impl OutputHandler for Daemon {
             self.wallpapers.push(Arc::new(Wallpaper::new(
                 output_info,
                 layer_surface,
-                &self.pool,
+                Arc::clone(&self.pool),
             )));
             debug!("Output count: {}", self.wallpapers.len());
         }
@@ -496,8 +487,7 @@ impl OutputHandler for Daemon {
                             Some(NonZeroI32::new(output_size.1).unwrap()),
                         );
                         let scale_factor = Some(NonZeroI32::new(output_info.scale_factor).unwrap());
-                        let mut pool = wallpaper.lock_pool_to_get_canvas(&self.pool);
-                        wallpaper.resize(&mut pool, width, height, scale_factor);
+                        wallpaper.resize(width, height, scale_factor);
                         return;
                     }
                 }
