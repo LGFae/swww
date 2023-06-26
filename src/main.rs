@@ -340,8 +340,13 @@ fn img_pad(
         padded.push(255);
     }
 
+    // Calculate left and right border widths. `u32::div` rounds toward 0, so, if `img_w` is odd,
+    // add an extra pixel to the right border to ensure the row is the correct width.
+    let left_border_w = (padded_w - img_w) / 2;
+    let right_border_w = left_border_w + (img_w % 2);
+
     for row in 0..img_h {
-        for _ in 0..(padded_w - img_w) / 2 {
+        for _ in 0..left_border_w {
             padded.push(color[2]);
             padded.push(color[1]);
             padded.push(color[0]);
@@ -354,7 +359,7 @@ fn img_pad(
             padded.push(pixel[0]);
             padded.push(pixel[3]);
         }
-        for _ in 0..(padded_w - img_w) / 2 {
+        for _ in 0..right_border_w {
             padded.push(color[2]);
             padded.push(color[1]);
             padded.push(color[0]);
