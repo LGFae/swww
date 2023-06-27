@@ -5,5 +5,3 @@ Fully automated, complete testing, for every option
 DEADLOCK - gif play on monitor 1, turn on monitor 2, gif play on monitor 2, turn off monitor 2
 	- doesn't always happen (seems to happen after I first turn on my pc)
 	- maybe solved?
-
-VALIDADE CACHE'S RKYV CONTENT

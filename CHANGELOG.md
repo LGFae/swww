@@ -32,7 +32,7 @@ rm -r $HOME/.cache/swww
 
 #### Aditions:
 
-We have reworked the way we do syncronization between monitors. It should sync
+We have reworked the way we do synchronization between monitors. It should sync
 all monitors animations automatically.
 
 #### Summary:

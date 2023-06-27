@@ -25,7 +25,6 @@ pub fn store(output_name: &str, img_path: &str) -> Result<(), String> {
         .map_err(|e| format!("failed to write cache: {e}"))
 }
 
-#[allow(clippy::borrowed_box)]
 pub fn store_animation_frames(animation: &Animation) -> Result<(), String> {
     let filename = animation_filename(&PathBuf::from(&animation.path), animation.dimensions);
     let mut filepath = cache_dir()?;
@@ -149,10 +148,11 @@ fn cache_dir() -> Result<PathBuf, String> {
 #[must_use]
 fn animation_filename(path: &Path, dimensions: (u32, u32)) -> PathBuf {
     format!(
-        "{}__{}x{}",
+        "{}__{}x{}_v{}",
         path.to_string_lossy().replace('/', "__"),
         dimensions.0,
-        dimensions.1
+        dimensions.1,
+        env!("CARGO_PKG_VERSION"),
     )
     .into()
 }

@@ -72,7 +72,7 @@ impl Animator {
     pub fn transition(&mut self, bytes: Vec<u8>, wallpapers: Vec<Vec<Arc<Wallpaper>>>) -> Answer {
         match thread::Builder::new()
             .stack_size(1 << 15)
-            .name("animaiton spawner".to_string())
+            .name("transition spawner".to_string())
             .spawn(move || {
                 if let ArchivedRequest::Img((transition, imgs)) = Request::receive(&bytes) {
                     thread::scope(|s| {
@@ -151,7 +151,7 @@ impl Animator {
         let barrier = self.anim_barrier.clone();
         match thread::Builder::new()
             .stack_size(1 << 15)
-            .name("animaiton spawner".to_string())
+            .name("animation spawner".to_string())
             .spawn(move || {
                 thread::scope(|s| {
                     if let ArchivedRequest::Animation(animations) = Request::receive(&bytes) {

@@ -21,6 +21,12 @@ cargo test -- --include-ignored
 sed "s/^version = .*/version = \"$1\"/" Cargo.toml > TMP \
 	&& mv TMP Cargo.toml
 
+sed "s/^version = .*/version = \"$1\"/" utils/Cargo.toml > TMP \
+	&& mv TMP utils/Cargo.toml
+
+sed "s/^version = .*/version = \"$1\"/" daemon/Cargo.toml > TMP \
+	&& mv TMP daemon/Cargo.toml
+
 # CHANGELOG:
 sed -e "s/^### Unreleased/### $1/" \
 	-e '1s/^/### Unreleased\n\n\n/' CHANGELOG.md > TMP \

@@ -1,6 +1,7 @@
 [package]
 name = "utils"
-version = "0.1.0"
+version = "0.7.3"
+authors = ["Leonardo Gibrowski Faé <leonardo.fae44@gmail.com>"]
 edition = "2021"
 
 [dependencies]
