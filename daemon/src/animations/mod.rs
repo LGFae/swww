@@ -136,9 +136,8 @@ impl Animator {
                     }
 
                     let timeout = duration.saturating_sub(now.elapsed());
-                    thread::sleep(timeout);
-                    nix::sys::signal::kill(nix::unistd::Pid::this(), nix::sys::signal::SIGUSR1)
-                        .unwrap();
+                    thread::sleep(timeout.mul_f32(0.9));
+                    crate::wake_poll();
                     now = std::time::Instant::now();
                 }
             })

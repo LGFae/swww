@@ -117,8 +117,8 @@ impl Transition {
             }
         });
         let timeout = fps.saturating_sub(now.elapsed());
-        std::thread::sleep(timeout);
-        nix::sys::signal::kill(nix::unistd::Pid::this(), nix::sys::signal::SIGUSR1).unwrap();
+        std::thread::sleep(timeout.mul_f32(0.9));
+        crate::wake_poll();
         *now = Instant::now();
     }
 

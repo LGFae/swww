@@ -20,7 +20,10 @@ use std::{
         fd::{AsRawFd, RawFd},
         unix::net::{UnixListener, UnixStream},
     },
-    sync::{Arc, Mutex, RwLock},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex, OnceLock,
+    },
 };
 
 use smithay_client_toolkit::{
@@ -47,22 +50,27 @@ use utils::ipc::{get_socket_path, Answer, ArchivedRequest, BgInfo, Request};
 use animations::Animator;
 
 // We need this because this might be set by signals, so we can't keep it in the daemon
-static EXIT: RwLock<bool> = RwLock::new(false);
+static EXIT: AtomicBool = AtomicBool::new(false);
 
+#[inline]
 fn exit_daemon() {
-    let mut lock = EXIT.write().expect("failed to lock EXIT for writing");
-    *lock = true;
+    EXIT.store(true, Ordering::Release);
 }
 
+#[inline]
 fn should_daemon_exit() -> bool {
-    *EXIT.read().expect("failed to read EXIT")
+    EXIT.load(Ordering::Acquire)
 }
 
-extern "C" fn signal_handler(s: i32) {
-    // SIGUSR1 simply signals us to stop polling, since we need to draw something
-    if let Ok(Signal::SIGUSR1) = Signal::try_from(s) {
-        return;
+static POLL_WAKER: OnceLock<RawFd> = OnceLock::new();
+
+pub fn wake_poll() {
+    if let Err(e) = nix::unistd::write(*unsafe { POLL_WAKER.get().unwrap_unchecked() }, &[0]) {
+        error!("failed to write to pipe file descriptor: {e}");
     }
+}
+
+extern "C" fn signal_handler(_s: i32) {
     exit_daemon();
 }
 
@@ -70,16 +78,7 @@ type DaemonResult<T> = Result<T, String>;
 fn main() -> DaemonResult<()> {
     make_logger();
     let listener = SocketWrapper::new()?;
-
-    let handler = SigHandler::Handler(signal_handler);
-    for signal in [
-        Signal::SIGINT,
-        Signal::SIGQUIT,
-        Signal::SIGTERM,
-        Signal::SIGUSR1,
-    ] {
-        unsafe { signal::signal(signal, handler).expect("failed to install signal handler") };
-    }
+    let wake = setup_signals_and_pipe();
 
     let conn = Connection::connect_to_env().expect("failed to connect to the wayland server");
     // Enumerate the list of globals to get the protocols the server implements.
@@ -95,7 +94,8 @@ fn main() -> DaemonResult<()> {
         }
     }
     info!("Initialization succeeded! Starting main loop...");
-    let mut poll_handler = PollHandler::new(&listener);
+    let mut poll_handler = PollHandler::new(&listener, wake);
+    let mut buf = [0; 16];
     while !should_daemon_exit() {
         // Process wayland events
         event_queue
@@ -129,10 +129,34 @@ fn main() -> DaemonResult<()> {
                 },
             }
         }
+
+        if poll_handler.has_event(PollHandler::WAKER_FD) {
+            if let Err(e) = nix::unistd::read(wake, &mut buf) {
+                error!("error reading pipe file descriptor: {e}");
+            }
+        }
+    }
+
+    if let Err(e) = nix::unistd::close(*POLL_WAKER.get().unwrap()) {
+        error!("error closing write pipe file descriptor: {e}");
+    }
+    if let Err(e) = nix::unistd::close(wake) {
+        error!("error closing read pipe file descriptor: {e}");
     }
 
     info!("Goodbye!");
     Ok(())
+}
+
+/// Returns the file descriptor we should install in the poll handler
+fn setup_signals_and_pipe() -> RawFd {
+    let handler = SigHandler::Handler(signal_handler);
+    for signal in [Signal::SIGINT, Signal::SIGQUIT, Signal::SIGTERM] {
+        unsafe { signal::signal(signal, handler).expect("failed to install signal handler") };
+    }
+    let (r, w) = nix::unistd::pipe().expect("failed to create pipe");
+    let _ = POLL_WAKER.get_or_init(|| w);
+    r
 }
 
 /// This is a wrapper that makes sure to delete the socket when it is dropped
@@ -183,18 +207,20 @@ impl Drop for SocketWrapper {
 }
 
 struct PollHandler {
-    fds: [PollFd; 2],
+    fds: [PollFd; 3],
 }
 
 impl PollHandler {
     const SOCKET_FD: usize = 0;
     const WAYLAND_FD: usize = 1;
+    const WAKER_FD: usize = 2;
 
-    pub fn new(listener: &SocketWrapper) -> Self {
+    pub fn new(listener: &SocketWrapper, waker: RawFd) -> Self {
         Self {
             fds: [
                 PollFd::new(listener.0.as_raw_fd(), PollFlags::POLLIN),
                 PollFd::new(0, PollFlags::POLLIN),
+                PollFd::new(waker, PollFlags::POLLIN),
             ],
         }
     }
