@@ -134,6 +134,7 @@ fn sending_imgs_with_filter() {
             .arg(filter)
             .assert()
             .success();
+        std::thread::sleep(std::time::Duration::from_millis(1));
     }
 }
 

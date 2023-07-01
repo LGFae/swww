@@ -101,9 +101,6 @@ fn main() -> DaemonResult<()> {
         event_queue
             .flush()
             .expect("failed to flush the event queue");
-        event_queue
-            .dispatch_pending(&mut daemon)
-            .expect("failed to dispatch events");
         let read_guard = event_queue
             .prepare_read()
             .expect("failed to prepare the event queue's read");

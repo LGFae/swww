@@ -14,10 +14,10 @@ fn spell_check_code_and_man_pages() {
             "crate",
             "--skip",
             "doc/generated", // skip the generated documentation
-            "src",        // client
-            "daemon/src", // daemon
-            "utils/src",  // common code
-            "doc",        // man pages
+            "src",           // client
+            "daemon/src",    // daemon
+            "utils/src",     // common code
+            "doc",           // man pages
             "CHANGELOG.md",
             "README.md",
         ])
