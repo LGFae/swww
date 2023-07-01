@@ -43,7 +43,7 @@ impl Position {
             },
             Coord::Percent(y) => {
                 if invert_y {
-                    dim.1 as f32 - y * dim.1 as f32
+                    (1.0 - y) * dim.1 as f32
                 } else {
                     y * dim.1 as f32
                 }
