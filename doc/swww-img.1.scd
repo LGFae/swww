@@ -165,6 +165,11 @@ swww-img
 
 	Default is _center_.
 
+*--invert-y* <bool>
+	\[Environment Variable: SWWW_INVERT_Y]
+
+	inverts the y position sent in `transiiton_pos` flag
+
 *--transition-bezier* <f1,f2,f3,f4 (all floats)>
 	\[Environment Variable: SWWW_TRANSITION_BEZIER]
 
