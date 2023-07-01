@@ -41,6 +41,7 @@ pub struct Transition {
     pos: Position,
     bezier: BezierCurve,
     wave: (f32, f32),
+    invert_y: bool,
 }
 
 /// All transitions return whether or not they completed
@@ -70,6 +71,7 @@ impl Transition {
                 },
             ),
             wave: transition.wave,
+            invert_y: transition.invert_y,
         }
     }
 
@@ -266,7 +268,7 @@ impl Transition {
     ) {
         let fps = self.fps;
         let (width, height) = (self.dimensions.0 as f32, self.dimensions.1 as f32);
-        let (center_x, center_y) = self.pos.to_pixel(self.dimensions);
+        let (center_x, center_y) = self.pos.to_pixel(self.dimensions,self.invert_y);
         let mut dist_center: f32 = 0.0;
         let dist_end: f32 = {
             let mut x = center_x;
@@ -320,7 +322,7 @@ impl Transition {
     ) {
         let fps = self.fps;
         let (width, height) = (self.dimensions.0 as f32, self.dimensions.1 as f32);
-        let (center_x, center_y) = self.pos.to_pixel(self.dimensions);
+        let (center_x, center_y) = self.pos.to_pixel(self.dimensions,self.invert_y);
         let mut dist_center = {
             let mut x = center_x;
             let mut y = center_y;
@@ -421,6 +423,7 @@ mod tests {
             pos: Position::new(Coord::Percent(0.0), Coord::Percent(0.0)),
             bezier: BezierCurve::from(Vector2 { x: 1.0, y: 0.0 }, Vector2 { x: 0.0, y: 1.0 }),
             wave: (20.0, 20.0),
+            invert_y: false,
         }
     }
 
