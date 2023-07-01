@@ -1,5 +1,20 @@
 ### Unreleased
 
+#### BREAKING CHANGE: CACHE HAS CHANGED:
+
+I have changed the way we are caching the images / animations. **I would
+recommend users to delete the previous cache directory once they install this
+new version**:
+
+```bash
+rm -r $XDG_CACHE_HOME/swww # OR
+rm -r $HOME/.cache/swww
+```
+
+#### BREAKING CHANGE: NUKED `--sync` flag:
+
+We now sync everything automatically, every time. So we've eliminated that flag.
+
 #### Update to [`sctk 0.17`](https://github.com/Smithay/client-toolkit):
 
 Updating to [`sctk 0.17`](https://github.com/Smithay/client-toolkit) unlocked
@@ -18,17 +33,6 @@ We have changed our serialization strategy from
 [`rkyv`](https://github.com/rkyv/rkyv). This lead to even further memory usage
 reductions, since `rkyv` does not use an intermidate buffer to deserialize its
 structures.
-
-#### BREAKING CHANGE: CACHE HAS CHANGED:
-
-I have changed the way we are caching the images / animations. **I would
-recommend users to delete the previous cache directory once they install this
-new version**:
-
-```bash
-rm -r $XDG_CACHE_HOME/swww # OR
-rm -r $HOME/.cache/swww
-```
 
 #### Aditions:
 
