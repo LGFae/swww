@@ -56,6 +56,7 @@ swww-img
 	Possible transitions are:
 
 [- _simple_
+:- _fade_
 :- _left_
 :- _right_
 :- _top_
@@ -67,6 +68,9 @@ swww-img
 :- _any_
 :- _outer_
 :- _random_
+
+	_fade_ is like _simple_ but uses bezier curves while fading the image, its a 
+	more polished looking version of _simple_ with less artifacts
 
 	The _left_, _right_, _top_ and _bottom_ options make the transition	happen
 	from that position to its opposite in the screen.

@@ -118,6 +118,7 @@ impl fmt::Display for BgInfo {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum TransitionType {
     Simple,
+    Fade,
     Outer,
     Wipe,
     Grow,
