@@ -13,11 +13,12 @@ fn spell_check_code_and_man_pages() {
             "--ignore-words-list",
             "crate",
             "--skip",
-            "doc/generated", // skip the generated documentation
-            "src",           // client
-            "daemon/src",    // daemon
-            "utils/src",     // common code
-            "doc",           // man pages
+            "doc/generated",   // skip the generated documentation
+            "src",             // client
+            "daemon/src",      // daemon
+            "utils/src",       // common code
+            "doc",             // man pages
+            "example_scripts", // scripts
             "CHANGELOG.md",
             "README.md",
         ])
