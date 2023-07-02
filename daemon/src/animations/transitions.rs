@@ -154,20 +154,23 @@ impl Transition {
         let mut now = Instant::now();
         while start.elapsed().as_secs_f64() < seq.duration() {
             for wallpaper in self.wallpapers.iter_mut() {
-                let mut pool = wallpaper.lock_pool_to_get_canvas(&self.pool);
-                let canvas = wallpaper.get_canvas(&mut pool);
-                for (old_pix, new_pix) in canvas.chunks_exact_mut(4).zip(new_img.chunks_exact(4)) {
-                    for (old_col, new_col) in old_pix.iter_mut().zip(new_pix) {
-                        *old_col = (*old_col as f64 * (1.0 - step) + *new_col as f64 * step) as u8;
+                wallpaper.canvas_change(|canvas| {
+                    for (old_pix, new_pix) in
+                        canvas.chunks_exact_mut(4).zip(new_img.chunks_exact(4))
+                    {
+                        for (old_col, new_col) in old_pix.iter_mut().zip(new_pix) {
+                            *old_col =
+                                (*old_col as f64 * (1.0 - step) + *new_col as f64 * step) as u8;
+                        }
                     }
-                }
-                wallpaper.draw(&mut pool);
+                });
+                wallpaper.draw();
             }
             self.send_frame(&mut now);
             step = seq.now() as f64;
             seq.advance_to(start.elapsed().as_secs_f64());
         }
-        self.step = 255;
+        self.step = 4;
         self.simple(new_img)
     }
 
