@@ -27,15 +27,27 @@ impl Position {
         Self { x, y }
     }
 
-    pub fn to_pixel(&self, dim: (u32, u32)) -> (f32, f32) {
+    pub fn to_pixel(&self, dim: (u32, u32), invert_y: bool) -> (f32, f32) {
         let x = match self.x {
             Coord::Pixel(x) => x,
             Coord::Percent(x) => x * dim.0 as f32,
         };
 
         let y = match self.y {
-            Coord::Pixel(y) => y,
-            Coord::Percent(y) => y * dim.1 as f32,
+            Coord::Pixel(y) => {
+                if invert_y {
+                    dim.1 as f32 - y
+                } else {
+                    y
+                }
+            },
+            Coord::Percent(y) => {
+                if invert_y {
+                    (1.0 - y) * dim.1 as f32
+                } else {
+                    y * dim.1 as f32
+                }
+            },
         };
 
         (x, y)
@@ -122,6 +134,7 @@ pub struct Transition {
     pub pos: Position,
     pub bezier: (f32, f32, f32, f32),
     pub wave: (f32, f32),
+    pub invert_y: bool,
 }
 
 #[derive(Serialize, Deserialize)]

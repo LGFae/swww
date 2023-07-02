@@ -519,6 +519,7 @@ fn make_transition(img: &cli::Img) -> communication::Transition {
         pos,
         transition_type,
         wave: img.transition_wave,
+        invert_y: img.invert_y,
     }
 }
 

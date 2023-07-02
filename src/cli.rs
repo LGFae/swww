@@ -310,6 +310,10 @@ pub struct Img {
     #[arg(long, env = "SWWW_TRANSITION_POS", default_value = "center", value_parser=parse_coords)]
     pub transition_pos: CliPosition,
 
+    /// inverts the y position sent in 'transiiton_pos' flag
+    #[arg(long, env = "INVERT_Y", default_value = "false")]
+    pub invert_y: bool,
+
     ///bezier curve to use for the transition
     ///https://cubic-bezier.com is a good website to get these values from
     ///
@@ -320,6 +324,8 @@ pub struct Img {
     ///currently only used for 'wave' transition to control the width and height of each wave
     #[arg(long, env = "SWWW_TRANSITION_WAVE", default_value = "20,20", value_parser = parse_wave)]
     pub transition_wave: (f32, f32),
+
+
 }
 
 fn parse_wave(raw: &str) -> Result<(f32, f32), String> {
