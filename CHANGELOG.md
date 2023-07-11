@@ -39,6 +39,11 @@ structures.
 We have reworked the way we do synchronization between monitors. It should sync
 all monitors animations automatically.
 
+  * New transition, `fade`, that is essentially `simple` with beziers (@flick0)
+  * `invert_y` flag (@flick0)
+  * New option to resize to fit, padding only what was left (@SignalWalker)
+  * @RiedleroD fixed a type :)
+
 #### Summary:
 
 With all of the changes above, **I've managed to reduce memory consumption

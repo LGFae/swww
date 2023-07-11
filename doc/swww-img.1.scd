@@ -30,11 +30,21 @@ swww-img
 	Default is Lanczos3.
 
 *--no-resize*
-	Do not resize the image.
+	Do not resize the image. Equivalent to *--resize* _no_.
 
 	If this is set, the image won't be resized, and will be centralized in the
 	middle of the screen instead. If it is smaller than the screen's size, it
 	will be padded with the value of *--fill_color*, below.
+
+*--resize* <RESIZE>
+	Whether to resize the image and the method by which to resize it.
+	
+	Possible values:
+		- _no_:   Do not resize the image
+		- _crop_: Resize the image to fill the whole screen, cropping out parts that don't fit
+		- _fit_:  Resize the image to fit inside the screen, preserving the original aspect ratio
+
+	Default is _crop_.
 
 *--fill-color* <RRGGBB>
 	Which color to fill the padding with when not resizing.
