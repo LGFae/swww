@@ -17,7 +17,7 @@ use utils::{
 };
 
 mod cli;
-use cli::Swww;
+use cli::{ResizeStrategy, Swww};
 
 fn main() -> Result<(), String> {
     let swww = Swww::parse();
@@ -172,10 +172,17 @@ fn make_img_request(
     for (dim, outputs) in dims.iter().zip(outputs) {
         unique_requests.push((
             communication::Img {
-                img: if img.no_resize {
-                    img_pad(img_raw.clone(), *dim, &img.fill_color)?
-                } else {
-                    img_resize(img_raw.clone(), *dim, make_filter(&img.filter))?
+                img: match img.resize {
+                    ResizeStrategy::No => img_pad(img_raw.clone(), *dim, &img.fill_color)?,
+                    ResizeStrategy::Crop => {
+                        img_resize_crop(img_raw.clone(), *dim, make_filter(&img.filter))?
+                    }
+                    ResizeStrategy::Fit => img_resize_fit(
+                        img_raw.clone(),
+                        *dim,
+                        make_filter(&img.filter),
+                        &img.fill_color,
+                    )?,
                 },
                 path: match img.path.canonicalize() {
                     Ok(p) => p,
@@ -260,7 +267,7 @@ fn make_animation_request(
         };
         animations.push((
             communication::Animation {
-                animation: compress_frames(gif, *dim, filter, img.no_resize, &img.fill_color)?
+                animation: compress_frames(gif, *dim, filter, img.resize, &img.fill_color)?
                     .into_boxed_slice(),
                 sync: img.sync,
             },
@@ -274,7 +281,7 @@ fn compress_frames(
     gif: GifDecoder<BufReader<File>>,
     dim: (u32, u32),
     filter: FilterType,
-    no_resize: bool,
+    resize: ResizeStrategy,
     color: &[u8; 3],
 ) -> Result<Vec<(BitPack, Duration)>, String> {
     let mut compressed_frames = Vec::new();
@@ -284,10 +291,10 @@ fn compress_frames(
     let first = frames.next().unwrap().unwrap();
     let first_duration = first.delay().numer_denom_ms();
     let first_duration = Duration::from_millis((first_duration.0 / first_duration.1).into());
-    let first_img = if no_resize {
-        img_pad(first.into_buffer(), dim, color)?
-    } else {
-        img_resize(first.into_buffer(), dim, filter)?
+    let first_img = match resize {
+        ResizeStrategy::No => img_pad(first.into_buffer(), dim, color)?,
+        ResizeStrategy::Crop => img_resize_crop(first.into_buffer(), dim, filter)?,
+        ResizeStrategy::Fit => img_resize_fit(first.into_buffer(), dim, filter, color)?,
     };
 
     let mut canvas = first_img.clone();
@@ -295,10 +302,10 @@ fn compress_frames(
         let (dur_num, dur_div) = frame.delay().numer_denom_ms();
         let duration = Duration::from_millis((dur_num / dur_div).into());
 
-        let img = if no_resize {
-            img_pad(frame.into_buffer(), dim, color)?
-        } else {
-            img_resize(frame.into_buffer(), dim, filter)?
+        let img = match resize {
+            ResizeStrategy::No => img_pad(frame.into_buffer(), dim, color)?,
+            ResizeStrategy::Crop => img_resize_crop(frame.into_buffer(), dim, filter)?,
+            ResizeStrategy::Fit => img_resize_fit(frame.into_buffer(), dim, filter, color)?,
         };
 
         compressed_frames.push((BitPack::pack(&mut canvas, &img)?, duration));
@@ -340,8 +347,13 @@ fn img_pad(
         padded.push(255);
     }
 
+    // Calculate left and right border widths. `u32::div` rounds toward 0, so, if `img_w` is odd,
+    // add an extra pixel to the right border to ensure the row is the correct width.
+    let left_border_w = (padded_w - img_w) / 2;
+    let right_border_w = left_border_w + (img_w % 2);
+
     for row in 0..img_h {
-        for _ in 0..(padded_w - img_w) / 2 {
+        for _ in 0..left_border_w {
             padded.push(color[2]);
             padded.push(color[1]);
             padded.push(color[0]);
@@ -354,7 +366,7 @@ fn img_pad(
             padded.push(pixel[0]);
             padded.push(pixel[3]);
         }
-        for _ in 0..(padded_w - img_w) / 2 {
+        for _ in 0..right_border_w {
             padded.push(color[2]);
             padded.push(color[1]);
             padded.push(color[0]);
@@ -372,7 +384,84 @@ fn img_pad(
     Ok(padded)
 }
 
-fn img_resize(
+/// Convert an ARGB &[u8] to BRGA in-place by swapping bytes
+fn argb_to_brga(argb: &mut [u8]) {
+    for pixel in argb.chunks_exact_mut(4) {
+        pixel.swap(0, 2);
+    }
+}
+
+/// Resize an image to fit within the given dimensions, covering as much space as possible without
+/// cropping.
+fn img_resize_fit(
+    img: image::RgbaImage,
+    dimensions: (u32, u32),
+    filter: FilterType,
+    padding_color: &[u8; 3],
+) -> Result<Vec<u8>, String> {
+    let (width, height) = dimensions;
+    let (img_w, img_h) = img.dimensions();
+    if (img_w, img_h) != (width, height) {
+        // if our image is already scaled to fit, skip resizing it and just pad it directly
+        if img_w == width || img_h == height {
+            return img_pad(img, dimensions, padding_color);
+        }
+
+        let (trg_w, trg_h) = if width.abs_diff(img_w) > height.abs_diff(img_h) {
+            let scale = height as f32 / img_h as f32;
+            ((img_w as f32 * scale) as u32, height)
+        } else {
+            let scale = width as f32 / img_w as f32;
+            (width, (img_h as f32 * scale) as u32)
+        };
+
+        let mut src = match fast_image_resize::Image::from_vec_u8(
+            // We unwrap below because we know the images's dimensions should never be 0
+            NonZeroU32::new(img_w).unwrap(),
+            NonZeroU32::new(img_h).unwrap(),
+            img.into_raw(),
+            PixelType::U8x4,
+        ) {
+            Ok(i) => i,
+            Err(e) => return Err(e.to_string()),
+        };
+
+        let alpha_mul_div = fast_image_resize::MulDiv::default();
+        if let Err(e) = alpha_mul_div.multiply_alpha_inplace(&mut src.view_mut()) {
+            return Err(e.to_string());
+        }
+
+        // We unwrap below because we know the outputs's dimensions should never be 0
+        let new_w = NonZeroU32::new(trg_w).unwrap();
+        let new_h = NonZeroU32::new(trg_h).unwrap();
+
+        let mut dst = fast_image_resize::Image::new(new_w, new_h, src.pixel_type());
+        let mut dst_view = dst.view_mut();
+
+        let mut resizer = Resizer::new(fast_image_resize::ResizeAlg::Convolution(filter));
+        if let Err(e) = resizer.resize(&src.view(), &mut dst_view) {
+            return Err(e.to_string());
+        }
+
+        if let Err(e) = alpha_mul_div.divide_alpha_inplace(&mut dst_view) {
+            return Err(e.to_string());
+        }
+
+        img_pad(
+            image::RgbaImage::from_raw(trg_w, trg_h, dst.into_vec()).unwrap(),
+            dimensions,
+            padding_color,
+        )
+    } else {
+        let mut res = img.into_vec();
+        // The ARGB is 'little endian', so here we must  put the order
+        // of bytes 'in reverse', so it needs to be BGRA.
+        argb_to_brga(&mut res);
+        Ok(res)
+    }
+}
+
+fn img_resize_crop(
     img: image::RgbaImage,
     dimensions: (u32, u32),
     filter: FilterType,
@@ -421,9 +510,7 @@ fn img_resize(
 
     // The ARGB is 'little endian', so here we must  put the order
     // of bytes 'in reverse', so it needs to be BGRA.
-    for pixel in resized_img.chunks_exact_mut(4) {
-        pixel.swap(0, 2);
-    }
+    argb_to_brga(&mut resized_img);
 
     Ok(resized_img)
 }
