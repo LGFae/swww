@@ -239,10 +239,10 @@ pub fn img_pad(
     Ok(padded)
 }
 
-/// Convert an ARGB &[u8] to BRGA in-place by swapping bytes
+/// Convert an RGB &[u8] to BRG in-place by swapping bytes
 #[inline]
-fn argb_to_brga(argb: &mut [u8]) {
-    for pixel in argb.chunks_exact_mut(4) {
+fn rgb_to_brg(rgb: &mut [u8]) {
+    for pixel in rgb.chunks_exact_mut(3) {
         pixel.swap(0, 2);
     }
 }
@@ -303,7 +303,7 @@ pub fn img_resize_fit(
         let mut res = img.into_vec();
         // The ARGB is 'little endian', so here we must  put the order
         // of bytes 'in reverse', so it needs to be BGRA.
-        argb_to_brga(&mut res);
+        rgb_to_brg(&mut res);
         Ok(res)
     }
 }
@@ -348,7 +348,7 @@ pub fn img_resize_crop(
 
     // The ARGB is 'little endian', so here we must  put the order
     // of bytes 'in reverse', so it needs to be BGRA.
-    argb_to_brga(&mut resized_img);
+    rgb_to_brg(&mut resized_img);
 
     Ok(resized_img)
 }
