@@ -1,5 +1,8 @@
 ### Unreleased
 
+
+### 0.8.0
+
 #### BREAKING CHANGE: CACHE HAS CHANGED:
 
 I have changed the way we are caching the images / animations. **I would
