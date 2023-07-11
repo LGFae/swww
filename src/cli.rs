@@ -246,20 +246,6 @@ pub struct Img {
     #[arg(short, long, default_value = "Lanczos3")]
     pub filter: Filter,
 
-    ///Sync the animations' frames between the monitors
-    ///
-    ///Activating this will cause a monitor's animation to wait until all other monitor's are
-    ///ready to update, and then update them all at once. Note if you want to send different `gif`s
-    ///to different monitors and have them synced, you will have to call `swww img --sync` **every
-    ///time**.
-    ///
-    ///Furthermore, if you only set `--sync` to one monitor and not the others, that monitor will
-    ///not animate anything, while the others will animate out-of-sync.
-    ///
-    ///Finally, note this only applies to `gif` animations, not the transitions.
-    #[arg(long, default_value = "false")]
-    pub sync: bool,
-
     ///Sets the type of transition. Default is 'simple', that fades into the new image
     ///
     ///Possible transitions are:
@@ -352,8 +338,6 @@ pub struct Img {
     ///currently only used for 'wave' transition to control the width and height of each wave
     #[arg(long, env = "SWWW_TRANSITION_WAVE", default_value = "20,20", value_parser = parse_wave)]
     pub transition_wave: (f32, f32),
-
-
 }
 
 fn parse_wave(raw: &str) -> Result<(f32, f32), String> {

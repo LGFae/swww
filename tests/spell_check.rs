@@ -1,9 +1,7 @@
 use std::process::Command;
 
-// We ignore because people might not have codespell installed, and I don't want to force anyone to
-// install to e.g. run tests before installing. This may change in the future
-// IMPORTANT: THIS TEST WILL DELETE THE GENERATED DOC FILES (just run ./doc/gen.sh to generate them
-// again)
+/// We ignore because people might not have codespell installed, and I don't want to force anyone to
+/// install codespell to e.g. run tests before installing swww. This may change in the future
 #[test]
 #[ignore]
 fn spell_check_code_and_man_pages() {
@@ -14,10 +12,13 @@ fn spell_check_code_and_man_pages() {
             "--enable-colors",
             "--ignore-words-list",
             "crate",
-            "src",        // client
-            "daemon/src", // daemon
-            "utils/src",  // common code
-            "doc",        // man pages
+            "--skip",
+            "doc/generated",   // skip the generated documentation
+            "src",             // client
+            "daemon/src",      // daemon
+            "utils/src",       // common code
+            "doc",             // man pages
+            "example_scripts", // scripts
             "CHANGELOG.md",
             "README.md",
         ])
@@ -25,7 +26,11 @@ fn spell_check_code_and_man_pages() {
     {
         Ok(output) => {
             if !output.status.success() {
-                panic!("\n{}", String::from_utf8_lossy(&output.stdout));
+                panic!(
+                    "\nstdout:{}\nstderr:{}\n",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr)
+                );
             }
         }
         Err(e) => match e.kind() {

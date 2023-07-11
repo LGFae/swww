@@ -8,7 +8,7 @@
 
 if [[ $# -lt 1 ]] || [[ ! -d $1   ]]; then
 	echo "Usage:
-	$0 <dir containg images>"
+	$0 <dir containing images>"
 	exit 1
 fi
 

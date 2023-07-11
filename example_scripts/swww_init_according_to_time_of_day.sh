@@ -9,8 +9,8 @@
 
 case $(date +%H) in
 	00 | 01 | 02 | 03 | 04 | 05 | 06 | 07) # First 8 hours of the day
-		# Uncomment bellow to setup the image you wish to display as your
-		# wallpaper if you run this scritp during the first 8 hours of the
+		# Uncomment below to setup the image you wish to display as your
+		# wallpaper if you run this script during the first 8 hours of the
 		# day
 
 		# swww init && swww img path/to/img

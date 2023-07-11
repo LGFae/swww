@@ -1,18 +1,24 @@
 [package]
 name = "swww-daemon"
-version = "0.1.0"
+version = "0.7.3"
+authors = ["Leonardo Gibrowski Faé <leonardo.fae44@gmail.com>"]
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-smithay-client-toolkit = { version = "0.16", default-features = false, features = ["calloop"] }
 log = { version = "0.4", features = ["max_level_debug", "release_max_level_info"] }
 simplelog = "0.12"
-keyframe = "1.1"
 
-utils = { path = "../utils" }
+wayland-client = { version = "0.30", default-features = false, features = [ "log" ]}
+smithay-client-toolkit = { version = "0.17", default-features = false }
+
+nix = { version = "0.26", default-features = false, features = [ "signal", "poll" ] }
+keyframe = "1.1"
+rkyv = "0.7"
+
 sd-notify = { version = "0.4.1" }
 
+utils = { path = "../utils" }
 [dev-dependencies]
 rand = "0.8"

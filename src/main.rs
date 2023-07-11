@@ -1,20 +1,14 @@
 use clap::Parser;
-use fast_image_resize::{FilterType, PixelType, Resizer};
-use image::{codecs::gif::GifDecoder, AnimationDecoder, RgbaImage};
-use std::{
-    fs::File,
-    io::{stdin, BufReader, Read},
-    num::NonZeroU32,
-    os::unix::net::UnixStream,
-    path::{Path, PathBuf},
-    process::Stdio,
-    time::Duration,
-};
+use image::codecs::gif::GifDecoder;
+use std::{os::unix::net::UnixStream, path::PathBuf, process::Stdio, time::Duration};
 
 use utils::{
-    communication::{self, get_socket_path, AnimationRequest, Answer, Coord, Position, Request},
-    comp_decomp::BitPack,
+    cache,
+    ipc::{self, get_socket_path, read_socket, AnimationRequest, Answer, ArchivedAnswer, Request},
 };
+
+mod imgproc;
+use imgproc::*;
 
 mod cli;
 use cli::{ResizeStrategy, Swww};
@@ -59,10 +53,12 @@ fn main() -> Result<(), String> {
     let request = make_request(&swww)?;
     let socket = connect_to_socket(5, 100)?;
     request.send(&socket)?;
-    match Answer::receive(socket)? {
-        Answer::Err(msg) => return Err(msg),
-        Answer::Info(info) => info.into_iter().for_each(|i| println!("{i}")),
-        Answer::Ok => {
+    let bytes = read_socket(&socket)?;
+    drop(socket);
+    match Answer::receive(&bytes) {
+        ArchivedAnswer::Err(msg) => return Err(msg.to_string()),
+        ArchivedAnswer::Info(info) => info.iter().for_each(|i| println!("{}", i)),
+        ArchivedAnswer::Ok => {
             if let Swww::Kill = swww {
                 #[cfg(debug_assertions)]
                 let tries = 20;
@@ -81,30 +77,36 @@ fn main() -> Result<(), String> {
             }
         }
     }
+
     Ok(())
 }
 
 fn make_request(args: &Swww) -> Result<Request, String> {
     match args {
-        Swww::Clear(c) => Ok(Request::Clear(communication::Clear {
+        Swww::Clear(c) => Ok(Request::Clear(ipc::Clear {
             color: c.color,
             outputs: split_cmdline_outputs(&c.outputs),
         })),
         Swww::Img(img) => {
             let requested_outputs = split_cmdline_outputs(&img.outputs);
-            let (dims, outputs) = get_dimensions_and_outputs(requested_outputs)?;
+            let (dims, outputs) = get_dimensions_and_outputs(&requested_outputs)?;
             let (img_raw, is_gif) = read_img(&img.path)?;
             if is_gif {
-                match std::thread::scope(|s| {
-                    let animations = s.spawn(|| make_animation_request(img, &dims, &outputs));
+                match std::thread::scope::<_, Result<_, String>>(|s1| {
+                    let animations = s1.spawn(|| make_animation_request(img, &dims, &outputs));
                     let img_request = make_img_request(img, img_raw, &dims, &outputs)?;
                     let animations = match animations.join() {
                         Ok(a) => a,
                         Err(e) => Err(format!("{e:?}")),
                     };
+
                     let socket = connect_to_socket(5, 100)?;
                     Request::Img(img_request).send(&socket)?;
-                    Answer::receive(socket)?;
+                    let bytes = read_socket(&socket)?;
+                    drop(socket);
+                    if let ArchivedAnswer::Err(e) = Answer::receive(&bytes) {
+                        return Err(format!("daemon error when sending image: {e}"));
+                    }
                     animations
                 }) {
                     Ok(animations) => Ok(Request::Animation(animations)),
@@ -122,56 +124,17 @@ fn make_request(args: &Swww) -> Result<Request, String> {
     }
 }
 
-fn split_cmdline_outputs(outputs: &str) -> Vec<String> {
-    outputs
-        .split(',')
-        .map(|s| s.to_owned())
-        .filter(|s| !s.is_empty())
-        .collect()
-}
-
-fn read_img(path: &Path) -> Result<(RgbaImage, bool), String> {
-    if let Some("-") = path.to_str() {
-        let mut reader = BufReader::new(stdin());
-        let mut buffer = Vec::new();
-        if let Err(e) = reader.read_to_end(&mut buffer) {
-            return Err(format!("failed to read stdin: {e}"));
-        }
-
-        return match image::load_from_memory(&buffer) {
-            Ok(img) => Ok((img.into_rgba8(), false)),
-            Err(e) => return Err(format!("failed load image from memory: {e}")),
-        };
-    }
-
-    let imgbuf = match image::io::Reader::open(path) {
-        Ok(img) => img,
-        Err(e) => return Err(format!("failed to open image: {e}")),
-    };
-
-    let imgbuf = match imgbuf.with_guessed_format() {
-        Ok(img) => img,
-        Err(e) => return Err(format!("failed to detect the image's format: {e}")),
-    };
-
-    let is_gif = imgbuf.format() == Some(image::ImageFormat::Gif);
-    match imgbuf.decode() {
-        Ok(img) => Ok((img.into_rgba8(), is_gif)),
-        Err(e) => Err(format!("failed to decode image: {e}")),
-    }
-}
-
 fn make_img_request(
     img: &cli::Img,
-    img_raw: image::RgbaImage,
+    img_raw: image::RgbImage,
     dims: &[(u32, u32)],
     outputs: &[Vec<String>],
-) -> Result<communication::ImageRequest, String> {
+) -> Result<ipc::ImageRequest, String> {
     let transition = make_transition(img);
     let mut unique_requests = Vec::with_capacity(dims.len());
     for (dim, outputs) in dims.iter().zip(outputs) {
         unique_requests.push((
-            communication::Img {
+            ipc::Img {
                 img: match img.resize {
                     ResizeStrategy::No => img_pad(img_raw.clone(), *dim, &img.fill_color)?,
                     ResizeStrategy::Crop => {
@@ -183,59 +146,62 @@ fn make_img_request(
                         make_filter(&img.filter),
                         &img.fill_color,
                     )?,
-                },
+                }
+                .into_boxed_slice(),
                 path: match img.path.canonicalize() {
-                    Ok(p) => p,
+                    Ok(p) => p.to_string_lossy().to_string(),
                     Err(e) => {
                         if let Some("-") = img.path.to_str() {
-                            PathBuf::from("STDIN")
+                            "STDIN".to_string()
                         } else {
                             return Err(format!("failed no canonicalize image path: {e}"));
                         }
                     }
                 },
             },
-            outputs.to_owned(),
+            outputs.to_owned().into_boxed_slice(),
         ));
     }
 
-    Ok((transition, unique_requests))
+    Ok((transition, unique_requests.into_boxed_slice()))
 }
 
 #[allow(clippy::type_complexity)]
 fn get_dimensions_and_outputs(
-    requested_outputs: Vec<String>,
+    requested_outputs: &[String],
 ) -> Result<(Vec<(u32, u32)>, Vec<Vec<String>>), String> {
     let mut outputs: Vec<Vec<String>> = Vec::new();
     let mut dims: Vec<(u32, u32)> = Vec::new();
-    let mut imgs: Vec<communication::BgImg> = Vec::new();
+    let mut imgs: Vec<ipc::BgImg> = Vec::new();
 
     let socket = connect_to_socket(5, 100)?;
     Request::Query.send(&socket)?;
-    let answer = Answer::receive(socket)?;
+    let bytes = read_socket(&socket)?;
+    drop(socket);
+    let answer = Answer::receive(&bytes);
     match answer {
-        Answer::Info(infos) => {
-            for info in infos {
-                if !requested_outputs.is_empty() && !requested_outputs.contains(&info.name) {
+        ArchivedAnswer::Info(infos) => {
+            for info in infos.iter() {
+                let info_img = info.img.de();
+                let name = info.name.to_string();
+                if !requested_outputs.is_empty() && !requested_outputs.contains(&name) {
                     continue;
                 }
-                let mut should_add = true;
                 let real_dim = (
                     info.dim.0 * info.scale_factor as u32,
                     info.dim.1 * info.scale_factor as u32,
                 );
-                for (i, (dim, img)) in dims.iter().zip(&imgs).enumerate() {
-                    if real_dim == *dim && info.img == *img {
-                        outputs[i].push(info.name.clone());
-                        should_add = false;
-                        break;
-                    }
-                }
-
-                if should_add {
-                    outputs.push(vec![info.name]);
+                if let Some((_, output)) = dims
+                    .iter_mut()
+                    .zip(&imgs)
+                    .zip(&mut outputs)
+                    .find(|((dim, img), _)| real_dim == **dim && info_img == **img)
+                {
+                    output.push(name);
+                } else {
+                    outputs.push(vec![name]);
                     dims.push(real_dim);
-                    imgs.push(info.img);
+                    imgs.push(info_img);
                 }
             }
             if outputs.is_empty() {
@@ -244,7 +210,7 @@ fn get_dimensions_and_outputs(
                 Ok((dims, outputs))
             }
         }
-        Answer::Err(e) => Err(format!("failed to query swww-daemon: {e}")),
+        ArchivedAnswer::Err(e) => Err(format!("daemon error when sending query: {e}")),
         _ => unreachable!(),
     }
 }
@@ -257,6 +223,15 @@ fn make_animation_request(
     let filter = make_filter(&img.filter);
     let mut animations = Vec::with_capacity(dims.len());
     for (dim, outputs) in dims.iter().zip(outputs) {
+        match cache::load_animation_frames(&img.path, *dim) {
+            Ok(Some(animation)) => {
+                animations.push((animation, outputs.to_owned().into_boxed_slice()));
+                continue;
+            }
+            Ok(None) => (),
+            Err(e) => eprintln!("Error loading cache for {:?}: {e}", img.path),
+        }
+
         let imgbuf = match image::io::Reader::open(&img.path) {
             Ok(img) => img.into_inner(),
             Err(e) => return Err(format!("error opening image during animation: {e}")),
@@ -265,365 +240,34 @@ fn make_animation_request(
             Ok(gif) => gif,
             Err(e) => return Err(format!("failed to decode gif during animation: {e}")),
         };
-        animations.push((
-            communication::Animation {
-                animation: compress_frames(gif, *dim, filter, img.resize, &img.fill_color)?
-                    .into_boxed_slice(),
-                sync: img.sync,
-            },
-            outputs.to_owned(),
-        ));
-    }
-    Ok(animations)
-}
-
-fn compress_frames(
-    gif: GifDecoder<BufReader<File>>,
-    dim: (u32, u32),
-    filter: FilterType,
-    resize: ResizeStrategy,
-    color: &[u8; 3],
-) -> Result<Vec<(BitPack, Duration)>, String> {
-    let mut compressed_frames = Vec::new();
-    let mut frames = gif.into_frames();
-
-    // The first frame should always exist
-    let first = frames.next().unwrap().unwrap();
-    let first_duration = first.delay().numer_denom_ms();
-    let first_duration = Duration::from_millis((first_duration.0 / first_duration.1).into());
-    let first_img = match resize {
-        ResizeStrategy::No => img_pad(first.into_buffer(), dim, color)?,
-        ResizeStrategy::Crop => img_resize_crop(first.into_buffer(), dim, filter)?,
-        ResizeStrategy::Fit => img_resize_fit(first.into_buffer(), dim, filter, color)?,
-    };
-
-    let mut canvas = first_img.clone();
-    while let Some(Ok(frame)) = frames.next() {
-        let (dur_num, dur_div) = frame.delay().numer_denom_ms();
-        let duration = Duration::from_millis((dur_num / dur_div).into());
-
-        let img = match resize {
-            ResizeStrategy::No => img_pad(frame.into_buffer(), dim, color)?,
-            ResizeStrategy::Crop => img_resize_crop(frame.into_buffer(), dim, filter)?,
-            ResizeStrategy::Fit => img_resize_fit(frame.into_buffer(), dim, filter, color)?,
+        let animation = ipc::Animation {
+            path: img.path.to_string_lossy().to_string(),
+            dimensions: *dim,
+            animation: compress_frames(gif, *dim, filter, img.resize, &img.fill_color)?
+                .into_boxed_slice(),
         };
-
-        compressed_frames.push((BitPack::pack(&mut canvas, &img)?, duration));
+        animations.push((animation, outputs.to_owned().into_boxed_slice()));
     }
-    //Add the first frame we got earlier:
-    compressed_frames.push((BitPack::pack(&mut canvas, &first_img)?, first_duration));
-
-    Ok(compressed_frames)
+    Ok(animations.into_boxed_slice())
 }
 
-fn make_filter(filter: &cli::Filter) -> fast_image_resize::FilterType {
-    match filter {
-        cli::Filter::Nearest => fast_image_resize::FilterType::Box,
-        cli::Filter::Bilinear => fast_image_resize::FilterType::Bilinear,
-        cli::Filter::CatmullRom => fast_image_resize::FilterType::CatmullRom,
-        cli::Filter::Mitchell => fast_image_resize::FilterType::Mitchell,
-        cli::Filter::Lanczos3 => fast_image_resize::FilterType::Lanczos3,
-    }
-}
-
-fn img_pad(
-    mut img: image::RgbaImage,
-    dimensions: (u32, u32),
-    color: &[u8; 3],
-) -> Result<Vec<u8>, String> {
-    let (padded_w, padded_h) = dimensions;
-    let (padded_w, padded_h) = (padded_w as usize, padded_h as usize);
-    let mut padded = Vec::with_capacity(padded_w * padded_w * 4);
-
-    let img = image::imageops::crop(&mut img, 0, 0, dimensions.0, dimensions.1).to_image();
-    let (img_w, img_h) = img.dimensions();
-    let (img_w, img_h) = (img_w as usize, img_h as usize);
-    let raw_img = img.into_vec();
-
-    for _ in 0..(((padded_h - img_h) / 2) * padded_w) {
-        padded.push(color[2]);
-        padded.push(color[1]);
-        padded.push(color[0]);
-        padded.push(255);
-    }
-
-    // Calculate left and right border widths. `u32::div` rounds toward 0, so, if `img_w` is odd,
-    // add an extra pixel to the right border to ensure the row is the correct width.
-    let left_border_w = (padded_w - img_w) / 2;
-    let right_border_w = left_border_w + (img_w % 2);
-
-    for row in 0..img_h {
-        for _ in 0..left_border_w {
-            padded.push(color[2]);
-            padded.push(color[1]);
-            padded.push(color[0]);
-            padded.push(255);
-        }
-
-        for pixel in raw_img[(row * img_w * 4)..((row + 1) * img_w * 4)].chunks_exact(4) {
-            padded.push(pixel[2]);
-            padded.push(pixel[1]);
-            padded.push(pixel[0]);
-            padded.push(pixel[3]);
-        }
-        for _ in 0..right_border_w {
-            padded.push(color[2]);
-            padded.push(color[1]);
-            padded.push(color[0]);
-            padded.push(255);
-        }
-    }
-
-    while padded.len() < (padded_h * padded_w * 4) {
-        padded.push(color[2]);
-        padded.push(color[1]);
-        padded.push(color[0]);
-        padded.push(255);
-    }
-
-    Ok(padded)
-}
-
-/// Convert an ARGB &[u8] to BRGA in-place by swapping bytes
-fn argb_to_brga(argb: &mut [u8]) {
-    for pixel in argb.chunks_exact_mut(4) {
-        pixel.swap(0, 2);
-    }
-}
-
-/// Resize an image to fit within the given dimensions, covering as much space as possible without
-/// cropping.
-fn img_resize_fit(
-    img: image::RgbaImage,
-    dimensions: (u32, u32),
-    filter: FilterType,
-    padding_color: &[u8; 3],
-) -> Result<Vec<u8>, String> {
-    let (width, height) = dimensions;
-    let (img_w, img_h) = img.dimensions();
-    if (img_w, img_h) != (width, height) {
-        // if our image is already scaled to fit, skip resizing it and just pad it directly
-        if img_w == width || img_h == height {
-            return img_pad(img, dimensions, padding_color);
-        }
-
-        let (trg_w, trg_h) = if width.abs_diff(img_w) > height.abs_diff(img_h) {
-            let scale = height as f32 / img_h as f32;
-            ((img_w as f32 * scale) as u32, height)
-        } else {
-            let scale = width as f32 / img_w as f32;
-            (width, (img_h as f32 * scale) as u32)
-        };
-
-        let mut src = match fast_image_resize::Image::from_vec_u8(
-            // We unwrap below because we know the images's dimensions should never be 0
-            NonZeroU32::new(img_w).unwrap(),
-            NonZeroU32::new(img_h).unwrap(),
-            img.into_raw(),
-            PixelType::U8x4,
-        ) {
-            Ok(i) => i,
-            Err(e) => return Err(e.to_string()),
-        };
-
-        let alpha_mul_div = fast_image_resize::MulDiv::default();
-        if let Err(e) = alpha_mul_div.multiply_alpha_inplace(&mut src.view_mut()) {
-            return Err(e.to_string());
-        }
-
-        // We unwrap below because we know the outputs's dimensions should never be 0
-        let new_w = NonZeroU32::new(trg_w).unwrap();
-        let new_h = NonZeroU32::new(trg_h).unwrap();
-
-        let mut dst = fast_image_resize::Image::new(new_w, new_h, src.pixel_type());
-        let mut dst_view = dst.view_mut();
-
-        let mut resizer = Resizer::new(fast_image_resize::ResizeAlg::Convolution(filter));
-        if let Err(e) = resizer.resize(&src.view(), &mut dst_view) {
-            return Err(e.to_string());
-        }
-
-        if let Err(e) = alpha_mul_div.divide_alpha_inplace(&mut dst_view) {
-            return Err(e.to_string());
-        }
-
-        img_pad(
-            image::RgbaImage::from_raw(trg_w, trg_h, dst.into_vec()).unwrap(),
-            dimensions,
-            padding_color,
-        )
-    } else {
-        let mut res = img.into_vec();
-        // The ARGB is 'little endian', so here we must  put the order
-        // of bytes 'in reverse', so it needs to be BGRA.
-        argb_to_brga(&mut res);
-        Ok(res)
-    }
-}
-
-fn img_resize_crop(
-    img: image::RgbaImage,
-    dimensions: (u32, u32),
-    filter: FilterType,
-) -> Result<Vec<u8>, String> {
-    let (width, height) = dimensions;
-    let (img_w, img_h) = img.dimensions();
-    let mut resized_img = if (img_w, img_h) != (width, height) {
-        let mut src = match fast_image_resize::Image::from_vec_u8(
-            // We unwrap below because we know the images's dimensions should never be 0
-            NonZeroU32::new(img_w).unwrap(),
-            NonZeroU32::new(img_h).unwrap(),
-            img.into_raw(),
-            PixelType::U8x4,
-        ) {
-            Ok(i) => i,
-            Err(e) => return Err(e.to_string()),
-        };
-
-        let alpha_mul_div = fast_image_resize::MulDiv::default();
-        if let Err(e) = alpha_mul_div.multiply_alpha_inplace(&mut src.view_mut()) {
-            return Err(e.to_string());
-        }
-
-        // We unwrap below because we know the outputs's dimensions should never be 0
-        let new_w = NonZeroU32::new(width).unwrap();
-        let new_h = NonZeroU32::new(height).unwrap();
-        let mut src_view = src.view();
-        src_view.set_crop_box_to_fit_dst_size(new_w, new_h, Some((0.5, 0.5)));
-
-        let mut dst = fast_image_resize::Image::new(new_w, new_h, PixelType::U8x4);
-        let mut dst_view = dst.view_mut();
-
-        let mut resizer = Resizer::new(fast_image_resize::ResizeAlg::Convolution(filter));
-        if let Err(e) = resizer.resize(&src_view, &mut dst_view) {
-            return Err(e.to_string());
-        }
-
-        if let Err(e) = alpha_mul_div.divide_alpha_inplace(&mut dst_view) {
-            return Err(e.to_string());
-        }
-
-        dst.into_vec()
-    } else {
-        img.into_vec()
-    };
-
-    // The ARGB is 'little endian', so here we must  put the order
-    // of bytes 'in reverse', so it needs to be BGRA.
-    argb_to_brga(&mut resized_img);
-
-    Ok(resized_img)
-}
-
-fn make_transition(img: &cli::Img) -> communication::Transition {
-    let mut angle = img.transition_angle;
-
-    let x = match img.transition_pos.x {
-        cli::CliCoord::Percent(x) => {
-            if !(0.0..=1.0).contains(&x) {
-                println!(
-                    "Warning: x value not in range [0,1] position might be set outside screen: {x}"
-                );
-            }
-            Coord::Percent(x)
-        }
-        cli::CliCoord::Pixel(x) => Coord::Pixel(x),
-    };
-
-    let y = match img.transition_pos.y {
-        cli::CliCoord::Percent(y) => {
-            if !(0.0..=1.0).contains(&y) {
-                println!(
-                    "Warning: y value not in range [0,1] position might be set outside screen: {y}"
-                );
-            }
-            Coord::Percent(y)
-        }
-        cli::CliCoord::Pixel(y) => Coord::Pixel(y),
-    };
-
-    let mut pos = Position::new(x, y);
-
-    let transition_type = match img.transition_type {
-        cli::TransitionType::Simple => communication::TransitionType::Simple,
-        cli::TransitionType::Wipe => communication::TransitionType::Wipe,
-        cli::TransitionType::Outer => communication::TransitionType::Outer,
-        cli::TransitionType::Grow => communication::TransitionType::Grow,
-        cli::TransitionType::Wave => communication::TransitionType::Wave,
-        cli::TransitionType::Fade => communication::TransitionType::Fade,
-        cli::TransitionType::Right => {
-            angle = 0.0;
-            communication::TransitionType::Wipe
-        }
-        cli::TransitionType::Top => {
-            angle = 90.0;
-            communication::TransitionType::Wipe
-        }
-        cli::TransitionType::Left => {
-            angle = 180.0;
-            communication::TransitionType::Wipe
-        }
-        cli::TransitionType::Bottom => {
-            angle = 270.0;
-            communication::TransitionType::Wipe
-        }
-        cli::TransitionType::Center => {
-            pos = Position::new(Coord::Percent(0.5), Coord::Percent(0.5));
-            communication::TransitionType::Grow
-        }
-        cli::TransitionType::Any => {
-            pos = Position::new(
-                Coord::Percent(rand::random::<f32>()),
-                Coord::Percent(rand::random::<f32>()),
-            );
-            if rand::random::<u8>() % 2 == 0 {
-                communication::TransitionType::Grow
-            } else {
-                communication::TransitionType::Outer
-            }
-        }
-        cli::TransitionType::Random => {
-            pos = Position::new(
-                Coord::Percent(rand::random::<f32>()),
-                Coord::Percent(rand::random::<f32>()),
-            );
-            angle = rand::random();
-            match rand::random::<u8>() % 4 {
-                0 => communication::TransitionType::Simple,
-                1 => communication::TransitionType::Wipe,
-                2 => communication::TransitionType::Outer,
-                3 => communication::TransitionType::Grow,
-                _ => unreachable!(),
-            }
-        }
-    };
-
-    communication::Transition {
-        duration: img.transition_duration,
-        step: img.transition_step,
-        fps: img.transition_fps,
-        bezier: img.transition_bezier,
-        angle,
-        pos,
-        transition_type,
-        wave: img.transition_wave,
-        invert_y: img.invert_y,
-    }
+fn split_cmdline_outputs(outputs: &str) -> Box<[String]> {
+    outputs
+        .split(',')
+        .map(|s| s.to_owned())
+        .filter(|s| !s.is_empty())
+        .collect()
 }
 
 fn spawn_daemon(no_daemon: bool) -> Result<(), String> {
-    let cmd = "swww-daemon";
+    let mut cmd = std::process::Command::new("swww-daemon");
     if no_daemon {
-        match std::process::Command::new(cmd).status() {
+        match cmd.status() {
             Ok(_) => Ok(()),
             Err(e) => Err(format!("error spawning swww-daemon: {e}")),
         }
     } else {
-        match std::process::Command::new(cmd)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-        {
+        match cmd.stdout(Stdio::null()).stderr(Stdio::null()).spawn() {
             Ok(_) => Ok(()),
             Err(e) => Err(format!("error spawning swww-daemon: {e}")),
         }
@@ -645,6 +289,15 @@ fn connect_to_socket(tries: u8, interval: u64) -> Result<UnixStream, String> {
                 if let Err(e) = socket.set_nonblocking(false) {
                     return Err(format!("Failed to set blocking connection: {e}"));
                 }
+                #[cfg(debug_assertions)]
+                let timeout = Duration::from_secs(30); //Some operations take a while to respond in debug mode
+                #[cfg(not(debug_assertions))]
+                let timeout = Duration::from_secs(5);
+
+                if let Err(e) = socket.set_read_timeout(Some(timeout)) {
+                    return Err(format!("failed to set read timeout for socket: {e}"));
+                }
+
                 return Ok(socket);
             }
             Err(e) => error = Some(e),
