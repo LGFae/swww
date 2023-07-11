@@ -4,7 +4,7 @@ default-members = [".", "daemon"]
 
 [package]
 name = "swww"
-version = "0.8.0"
+version = "0.8.0-master"
 authors = ["Leonardo Gibrowski Faé <leonardo.fae44@gmail.com>"]
 edition = "2021"
 

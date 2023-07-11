@@ -321,7 +321,7 @@ impl Daemon {
                             wallpaper.clear(color);
                             wallpaper.draw();
                         }
-                        signal::kill(nix::unistd::Pid::this(), signal::SIGUSR1).unwrap();
+                        wake_poll();
                     }) {
                     Ok(_) => Answer::Ok,
                     Err(e) => Answer::Err(format!("failed to spawn `clear` thread: {e}")),
