@@ -313,10 +313,9 @@ impl Daemon {
                     .name("clear".to_string())
                     .spawn(move || {
                         for wallpaper in &wallpapers {
-                            wallpaper.set_end_animation_flag();
+                            wallpaper.inc_animation_id();
                         }
                         for wallpaper in wallpapers {
-                            wallpaper.wait_for_animation();
                             wallpaper.set_img_info(utils::ipc::BgImg::Color(color));
                             wallpaper.clear(color);
                             wallpaper.draw();
@@ -339,7 +338,7 @@ impl Daemon {
                 for img in imgs.iter() {
                     let mut wallpapers = self.find_wallpapers_by_names(&img.1);
                     for wallpaper in wallpapers.iter_mut() {
-                        wallpaper.set_end_animation_flag();
+                        wallpaper.inc_animation_id();
                     }
                     used_wallpapers.push(wallpapers);
                 }

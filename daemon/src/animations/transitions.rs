@@ -6,7 +6,7 @@ use std::{
 use log::debug;
 use utils::ipc::{ArchivedPosition, ArchivedTransitionType};
 
-use crate::wallpaper::Wallpaper;
+use crate::wallpaper::{AnimationToken, Wallpaper};
 
 use keyframe::{
     functions::BezierCurve, keyframes, mint::Vector2, num_traits::Pow, AnimationSequence,
@@ -41,6 +41,7 @@ macro_rules! change_cols {
 }
 
 pub struct Transition {
+    animation_tokens: Vec<AnimationToken>,
     wallpapers: Vec<Arc<Wallpaper>>,
     dimensions: (u32, u32),
     transition_type: ArchivedTransitionType,
@@ -62,6 +63,10 @@ impl Transition {
         transition: utils::ipc::ArchivedTransition,
     ) -> Self {
         Transition {
+            animation_tokens: wallpapers
+                .iter()
+                .map(|w| w.create_animation_token())
+                .collect(),
             wallpapers,
             dimensions,
             transition_type: transition.transition_type,
@@ -86,10 +91,6 @@ impl Transition {
     }
 
     pub fn execute(mut self, new_img: &[u8]) {
-        for wallpaper in self.wallpapers.iter_mut() {
-            wallpaper.begin_animation();
-        }
-
         debug!("Starting transitions");
         match self.transition_type {
             ArchivedTransitionType::Simple => self.simple(new_img),
@@ -100,22 +101,20 @@ impl Transition {
             ArchivedTransitionType::Fade => self.fade(new_img),
         };
         debug!("Transitions finished");
-
-        for wallpaper in self.wallpapers.iter_mut() {
-            wallpaper.end_animation();
-        }
     }
 
     fn send_frame(&mut self, now: &mut Instant) {
         let fps = self.fps;
-        self.wallpapers.retain(|w| {
-            if w.animation_should_stop() {
-                w.end_animation();
-                false
-            } else {
-                true
+        let mut i = 0;
+        while i < self.wallpapers.len() {
+            let token = &self.animation_tokens[i];
+            if !self.wallpapers[i].has_animation_id(token) {
+                self.wallpapers.swap_remove(i);
+                self.animation_tokens.swap_remove(i);
+                continue;
             }
-        });
+            i += 1;
+        }
         let timeout = fps.saturating_sub(now.elapsed());
         std::thread::sleep(timeout.mul_f32(0.9));
         crate::wake_poll();

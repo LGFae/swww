@@ -2,7 +2,10 @@ use utils::ipc::BgImg;
 
 use std::{
     num::NonZeroI32,
-    sync::{Arc, Condvar, Mutex, MutexGuard},
+    sync::{
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+        Arc, Condvar, Mutex, MutexGuard,
+    },
 };
 
 use smithay_client_toolkit::{
@@ -17,10 +20,27 @@ use smithay_client_toolkit::{
 use wayland_client::protocol::{wl_shm, wl_surface::WlSurface};
 
 #[derive(Debug)]
-pub enum AnimationState {
-    Animating,
-    ShouldStop,
-    Idle,
+struct AnimationState {
+    id: AtomicUsize,
+    transition_finished: Arc<AtomicBool>,
+}
+
+#[derive(Debug)]
+pub struct AnimationToken {
+    id: usize,
+    transition_finished: Arc<AtomicBool>,
+}
+
+impl AnimationToken {
+    pub fn transition_finished(&self) -> bool {
+        self.transition_finished.load(Ordering::Acquire)
+    }
+}
+
+impl Drop for AnimationToken {
+    fn drop(&mut self) {
+        self.transition_finished.store(true, Ordering::Release);
+    }
 }
 
 /// Owns all the necessary information for drawing.
@@ -31,8 +51,6 @@ struct WallpaperInner {
 
     slot: Slot,
     img: BgImg,
-
-    animation_state: AnimationState,
 }
 
 pub struct Wallpaper {
@@ -40,6 +58,8 @@ pub struct Wallpaper {
     inner: Mutex<WallpaperInner>,
     layer_surface: LayerSurface,
     condvar: Condvar,
+
+    animation_state: AnimationState,
     pool: Arc<Mutex<SlotPool>>,
 }
 
@@ -94,16 +114,29 @@ impl Wallpaper {
                 scale_factor,
                 slot,
                 img: BgImg::Color([0, 0, 0]),
-                animation_state: AnimationState::Idle,
             }),
+            animation_state: AnimationState {
+                id: AtomicUsize::new(0),
+                transition_finished: Arc::new(AtomicBool::new(false)),
+            },
             condvar: Condvar::new(),
         }
     }
 
+    #[inline]
     pub fn has_id(&self, id: u32) -> bool {
         self.output_id == id
     }
 
+    #[inline]
+    pub fn has_animation_id(&self, token: &AnimationToken) -> bool {
+        self.animation_state
+            .id
+            .load(std::sync::atomic::Ordering::Acquire)
+            == token.id
+    }
+
+    #[inline]
     pub fn has_surface(&self, surface: &WlSurface) -> bool {
         self.layer_surface.wl_surface() == surface
     }
@@ -137,46 +170,27 @@ impl Wallpaper {
         }
     }
 
+    #[inline]
     pub fn get_img_info(&self) -> BgImg {
         self.lock().0.img.clone()
     }
 
-    pub fn begin_animation(&self) {
-        let mut lock = self.lock().0;
-        log::debug!("beginning animation for output: {}", self.output_id);
-        while !matches!(lock.animation_state, AnimationState::Idle) {
-            lock = self.condvar.wait(lock).unwrap();
-        }
-        lock.animation_state = AnimationState::Animating;
-    }
-
-    pub fn set_end_animation_flag(&self) {
-        let mut lock = self.lock().0;
-        if !matches!(lock.animation_state, AnimationState::Idle) {
-            log::debug!("setting end animation flags for output: {}", self.output_id,);
-            lock.animation_state = AnimationState::ShouldStop;
+    #[inline]
+    pub fn create_animation_token(&self) -> AnimationToken {
+        let id = self.animation_state.id.load(Ordering::Acquire);
+        AnimationToken {
+            id,
+            transition_finished: Arc::clone(&self.animation_state.transition_finished),
         }
     }
 
-    pub fn animation_should_stop(&self) -> bool {
-        let lock = self.lock().0;
-        matches!(lock.animation_state, AnimationState::ShouldStop)
-    }
-
-    pub fn end_animation(&self) {
-        let mut lock = self.lock().0;
-        log::debug!("ending animation for output: {}", self.output_id);
-        lock.animation_state = AnimationState::Idle;
-        self.condvar.notify_all();
-    }
-
-    pub fn wait_for_animation(&self) {
-        let mut lock = self.lock().0;
-        log::debug!("wait for output {} animation to finish...", self.output_id);
-        while !matches!(lock.animation_state, AnimationState::Idle) {
-            lock = self.condvar.wait(lock).unwrap();
-        }
-        log::debug!("output {} animation to finished!", self.output_id);
+    /// This will stop all animations with the current id
+    #[inline]
+    pub fn inc_animation_id(&self) {
+        self.animation_state.id.fetch_add(1, Ordering::AcqRel);
+        self.animation_state
+            .transition_finished
+            .store(false, Ordering::Release);
     }
 
     pub fn clear(&self, color: [u8; 3]) {
@@ -194,6 +208,7 @@ impl Wallpaper {
         self.lock().0.img = img_info;
     }
 
+    #[inline]
     pub fn notify_condvar(&self) {
         self.condvar.notify_all()
     }
@@ -231,10 +246,7 @@ impl Wallpaper {
         if (width, height, scale_factor) == (inner.width, inner.height, inner.scale_factor) {
             return;
         }
-
-        if matches!(inner.animation_state, AnimationState::Animating) {
-            inner.animation_state = AnimationState::ShouldStop;
-        }
+        self.inc_animation_id();
         inner.width = width;
         inner.height = height;
         inner.scale_factor = scale_factor;
