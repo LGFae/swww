@@ -256,13 +256,16 @@ fn make_animation_request(
     let filter = make_filter(&img.filter);
     let mut animations = Vec::with_capacity(dims.len());
     for (dim, outputs) in dims.iter().zip(outputs) {
-        match cache::load_animation_frames(&img.path, *dim) {
-            Ok(Some(animation)) => {
-                animations.push((animation, outputs.to_owned().into_boxed_slice()));
-                continue;
+        //TODO: make cache work for all resize strategies
+        if img.resize == ResizeStrategy::Crop {
+            match cache::load_animation_frames(&img.path, *dim) {
+                Ok(Some(animation)) => {
+                    animations.push((animation, outputs.to_owned().into_boxed_slice()));
+                    continue;
+                }
+                Ok(None) => (),
+                Err(e) => eprintln!("Error loading cache for {:?}: {e}", img.path),
             }
-            Ok(None) => (),
-            Err(e) => eprintln!("Error loading cache for {:?}: {e}", img.path),
         }
 
         let imgbuf = match image::io::Reader::open(&img.path) {
