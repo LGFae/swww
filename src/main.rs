@@ -50,7 +50,13 @@ fn main() -> Result<(), String> {
         }
     }
 
-    let request = make_request(&swww)?;
+    process_swww_args(&swww)?;
+
+    Ok(())
+}
+
+fn process_swww_args(args: &Swww) -> Result<(), String> {
+    let request = make_request(args)?;
     let socket = connect_to_socket(5, 100)?;
     request.send(&socket)?;
     let bytes = read_socket(&socket)?;
@@ -59,7 +65,7 @@ fn main() -> Result<(), String> {
         ArchivedAnswer::Err(msg) => return Err(msg.to_string()),
         ArchivedAnswer::Info(info) => info.iter().for_each(|i| println!("{}", i)),
         ArchivedAnswer::Ok => {
-            if let Swww::Kill = swww {
+            if let Swww::Kill = args {
                 #[cfg(debug_assertions)]
                 let tries = 20;
                 #[cfg(not(debug_assertions))]
@@ -74,10 +80,37 @@ fn main() -> Result<(), String> {
                 return Err(format!(
                     "Could not confirm socket deletion at: {socket_path:?}"
                 ));
+            } else if let Swww::Init { .. } = args {
+                let (_, outputs) = get_dimensions_and_outputs(&[])?;
+                for output in outputs.iter().flatten() {
+                    let img_path = utils::cache::get_previous_image_path(output)?;
+                    #[allow(deprecated)]
+                    if let Err(e) = process_swww_args(&Swww::Img(cli::Img {
+                        path: PathBuf::from(img_path),
+                        outputs: output.to_string(),
+                        no_resize: false,
+                        resize: ResizeStrategy::Crop,
+                        fill_color: [0, 0, 0],
+                        filter: cli::Filter::Lanczos3,
+                        transition_type: cli::TransitionType::None,
+                        transition_step: u8::MAX,
+                        transition_duration: 0.0,
+                        transition_fps: u8::MAX,
+                        transition_angle: 0.0,
+                        transition_pos: cli::CliPosition {
+                            x: cli::CliCoord::Pixel(0.0),
+                            y: cli::CliCoord::Pixel(0.0),
+                        },
+                        invert_y: false,
+                        transition_bezier: (0.0, 0.0, 0.0, 0.0),
+                        transition_wave: (0.0, 0.0),
+                    })) {
+                        eprintln!("WARNING: failed to load cache for output {output}: {e}");
+                    }
+                }
             }
         }
     }
-
     Ok(())
 }
 

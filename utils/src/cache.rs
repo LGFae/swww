@@ -78,11 +78,11 @@ pub fn load_animation_frames(
     Ok(None)
 }
 
-pub fn load(output_name: &str) -> Result<(), String> {
+pub fn get_previous_image_path(output_name: &str) -> Result<String, String> {
     let mut filepath = cache_dir()?;
     filepath.push(output_name);
     if !filepath.is_file() {
-        return Ok(());
+        return Ok("".to_string());
     }
     let file = std::fs::File::open(filepath).map_err(|e| format!("failed to open file: {e}"))?;
     let mut reader = BufReader::new(file);
@@ -91,8 +91,12 @@ pub fn load(output_name: &str) -> Result<(), String> {
         .read_to_end(&mut buf)
         .map_err(|e| format!("failed to read file: {e}"))?;
 
-    let img_path = std::str::from_utf8(&buf).map_err(|e| format!("failed to decode bytes: {e}"))?;
-    if buf.is_empty() {
+    String::from_utf8(buf).map_err(|e| format!("failed to decode bytes: {e}"))
+}
+
+pub fn load(output_name: &str) -> Result<(), String> {
+    let img_path = get_previous_image_path(output_name)?;
+    if img_path.is_empty() {
         return Ok(());
     }
 
@@ -108,9 +112,8 @@ pub fn load(output_name: &str) -> Result<(), String> {
         .arg("img")
         .args([
             &format!("--outputs={output_name}"),
-            "--transition-type=simple",
-            "--transition-step=255",
-            img_path,
+            "--transition-type=none",
+            &img_path,
         ])
         .spawn()
     {
