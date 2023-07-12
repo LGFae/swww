@@ -94,6 +94,7 @@ impl Wallpaper {
 
         // Configure the layer surface
         layer_surface.set_anchor(Anchor::all());
+        layer_surface.set_exclusive_zone(-1);
         layer_surface.set_margin(0, 0, 0, 0);
         layer_surface.set_keyboard_interactivity(KeyboardInteractivity::None);
         layer_surface.set_size(width.get() as u32, height.get() as u32);
