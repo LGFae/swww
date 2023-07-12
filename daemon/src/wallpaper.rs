@@ -4,7 +4,7 @@ use std::{
     num::NonZeroI32,
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
-        Arc, Mutex, MutexGuard,
+        Arc, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard,
     },
 };
 
@@ -55,7 +55,7 @@ struct WallpaperInner {
 
 pub struct Wallpaper {
     output_id: u32,
-    inner: Mutex<WallpaperInner>,
+    inner: RwLock<WallpaperInner>,
     layer_surface: LayerSurface,
 
     animation_state: AnimationState,
@@ -108,7 +108,7 @@ impl Wallpaper {
             output_id: output_info.id,
             layer_surface,
             pool,
-            inner: Mutex::new(WallpaperInner {
+            inner: RwLock::new(WallpaperInner {
                 width,
                 height,
                 scale_factor,
@@ -149,8 +149,13 @@ impl Wallpaper {
     }
 
     #[inline]
-    fn lock(&self) -> (MutexGuard<WallpaperInner>, MutexGuard<SlotPool>) {
-        (self.inner.lock().unwrap(), self.pool.lock().unwrap())
+    fn lock(&self) -> (RwLockReadGuard<WallpaperInner>, MutexGuard<SlotPool>) {
+        (self.inner.read().unwrap(), self.pool.lock().unwrap())
+    }
+
+    #[inline]
+    fn lock_inner_mut(&self) -> (RwLockWriteGuard<WallpaperInner>, MutexGuard<SlotPool>) {
+        (self.inner.write().unwrap(), self.pool.lock().unwrap())
     }
 
     pub fn canvas_change<F, T>(&self, f: F) -> T
@@ -158,10 +163,12 @@ impl Wallpaper {
         F: FnOnce(&mut [u8]) -> T,
     {
         loop {
-            let (inner, mut pool) = self.lock();
-            if let Some(canvas) = inner.slot.canvas(&mut pool) {
-                log::debug!("got canvas! - output {}", self.output_id);
-                return f(canvas);
+            {
+                let (inner, mut pool) = self.lock();
+                if let Some(canvas) = inner.slot.canvas(&mut pool) {
+                    log::debug!("got canvas! - output {}", self.output_id);
+                    return f(canvas);
+                }
             }
             log::debug!("failed to get canvas - output {}", self.output_id);
             // sleep to mitigate busy waiting
@@ -204,7 +211,7 @@ impl Wallpaper {
 
     pub fn set_img_info(&self, img_info: BgImg) {
         log::debug!("output {} - drawing: {}", self.output_id, img_info);
-        self.lock().0.img = img_info;
+        self.lock_inner_mut().0.img = img_info;
     }
 
     pub fn draw(&self) {
@@ -233,7 +240,7 @@ impl Wallpaper {
         if let Some(s) = scale_factor {
             self.layer_surface.set_buffer_scale(s.get() as u32).unwrap();
         }
-        let (mut inner, mut pool) = self.lock();
+        let (mut inner, mut pool) = self.lock_inner_mut();
         let width = width.unwrap_or(inner.width);
         let height = height.unwrap_or(inner.height);
         let scale_factor = scale_factor.unwrap_or(inner.scale_factor);

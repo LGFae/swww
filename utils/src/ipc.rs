@@ -300,8 +300,20 @@ impl Answer {
 pub fn read_socket(stream: &UnixStream) -> Result<Vec<u8>, String> {
     let mut reader = BufReader::new(stream);
     let mut buf = vec![0; 8];
-    if let Err(e) = reader.read_exact(&mut buf[0..std::mem::size_of::<usize>()]) {
-        return Err(format!("failed to read serialized length: {e}"));
+
+    let mut tries = 0;
+    loop {
+        match reader.read_exact(&mut buf[0..std::mem::size_of::<usize>()]) {
+            Ok(()) => break,
+            Err(e) => {
+                if e.kind() == std::io::ErrorKind::WouldBlock && tries < 5 {
+                    std::thread::sleep(Duration::from_millis(1));
+                } else {
+                  return Err(format!("failed to read serialized length: {e}"));
+                }
+            }
+        }
+        tries += 1;
     }
     let len = usize::from_ne_bytes(buf[0..std::mem::size_of::<usize>()].try_into().unwrap());
     buf.clear();
