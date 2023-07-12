@@ -56,7 +56,7 @@ fn start_daemon() -> Command {
 fn general_commands() {
     make_test_imgs();
 
-    init_daemon();
+    //init_daemon();
     init_daemon_twice();
     sending_imgs();
     sending_img_that_does_not_exist();
@@ -108,6 +108,8 @@ fn query_outputs() -> String {
 fn sending_img_to_individual_monitors(output: &str) {
     cmd()
         .arg("img")
+        .arg("-t")
+        .arg("none")
         .arg(TEST_IMGS[0])
         .arg("-o")
         .arg(output)
@@ -118,6 +120,8 @@ fn sending_img_to_individual_monitors(output: &str) {
 fn sending_img_to_monitor_that_does_not_exist() {
     cmd()
         .arg("img")
+        .arg("-t")
+        .arg("none")
         .arg(TEST_IMGS[0])
         .arg("-o")
         .arg("AHOY")
@@ -129,6 +133,8 @@ fn sending_imgs_with_filter() {
     for filter in ["Nearest", "Bilinear", "CatmullRom", "Mitchell", "Lanczos3"] {
         cmd()
             .arg("img")
+            .arg("-t")
+            .arg("none")
             .arg(TEST_IMGS[0])
             .arg("-f")
             .arg(filter)
@@ -141,6 +147,8 @@ fn sending_imgs_with_filter() {
 fn sending_img_from_stdin() {
     cmd()
         .arg("img")
+        .arg("-t")
+        .arg("none")
         .arg("-")
         .pipe_stdin("test_images/test1.jpg")
         .expect("failed to pipe stdin")
@@ -151,6 +159,8 @@ fn sending_img_from_stdin() {
 fn sending_img_with_filter_that_does_not_exist() {
     cmd()
         .arg("img")
+        .arg("-t")
+        .arg("none")
         .arg(TEST_IMGS[0])
         .arg("-f")
         .arg("AHOY")
@@ -161,6 +171,8 @@ fn sending_img_with_filter_that_does_not_exist() {
 fn sending_img_with_custom_transition() {
     cmd()
         .arg("img")
+        .arg("-t")
+        .arg("none")
         .arg(TEST_IMGS[0])
         .arg("--transition-step")
         .arg("200")

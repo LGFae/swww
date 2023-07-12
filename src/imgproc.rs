@@ -355,6 +355,7 @@ pub fn img_resize_crop(
 
 pub fn make_transition(img: &cli::Img) -> ipc::Transition {
     let mut angle = img.transition_angle;
+    let mut step = img.transition_step;
 
     let x = match img.transition_pos.x {
         cli::CliCoord::Percent(x) => {
@@ -383,6 +384,10 @@ pub fn make_transition(img: &cli::Img) -> ipc::Transition {
     let mut pos = Position::new(x, y);
 
     let transition_type = match img.transition_type {
+        cli::TransitionType::None => {
+            step = u8::MAX;
+            ipc::TransitionType::Simple
+        }
         cli::TransitionType::Simple => ipc::TransitionType::Simple,
         cli::TransitionType::Fade => ipc::TransitionType::Fade,
         cli::TransitionType::Wipe => ipc::TransitionType::Wipe,
@@ -438,7 +443,7 @@ pub fn make_transition(img: &cli::Img) -> ipc::Transition {
 
     ipc::Transition {
         duration: img.transition_duration,
-        step: img.transition_step,
+        step,
         fps: img.transition_fps,
         bezier: img.transition_bezier,
         angle,

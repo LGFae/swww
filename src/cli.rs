@@ -64,6 +64,7 @@ impl std::str::FromStr for Filter {
 
 #[derive(Clone)]
 pub enum TransitionType {
+    None,
     Simple,
     Fade,
     Left,
@@ -84,6 +85,7 @@ impl std::str::FromStr for TransitionType {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
+            "none" => Ok(Self::None),
             "simple" => Ok(Self::Simple),
             "left" => Ok(Self::Left),
             "right" => Ok(Self::Right),
@@ -250,11 +252,14 @@ pub struct Img {
     ///
     ///Possible transitions are:
     ///
-    ///simple | fade | left | right | top | bottom | wipe | wave | grow | center | any | outer | random
+    ///none | simple | fade | left | right | top | bottom | wipe | wave | grow | center | any | outer | random
     ///
     ///The 'left', 'right', 'top' and 'bottom' options make the transition happen from that
     ///position to its opposite in the screen.
     /// 
+    ///'none' is an alias to 'simple' that also sets the 'transition-step' to 255. This has the
+    ///effect of the transition finishing instantly
+    ///
     ///'fade' is similar to 'simple' but the fade is controlled through the --transition-bezier flag
     ///
     ///'wipe' is similar to 'left' but allows you to specify the angle for transition with the `--transition-angle` flag.
