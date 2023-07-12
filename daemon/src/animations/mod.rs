@@ -11,7 +11,7 @@ use utils::ipc::{
     Answer, ArchivedAnimation, ArchivedImg, ArchivedRequest, ArchivedTransition, BgImg, Request,
 };
 
-use crate::wallpaper::Wallpaper;
+use crate::wallpaper::{AnimationToken, Wallpaper};
 
 mod anim_barrier;
 mod transitions;
@@ -107,9 +107,22 @@ impl Animator {
                 }
                 log::debug!("Starting animation");
 
-                for wallpaper in &wallpapers {
-                    wallpaper.wait_for_animation();
-                    wallpaper.begin_animation();
+                let mut tokens: Vec<AnimationToken> = wallpapers
+                    .iter()
+                    .map(|w| w.create_animation_token())
+                    .collect();
+
+                for (wallpaper, token) in wallpapers.iter().zip(&tokens) {
+                    loop {
+                        if !wallpaper.has_animation_id(token) || token.transition_finished() {
+                            break;
+                        }
+                        let duration: Duration = animation.animation[0]
+                            .1
+                            .deserialize(&mut rkyv::Infallible)
+                            .unwrap();
+                        std::thread::sleep(duration / 2);
+                    }
                 }
 
                 let mut now = std::time::Instant::now();
@@ -118,18 +131,25 @@ impl Animator {
                     let duration: Duration = duration.deserialize(&mut rkyv::Infallible).unwrap();
                     barrier.wait(duration.div_f32(2.0));
 
-                    wallpapers.retain(|wallpaper| {
-                        if wallpaper.animation_should_stop() {
-                            wallpaper.end_animation();
-                            return false;
+                    let mut i = 0;
+                    while i < wallpapers.len() {
+                        let token = &tokens[i];
+                        if !wallpapers[i].has_animation_id(token) {
+                            wallpapers.swap_remove(i);
+                            tokens.swap_remove(i);
+                            continue;
                         }
-                        if !wallpaper.canvas_change(|canvas| frame.unpack(canvas)) {
+
+                        if !wallpapers[i].canvas_change(|canvas| frame.unpack(canvas)) {
                             error!("failed to unpack frame, canvas has the wrong size");
-                            return false;
+                            wallpapers.swap_remove(i);
+                            tokens.swap_remove(i);
+                            continue;
                         }
-                        wallpaper.draw();
-                        true
-                    });
+
+                        wallpapers[i].draw();
+                        i += 1;
+                    }
 
                     if wallpapers.is_empty() {
                         return;
