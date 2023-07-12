@@ -112,9 +112,6 @@ fn main() -> DaemonResult<()> {
             event_queue
                 .dispatch_pending(&mut daemon)
                 .expect("failed to dispatch events");
-            for w in &daemon.wallpapers {
-                w.notify_condvar();
-            }
         }
 
         if poll_handler.has_event(PollHandler::SOCKET_FD) {

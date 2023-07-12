@@ -4,7 +4,7 @@ use std::{
     num::NonZeroI32,
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
-        Arc, Condvar, Mutex, MutexGuard,
+        Arc, Mutex, MutexGuard,
     },
 };
 
@@ -57,7 +57,6 @@ pub struct Wallpaper {
     output_id: u32,
     inner: Mutex<WallpaperInner>,
     layer_surface: LayerSurface,
-    condvar: Condvar,
 
     animation_state: AnimationState,
     pool: Arc<Mutex<SlotPool>>,
@@ -119,7 +118,6 @@ impl Wallpaper {
                 id: AtomicUsize::new(0),
                 transition_finished: Arc::new(AtomicBool::new(false)),
             },
-            condvar: Condvar::new(),
         }
     }
 
@@ -206,11 +204,6 @@ impl Wallpaper {
     pub fn set_img_info(&self, img_info: BgImg) {
         log::debug!("output {} - drawing: {}", self.output_id, img_info);
         self.lock().0.img = img_info;
-    }
-
-    #[inline]
-    pub fn notify_condvar(&self) {
-        self.condvar.notify_all()
     }
 
     pub fn draw(&self) {
