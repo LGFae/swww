@@ -56,7 +56,7 @@ fn start_daemon() -> Command {
 fn general_commands() {
     make_test_imgs();
 
-    //init_daemon();
+    init_daemon();
     init_daemon_twice();
     sending_imgs();
     sending_img_that_does_not_exist();

@@ -1,6 +1,25 @@
 ### Unreleased
 
 
+### 0.8.1
+
+Pretty a much a near-exclusive bug fix release:
+
+  * Fixed `swww clear` causing the daemon to exit
+  * The cache is once again being correctly load during `swww init`
+  * Fixed glitches happening to animated gifs (frames were being loaded in the 
+  wrong order)
+  * Fixed `swww-daemon` sometimes not drawing to the whole screen (forgot to set
+  the exclusive zone to -2)
+  * Fixed an issue where the daemon would hang if multiple images were sent in
+  quick succession
+
+#### Additions:
+
+  * `--transition-type none`, which is an alias to `--trasition-type simple`
+  `--transition-step 255`
+
+
 ### 0.8.0
 
 #### BREAKING CHANGE: CACHE HAS CHANGED:
