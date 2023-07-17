@@ -157,6 +157,13 @@ pub enum Swww {
         ///builds we only log info, warnings and errors, so you won't be seeing much (ideally).
         #[clap(long)]
         no_daemon: bool,
+
+        ///Don't load the cache *during initialization* (it still loads on monitor (re)connection)
+        ///
+        ///If want to always pass an image for `swww` to load, this option can help make the
+        ///results some reliable: `swww init --no-cache && swww img <some img>`
+        #[clap(long)]
+        no_cache: bool,
     },
 
     ///Kills the daemon
