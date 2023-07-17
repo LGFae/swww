@@ -15,7 +15,7 @@ use cli::{ResizeStrategy, Swww};
 
 fn main() -> Result<(), String> {
     let swww = Swww::parse();
-    if let Swww::Init { no_daemon } = &swww {
+    if let Swww::Init { no_daemon, .. } = &swww {
         match is_daemon_running() {
             Ok(false) => {
                 let socket_path = get_socket_path();
@@ -80,7 +80,10 @@ fn process_swww_args(args: &Swww) -> Result<(), String> {
                 return Err(format!(
                     "Could not confirm socket deletion at: {socket_path:?}"
                 ));
-            } else if let Swww::Init { .. } = args {
+            } else if let Swww::Init { no_cache, .. } = args {
+                if *no_cache {
+                    return Ok(());
+                }
                 let (_, outputs) = get_dimensions_and_outputs(&[])?;
                 for output in outputs.iter().flatten() {
                     let img_path = utils::cache::get_previous_image_path(output)?;

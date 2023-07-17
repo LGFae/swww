@@ -15,6 +15,12 @@ swww-init
 	release builds we only log info, warnings and errors, so you won't be seeing
 	much (ideally). This is mostly useful for debugging and developing.
 
+*--no-cache*
+    Don't load the cache *during initialization* (it still loads on monitor (re)connection)
+
+    If want to always pass an image for `swww` to load, this option can help make the
+    results some reliable: `swww init --no-cache && swww img <some img>`
+
 *-h*, *--help*
 	Print help (see a summary with '-h')
 
