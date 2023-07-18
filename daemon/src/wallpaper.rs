@@ -60,6 +60,7 @@ pub struct Wallpaper {
 
     animation_state: AnimationState,
     pool: Arc<Mutex<SlotPool>>,
+    pub configured: AtomicBool,
 }
 
 impl Wallpaper {
@@ -119,6 +120,7 @@ impl Wallpaper {
                 id: AtomicUsize::new(0),
                 transition_finished: Arc::new(AtomicBool::new(false)),
             },
+            configured: AtomicBool::new(false)
         }
     }
 
@@ -264,5 +266,6 @@ impl Wallpaper {
             .set_size(inner.width.get() as u32, inner.height.get() as u32);
         inner.img = BgImg::Color([0, 0, 0]);
         self.layer_surface.commit();
+        self.configured.store(false, Ordering::Release);
     }
 }

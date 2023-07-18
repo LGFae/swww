@@ -74,8 +74,7 @@ extern "C" fn signal_handler(_s: i32) {
     exit_daemon();
 }
 
-type DaemonResult<T> = Result<T, String>;
-fn main() -> DaemonResult<()> {
+fn main() -> Result<(), String> {
     make_logger();
     let listener = SocketWrapper::new()?;
     let wake = setup_signals_and_pipe();
@@ -323,7 +322,11 @@ impl Daemon {
                     Err(e) => Answer::Err(format!("failed to spawn `clear` thread: {e}")),
                 }
             }
-            ArchivedRequest::Init => Answer::Ok,
+            ArchivedRequest::Init => Answer::Init(
+                self.wallpapers
+                    .iter()
+                    .all(|w| w.configured.load(std::sync::atomic::Ordering::Acquire)),
+            ),
             ArchivedRequest::Kill => {
                 exit_daemon();
                 Answer::Ok
@@ -543,11 +546,19 @@ impl LayerShellHandler for Daemon {
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        _layer: &LayerSurface,
+        layer: &LayerSurface,
         _configure: LayerSurfaceConfigure,
         _serial: u32,
     ) {
-        // we only care about output configs
+        // we only care about output configs, so we just set the wallpaper as having been
+        // configured
+        for w in &mut self.wallpapers {
+            if w.has_surface(layer.wl_surface()) {
+                w.configured
+                    .store(true, std::sync::atomic::Ordering::Release);
+                break;
+            }
+        }
     }
 }
 
