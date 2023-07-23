@@ -182,7 +182,10 @@ pub fn img_resize_fit(
             return img_pad(img, dimensions, padding_color);
         }
 
-        let (trg_w, trg_h) = if width.abs_diff(img_w) > height.abs_diff(img_h) {
+        let ratio = width as f32 / height as f32;
+        let img_r = img_w as f32 / img_h as f32;
+
+        let (trg_w, trg_h) = if ratio > img_r {
             let scale = height as f32 / img_h as f32;
             ((img_w as f32 * scale) as u32, height)
         } else {
