@@ -3,6 +3,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+use rayon::prelude::*;
+
 use log::debug;
 use utils::ipc::{ArchivedPosition, ArchivedTransitionType};
 
@@ -116,7 +118,7 @@ impl Transition {
             i += 1;
         }
         let timeout = fps.saturating_sub(now.elapsed());
-        std::thread::sleep(timeout.mul_f32(0.9));
+        spin_sleep::sleep(timeout);
         crate::wake_poll();
         *now = Instant::now();
     }
@@ -154,14 +156,15 @@ impl Transition {
         while start.elapsed().as_secs_f64() < seq.duration() {
             for wallpaper in self.wallpapers.iter_mut() {
                 wallpaper.canvas_change(|canvas| {
-                    for (old_pix, new_pix) in
-                        canvas.chunks_exact_mut(4).zip(new_img.chunks_exact(4))
-                    {
-                        for (old_col, new_col) in old_pix.iter_mut().zip(new_pix) {
-                            *old_col =
-                                (*old_col as f64 * (1.0 - step) + *new_col as f64 * step) as u8;
-                        }
-                    }
+                    canvas
+                        .par_chunks_exact_mut(4)
+                        .zip(new_img.par_chunks_exact(3))
+                        .for_each(|(old_pix, new_pix)| {
+                            for (old_col, new_col) in old_pix.iter_mut().zip(new_pix) {
+                                *old_col =
+                                    (*old_col as f64 * (1.0 - step) + *new_col as f64 * step) as u8;
+                            }
+                        });
                 });
                 wallpaper.draw();
             }
@@ -169,7 +172,7 @@ impl Transition {
             step = seq.now() as f64;
             seq.advance_to(start.elapsed().as_secs_f64());
         }
-        self.step = 4;
+        self.step = 4 + self.step / 4;
         self.simple(new_img)
     }
 
@@ -213,6 +216,7 @@ impl Transition {
             offset
         };
         let max_offset = 2.0 * circle_radius - offset;
+        let (width, height) = (width as usize, height as usize);
 
         let (mut seq, start) = self.bezier_seq(offset as f32, max_offset as f32);
 
@@ -221,19 +225,17 @@ impl Transition {
         while start.elapsed().as_secs_f64() < seq.duration() {
             for wallpaper in self.wallpapers.iter_mut() {
                 wallpaper.canvas_change(|canvas| {
-                    for (i, (old, new)) in canvas
-                        .chunks_exact_mut(4)
-                        .zip(new_img.chunks_exact(3))
+                    canvas
+                        .par_chunks_exact_mut(4)
+                        .zip(new_img.par_chunks_exact(3))
                         .enumerate()
-                    {
-                        let width = width as usize;
-                        let height = height as usize;
-                        let pix_x = i % width;
-                        let pix_y = height - i / width;
-                        if is_low(pix_x as f64, pix_y as f64, offset) {
-                            change_cols!(step, old, new);
-                        }
-                    }
+                        .for_each(|(i, (old, new))| {
+                            let pix_x = i % width;
+                            let pix_y = height - i / width;
+                            if is_low(pix_x as f64, pix_y as f64, offset) {
+                                change_cols!(step, old, new);
+                            }
+                        });
                 });
                 wallpaper.draw();
             }
@@ -242,7 +244,7 @@ impl Transition {
             offset = seq.now() as f64;
             seq.advance_to(start.elapsed().as_secs_f64());
         }
-        self.step = 4;
+        self.step = 4 + self.step / 4;
         self.simple(new_img)
     }
 
@@ -276,6 +278,7 @@ impl Transition {
             res >= radius.pow(2)
         };
 
+        let (width, height) = (width as usize, height as usize);
         let (mut seq, start) = self.bezier_seq(0.0, max_offset as f32);
 
         let step = self.step;
@@ -283,19 +286,17 @@ impl Transition {
         while start.elapsed().as_secs_f64() < seq.duration() {
             for wallpaper in self.wallpapers.iter_mut() {
                 wallpaper.canvas_change(|canvas| {
-                    for (i, (old, new)) in canvas
-                        .chunks_exact_mut(4)
-                        .zip(new_img.chunks_exact(3))
+                    canvas
+                        .par_chunks_exact_mut(4)
+                        .zip(new_img.par_chunks_exact(3))
                         .enumerate()
-                    {
-                        let width = width as usize;
-                        let height = height as usize;
-                        let pix_x = i % width;
-                        let pix_y = height - i / width;
-                        if is_low(pix_x as f64, pix_y as f64, offset, circle_radius) {
-                            change_cols!(step, old, new);
-                        }
-                    }
+                        .for_each(|(i, (old, new))| {
+                            let pix_x = i % width;
+                            let pix_y = height - i / width;
+                            if is_low(pix_x as f64, pix_y as f64, offset, circle_radius) {
+                                change_cols!(step, old, new);
+                            }
+                        });
                 });
                 wallpaper.draw();
             }
@@ -304,7 +305,7 @@ impl Transition {
             offset = seq.now() as f64;
             seq.advance_to(start.elapsed().as_secs_f64());
         }
-        self.step = 4;
+        self.step = 4 + self.step / 4;
         self.simple(new_img)
     }
 
@@ -323,31 +324,32 @@ impl Transition {
             }
             f32::sqrt(x.pow(2) + y.pow(2))
         };
-        let mut now = Instant::now();
+
+        let (width, height) = (width as usize, height as usize);
+        let (center_x, center_y) = (center_x as usize, center_y as usize);
 
         let (mut seq, start) = self.bezier_seq(0.0, dist_end);
-
+        let mut now = Instant::now();
         while start.elapsed().as_secs_f64() < seq.duration() {
             for wallpaper in self.wallpapers.iter_mut() {
                 wallpaper.canvas_change(|canvas| {
-                    for (i, (old, new)) in canvas
-                        .chunks_exact_mut(4)
-                        .zip(new_img.chunks_exact(3))
+                    canvas
+                        .par_chunks_exact_mut(4)
+                        .zip(new_img.par_chunks_exact(3))
                         .enumerate()
-                    {
-                        let (width, height) = (width as usize, height as usize);
-                        let pix_x = i % width;
-                        let pix_y = height - i / width;
-                        let diff_x = pix_x.abs_diff(center_x as usize) as f32;
-                        let diff_y = pix_y.abs_diff(center_y as usize) as f32;
-                        let pix_center_dist = f32::sqrt(diff_x.pow(2) + diff_y.pow(2));
-                        if pix_center_dist <= dist_center {
-                            let step = self
-                                .step
-                                .saturating_add((dist_center - pix_center_dist).log2() as u8);
-                            change_cols!(step, old, new);
-                        }
-                    }
+                        .for_each(|(i, (old, new))| {
+                            let pix_x = i % width;
+                            let pix_y = height - i / width;
+                            let diff_x = pix_x.abs_diff(center_x);
+                            let diff_y = pix_y.abs_diff(center_y);
+                            let pix_center_dist = f32::sqrt((diff_x.pow(2) + diff_y.pow(2)) as f32);
+                            if pix_center_dist <= dist_center {
+                                let step = self
+                                    .step
+                                    .saturating_add((dist_center - pix_center_dist).log2() as u8);
+                                change_cols!(step, old, new);
+                            }
+                        });
                 });
                 wallpaper.draw();
             }
@@ -356,7 +358,7 @@ impl Transition {
             dist_center = seq.now();
             seq.advance_to(start.elapsed().as_secs_f64());
         }
-        self.step = 4;
+        self.step = 4 + self.step / 4;
         self.simple(new_img)
     }
 
@@ -374,31 +376,31 @@ impl Transition {
             }
             f32::sqrt(x.pow(2) + y.pow(2))
         };
-        let mut now = Instant::now();
+        let (width, height) = (width as usize, height as usize);
+        let (center_x, center_y) = (center_x as usize, center_y as usize);
 
         let (mut seq, start) = self.bezier_seq(dist_center, 0.0);
-
+        let mut now = Instant::now();
         while start.elapsed().as_secs_f64() < seq.duration() {
             for wallpaper in self.wallpapers.iter_mut() {
                 wallpaper.canvas_change(|canvas| {
-                    for (i, (old, new)) in canvas
-                        .chunks_exact_mut(4)
-                        .zip(new_img.chunks_exact(3))
+                    canvas
+                        .par_chunks_exact_mut(4)
+                        .zip(new_img.par_chunks_exact(3))
                         .enumerate()
-                    {
-                        let (width, height) = (width as usize, height as usize);
-                        let pix_x = i % width;
-                        let pix_y = height - i / width;
-                        let diff_x = pix_x.abs_diff(center_x as usize) as f32;
-                        let diff_y = pix_y.abs_diff(center_y as usize) as f32;
-                        let pix_center_dist = f32::sqrt(diff_x.pow(2) + diff_y.pow(2));
-                        if pix_center_dist >= dist_center {
-                            let step = self
-                                .step
-                                .saturating_add((pix_center_dist - dist_center).log2() as u8);
-                            change_cols!(step, old, new);
-                        }
-                    }
+                        .for_each(|(i, (old, new))| {
+                            let pix_x = i % width;
+                            let pix_y = height - i / width;
+                            let diff_x = pix_x.abs_diff(center_x);
+                            let diff_y = pix_y.abs_diff(center_y);
+                            let pix_center_dist = f32::sqrt((diff_x.pow(2) + diff_y.pow(2)) as f32);
+                            if pix_center_dist >= dist_center {
+                                let step = self
+                                    .step
+                                    .saturating_add((pix_center_dist - dist_center).log2() as u8);
+                                change_cols!(step, old, new);
+                            }
+                        });
                 });
                 wallpaper.draw();
             }
@@ -407,7 +409,7 @@ impl Transition {
             dist_center = seq.now();
             seq.advance_to(start.elapsed().as_secs_f64());
         }
-        self.step = 4;
+        self.step = 4 + self.step / 4;
         self.simple(new_img)
     }
 }
