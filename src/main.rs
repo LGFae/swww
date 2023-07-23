@@ -80,7 +80,23 @@ fn process_swww_args(args: &Swww) -> Result<(), String> {
                 return Err(format!(
                     "Could not confirm socket deletion at: {socket_path:?}"
                 ));
-            } else if let Swww::Init { no_cache, .. } = args {
+            }
+        }
+        ArchivedAnswer::Init(configured) => {
+            let mut configured = *configured;
+            while !configured {
+                std::thread::sleep(Duration::from_millis(1));
+                let socket = connect_to_socket(5, 100)?;
+                Request::Init.send(&socket)?;
+                let bytes = read_socket(&socket)?;
+                let answer = Answer::receive(&bytes);
+                if let ArchivedAnswer::Init(c) = answer {
+                    configured = *c;
+                } else {
+                    return Err("Daemon did not return Answer::Init, as expected".to_string());
+                }
+            }
+            if let Swww::Init { no_cache, .. } = args {
                 if *no_cache {
                     return Ok(());
                 }

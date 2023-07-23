@@ -272,6 +272,7 @@ pub enum Answer {
     Ok,
     Err(String),
     Info(Box<[BgInfo]>),
+    Init(bool),
 }
 
 impl Answer {
