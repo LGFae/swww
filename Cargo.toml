@@ -7,6 +7,8 @@ name = "swww"
 version = "0.8.1"
 authors = ["Leonardo Gibrowski Faé <leonardo.fae44@gmail.com>"]
 edition = "2021"
+# we use `std::cell::OnceLock` which was stabilized in 1.70
+rust-version = "1.70"
 
 [profile.release]
 debug = 0
