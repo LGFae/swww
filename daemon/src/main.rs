@@ -76,7 +76,6 @@ extern "C" fn signal_handler(_s: i32) {
 
 fn main() -> Result<(), String> {
     rayon::ThreadPoolBuilder::default()
-        .stack_size(1 << 16) // 64KiB
         .thread_name(|i| format!("rayon thread {i}"))
         .build_global()
         .expect("failed to configure rayon global thread pool");
