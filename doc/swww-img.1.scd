@@ -225,7 +225,7 @@ calling `swww-init` will.
 The `swww-daemon` will actually wait until the first image has been set before 
 trying to load the cache.
 
-Finally, the cache will keep preproccessed versions of `gif`s. So, if you load a
+Finally, the cache will keep preprocessed versions of `gif`s. So, if you load a
 large `gif`, you would have to pay the price for its processing the first time.
 If you constantly load large `gif`s, this could cause the cache to get very big.
 You can simply delete the cache directory if this happens.
