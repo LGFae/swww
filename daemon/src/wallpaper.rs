@@ -164,6 +164,7 @@ impl Wallpaper {
     where
         F: FnOnce(&mut [u8]) -> T,
     {
+        let mut nano_sleep = 2000000; // start at 2 ms, half it every loop
         loop {
             {
                 let (inner, mut pool) = self.lock();
@@ -174,7 +175,8 @@ impl Wallpaper {
             }
             log::debug!("failed to get canvas - output {}", self.output_id);
             // sleep to mitigate busy waiting
-            std::thread::sleep(std::time::Duration::from_millis(1));
+            std::thread::sleep(std::time::Duration::from_nanos(nano_sleep));
+            nano_sleep /= 2;
         }
     }
 

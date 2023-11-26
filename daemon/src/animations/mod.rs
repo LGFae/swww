@@ -156,7 +156,7 @@ impl Animator {
                     }
 
                     let timeout = duration.saturating_sub(now.elapsed());
-                    thread::sleep(timeout.mul_f32(0.9));
+                    spin_sleep::sleep(timeout);
                     crate::wake_poll();
                     now = std::time::Instant::now();
                 }

@@ -1330,6 +1330,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "spin_sleep"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cafa7900db085f4354dbc7025e25d7a839a14360ea13b5fc4fd717f2d3b23134"
+dependencies = [
+ "once_cell",
+ "winapi",
+]
+
+[[package]]
 name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1362,10 +1372,12 @@ dependencies = [
  "log",
  "nix",
  "rand",
+ "rayon",
  "rkyv",
  "sd-notify",
  "simplelog",
  "smithay-client-toolkit",
+ "spin_sleep",
  "utils",
  "wayland-client",
 ]
