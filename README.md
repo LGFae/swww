@@ -206,3 +206,8 @@ the first versions of swww were quite literally copy pasted from the
 
 A big thank-you also to [HakierGrzonzo](https://github.com/HakierGrzonzo), for
 setting up the AUR package.
+
+### Wallpapers used in this README
+
+Pixel Art, by Waneella - https://www.patreon.com/waneella
+Gradient - https://www.behance.net/gallery/86128681/Free-Unicorn-Vector-Gradients
