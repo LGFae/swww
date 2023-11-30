@@ -210,4 +210,5 @@ setting up the AUR package.
 ### Wallpapers used in this README
 
 Pixel Art, by Waneella - https://www.patreon.com/waneella
+
 Gradient - https://www.behance.net/gallery/86128681/Free-Unicorn-Vector-Gradients
