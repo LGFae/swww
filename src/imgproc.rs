@@ -112,7 +112,7 @@ pub fn img_pad(
 ) -> Result<Vec<u8>, String> {
     let (padded_w, padded_h) = dimensions;
     let (padded_w, padded_h) = (padded_w as usize, padded_h as usize);
-    let mut padded = Vec::with_capacity(padded_w * padded_w * 3);
+    let mut padded = Vec::with_capacity(padded_h * padded_w * 3);
 
     let img = image::imageops::crop(&mut img, 0, 0, dimensions.0, dimensions.1).to_image();
     let (img_w, img_h) = img.dimensions();
