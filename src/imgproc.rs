@@ -1,7 +1,11 @@
 use fast_image_resize::{FilterType, PixelType, Resizer};
-use image::{codecs::gif::GifDecoder, AnimationDecoder, DynamicImage, RgbImage};
+use image::{
+    codecs::{gif::GifDecoder, webp::WebPDecoder},
+    AnimationDecoder, DynamicImage, Frames, ImageFormat, RgbImage,
+};
 use std::{
     fs::File,
+    io::Stdin,
     io::{stdin, BufReader, Read},
     num::NonZeroU32,
     path::Path,
@@ -17,34 +21,79 @@ use crate::cli::ResizeStrategy;
 
 use super::cli;
 
-pub fn read_img(path: &Path) -> Result<(RgbImage, bool), String> {
-    if let Some("-") = path.to_str() {
-        let mut reader = BufReader::new(stdin());
-        let mut buffer = Vec::new();
-        if let Err(e) = reader.read_to_end(&mut buffer) {
-            return Err(format!("failed to read stdin: {e}"));
-        }
+pub enum ImgBuf {
+    Stdin(BufReader<Stdin>),
+    File(image::io::Reader<BufReader<File>>),
+}
 
-        return match image::load_from_memory(&buffer) {
-            Ok(img) => Ok((img.into_rgb8(), false)),
-            Err(e) => return Err(format!("failed load image from memory: {e}")),
-        };
+impl ImgBuf {
+    /// Create a new ImgBuf from a given path. Use - for Stdin
+    pub fn new(path: &Path) -> Result<Self, String> {
+        Ok(if let Some("-") = path.to_str() {
+            let reader = BufReader::new(stdin());
+            Self::Stdin(reader)
+        } else {
+            let reader = image::io::Reader::open(path)
+                .map_err(|e| format!("failed to open image: {e}"))?
+                .with_guessed_format()
+                .map_err(|e| format!("failed to detect the image's format: {e}"))?;
+
+            Self::File(reader)
+        })
     }
 
-    let imgbuf = match image::io::Reader::open(path) {
-        Ok(img) => img,
-        Err(e) => return Err(format!("failed to open image: {e}")),
-    };
+    /// Guess the format of the ImgBuf
+    fn format(&self) -> Option<ImageFormat> {
+        match self {
+            ImgBuf::Stdin(_) => None, // not seekable
+            ImgBuf::File(reader) => reader.format(),
+        }
+    }
 
-    let imgbuf = match imgbuf.with_guessed_format() {
-        Ok(img) => img,
-        Err(e) => return Err(format!("failed to detect the image's format: {e}")),
-    };
+    /// Is this ImgBuf an animated image?
+    pub fn is_animated(&self) -> bool {
+        matches!(self.format(), Some(ImageFormat::Gif | ImageFormat::WebP))
+    }
 
-    let is_gif = imgbuf.format() == Some(image::ImageFormat::Gif);
-    match imgbuf.decode() {
-        Ok(img) => Ok((img.into_rgb8(), is_gif)),
-        Err(e) => Err(format!("failed to decode image: {e}")),
+    /// Decode the ImgBuf into am RgbImage
+    pub fn decode(self) -> Result<RgbImage, String> {
+        Ok(match self {
+            ImgBuf::Stdin(mut reader) => {
+                let mut buffer = Vec::new();
+                reader
+                    .read_to_end(&mut buffer)
+                    .map_err(|e| format!("failed to read stdin: {e}"))?;
+
+                image::load_from_memory(&buffer)
+            }
+            ImgBuf::File(reader) => reader.decode(),
+        }
+        .map_err(|e| format!("failed to decode image: {e}"))?
+        .into_rgb8())
+    }
+
+    /// Convert this ImgBuf into Frames
+    pub fn into_frames<'a>(self) -> Result<Frames<'a>, String> {
+        fn create_decoder<'a>(
+            img_format: Option<ImageFormat>,
+            reader: impl Read + 'a,
+        ) -> Result<Frames<'a>, String> {
+            match img_format {
+                Some(ImageFormat::Gif) => Ok(GifDecoder::new(reader)
+                    .map_err(|e| format!("failed to decode gif during animation: {e}"))?
+                    .into_frames()),
+                Some(ImageFormat::WebP) => Ok(WebPDecoder::new(reader)
+                    .map_err(|e| format!("failed to decode webp during animation: {e}"))?
+                    .into_frames()),
+                _ => Err(format!("requested format has no decoder: {img_format:#?}")),
+            }
+        }
+
+        let img_format = self.format();
+        match self {
+            ImgBuf::Stdin(reader) => create_decoder(img_format, reader),
+            ImgBuf::File(reader) => create_decoder(img_format, reader.into_inner()),
+        }
     }
 }
 
@@ -54,14 +103,13 @@ pub fn frame_to_rgb(frame: image::Frame) -> RgbImage {
 }
 
 pub fn compress_frames(
-    gif: GifDecoder<BufReader<File>>,
+    mut frames: Frames,
     dim: (u32, u32),
     filter: FilterType,
     resize: ResizeStrategy,
     color: &[u8; 3],
 ) -> Result<Vec<(BitPack, Duration)>, String> {
     let mut compressed_frames = Vec::new();
-    let mut frames = gif.into_frames();
 
     // The first frame should always exist
     let first = frames.next().unwrap().unwrap();
