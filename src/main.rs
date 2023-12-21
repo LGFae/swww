@@ -1,5 +1,4 @@
 use clap::Parser;
-use image::codecs::gif::GifDecoder;
 use std::{os::unix::net::UnixStream, path::PathBuf, process::Stdio, time::Duration};
 
 use utils::{
@@ -142,15 +141,19 @@ fn make_request(args: &Swww) -> Result<Request, String> {
         Swww::Img(img) => {
             let requested_outputs = split_cmdline_outputs(&img.outputs);
             let (dims, outputs) = get_dimensions_and_outputs(&requested_outputs)?;
-            let (img_raw, is_gif) = read_img(&img.path)?;
-            if is_gif {
+            let imgbuf = ImgBuf::new(&img.path)?;
+            if imgbuf.is_animated() {
                 match std::thread::scope::<_, Result<_, String>>(|s1| {
                     let animations = s1.spawn(|| make_animation_request(img, &dims, &outputs));
-                    let img_request = make_img_request(img, img_raw, &dims, &outputs)?;
-                    let animations = match animations.join() {
-                        Ok(a) => a,
-                        Err(e) => Err(format!("{e:?}")),
-                    };
+                    let first_frame = imgbuf
+                        .into_frames()?
+                        .next()
+                        .ok_or("missing first frame".to_owned())?
+                        .map_err(|e| format!("unable to decode first frame: {e}"))?;
+
+                    let img_request =
+                        make_img_request(img, frame_to_rgb(first_frame), &dims, &outputs)?;
+                    let animations = animations.join().unwrap_or_else(|e| Err(format!("{e:?}")));
 
                     let socket = connect_to_socket(5, 100)?;
                     Request::Img(img_request).send(&socket)?;
@@ -165,6 +168,7 @@ fn make_request(args: &Swww) -> Result<Request, String> {
                     Err(e) => Err(format!("failed to create animated request: {e}")),
                 }
             } else {
+                let img_raw = imgbuf.decode()?;
                 Ok(Request::Img(make_img_request(
                     img, img_raw, &dims, &outputs,
                 )?))
@@ -287,19 +291,18 @@ fn make_animation_request(
             }
         }
 
-        let imgbuf = match image::io::Reader::open(&img.path) {
-            Ok(img) => img.into_inner(),
-            Err(e) => return Err(format!("error opening image during animation: {e}")),
-        };
-        let gif = match GifDecoder::new(imgbuf) {
-            Ok(gif) => gif,
-            Err(e) => return Err(format!("failed to decode gif during animation: {e}")),
-        };
+        let imgbuf = ImgBuf::new(&img.path)?;
         let animation = ipc::Animation {
             path: img.path.to_string_lossy().to_string(),
             dimensions: *dim,
-            animation: compress_frames(gif, *dim, filter, img.resize, &img.fill_color)?
-                .into_boxed_slice(),
+            animation: compress_frames(
+                imgbuf.into_frames()?,
+                *dim,
+                filter,
+                img.resize,
+                &img.fill_color,
+            )?
+            .into_boxed_slice(),
         };
         animations.push((animation, outputs.to_owned().into_boxed_slice()));
     }
