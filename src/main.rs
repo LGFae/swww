@@ -55,7 +55,10 @@ fn main() -> Result<(), String> {
 }
 
 fn process_swww_args(args: &Swww) -> Result<(), String> {
-    let request = make_request(args)?;
+    let request = match make_request(args)? {
+        Some(request) => request,
+        None => return Ok(()),
+    };
     let socket = connect_to_socket(5, 100)?;
     request.send(&socket)?;
     let bytes = read_socket(&socket)?;
@@ -132,12 +135,16 @@ fn process_swww_args(args: &Swww) -> Result<(), String> {
     Ok(())
 }
 
-fn make_request(args: &Swww) -> Result<Request, String> {
+fn make_request(args: &Swww) -> Result<Option<Request>, String> {
     match args {
-        Swww::Clear(c) => Ok(Request::Clear(ipc::Clear {
+        Swww::Clear(c) => Ok(Some(Request::Clear(ipc::Clear {
             color: c.color,
             outputs: split_cmdline_outputs(&c.outputs),
-        })),
+        }))),
+        Swww::ClearCache => {
+            cache::clean()?;
+            Ok(None)
+        }
         Swww::Img(img) => {
             let requested_outputs = split_cmdline_outputs(&img.outputs);
             let (dims, outputs) = get_dimensions_and_outputs(&requested_outputs)?;
@@ -164,19 +171,19 @@ fn make_request(args: &Swww) -> Result<Request, String> {
                     }
                     animations
                 }) {
-                    Ok(animations) => Ok(Request::Animation(animations)),
+                    Ok(animations) => Ok(Some(Request::Animation(animations))),
                     Err(e) => Err(format!("failed to create animated request: {e}")),
                 }
             } else {
                 let img_raw = imgbuf.decode()?;
-                Ok(Request::Img(make_img_request(
+                Ok(Some(Request::Img(make_img_request(
                     img, img_raw, &dims, &outputs,
-                )?))
+                )?)))
             }
         }
-        Swww::Init { .. } => Ok(Request::Init),
-        Swww::Kill => Ok(Request::Kill),
-        Swww::Query => Ok(Request::Query),
+        Swww::Init { .. } => Ok(Some(Request::Init)),
+        Swww::Kill => Ok(Some(Request::Kill)),
+        Swww::Query => Ok(Some(Request::Query)),
     }
 }
 

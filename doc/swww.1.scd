@@ -11,6 +11,9 @@ swww - A Solution to your Wayland Wallpaper Woes
 *clear*
 	Fills the specified outputs with the given color
 
+*clear-cache*
+	Fills the specified outputs with the given color
+
 *img*
 	Sends an image (or animated gif) for the daemon to display
 

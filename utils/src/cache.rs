@@ -80,6 +80,8 @@ pub fn load_animation_frames(
 
 pub fn get_previous_image_path(output_name: &str) -> Result<String, String> {
     let mut filepath = cache_dir()?;
+    clean_previous_verions(&filepath);
+
     filepath.push(output_name);
     if !filepath.is_file() {
         return Ok("".to_string());
@@ -122,6 +124,45 @@ pub fn load(output_name: &str) -> Result<(), String> {
     }
 }
 
+pub fn clean() -> Result<(), String> {
+    std::fs::remove_dir(cache_dir()?).map_err(|e| format!("failed to remove cache directory: {e}"))
+}
+
+fn clean_previous_verions(cache_dir: &Path) {
+    let mut read_dir = match std::fs::read_dir(cache_dir) {
+        Ok(read_dir) => read_dir,
+        Err(_) => {
+            eprintln!("WARNING: failed to read cache dir {:?} entries", cache_dir);
+            return;
+        }
+    };
+
+    let current_version = env!("CARGO_PKG_VERSION");
+
+    while let Some(Ok(entry)) = read_dir.next() {
+        let filename = entry.file_name();
+        let filename = match filename.to_str() {
+            Some(filename) => filename,
+            None => {
+                eprintln!("WARNING: failed to read filename of {:?}", filename);
+                continue;
+            }
+        };
+
+        // only the images we've cached will have a _v token, indicating their version
+        if let Some(i) = filename.rfind("_v") {
+            if &filename[i..] != current_version {
+                if let Err(e) = std::fs::remove_file(entry.path()) {
+                    eprintln!(
+                        "WARNING: failed to remove cache file {} of old swww version {:?}",
+                        filename, e
+                    );
+                }
+            }
+        }
+    }
+}
+
 fn create_dir(p: &Path) -> Result<(), String> {
     if !p.is_dir() {
         if let Err(e) = std::fs::create_dir(p) {
@@ -152,7 +193,7 @@ fn cache_dir() -> Result<PathBuf, String> {
 fn animation_filename(path: &Path, dimensions: (u32, u32)) -> PathBuf {
     format!(
         "{}__{}x{}_v{}",
-        path.to_string_lossy().replace('/', "__"),
+        path.to_string_lossy().replace('/', "_"),
         dimensions.0,
         dimensions.1,
         env!("CARGO_PKG_VERSION"),

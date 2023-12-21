@@ -213,7 +213,7 @@ swww-img
 Sends an image (or animated gif) for the daemon to display. You can also use `-`
 to read from stdin instead.
 
-# ABOUTH THE CACHE
+# ABOUT THE CACHE
 
 The images sent will be cached at _$XDG_CACHE_HOME/swww_ or _$HOME/.cache/swww_
 if $XDG_CACHE_HOME does not exist. For each monitor, there will be a file in
@@ -228,7 +228,7 @@ trying to load the cache.
 Finally, the cache will keep preprocessed versions of `gif`s. So, if you load a
 large `gif`, you would have to pay the price for its processing the first time.
 If you constantly load large `gif`s, this could cause the cache to get very big.
-You can simply delete the cache directory if this happens.
+You can simply run `swww clean-cache` if this happens.
 
 # SEE ALSO
-*swww-daemon*(1) *swww-query*(1)
+*swww-clear-cache*(1) *swww-daemon*(1) *swww-query*(1)

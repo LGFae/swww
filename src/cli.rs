@@ -141,6 +141,12 @@ pub enum Swww {
     ///Defaults to filling all outputs with black.
     Clear(Clear),
 
+    ///Clears the swww cache.
+    ///
+    ///We currently store the address of the last file set as wallpaper for each monitor, as well
+    ///as the animation frames of every gif ever set for a given version of `swww`.
+    ClearCache,
+
     /// Sends an image (or animated gif) for the daemon to display.
     ///
     /// Use `-` to read from stdin
