@@ -212,3 +212,5 @@ setting up the AUR package.
 Pixel Art, by Waneella - https://www.patreon.com/waneella
 
 Gradient - https://www.behance.net/gallery/86128681/Free-Unicorn-Vector-Gradients
+
+Silhouette of Skyway - https://unsplash.com/photos/silhouette-of-skyway-UUJzCuHUfYI
