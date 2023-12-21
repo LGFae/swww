@@ -17,7 +17,7 @@ use std::{
     fs,
     num::NonZeroI32,
     os::{
-        fd::{AsRawFd, RawFd},
+        fd::{BorrowedFd, RawFd},
         unix::net::{UnixListener, UnixStream},
     },
     sync::{
@@ -97,7 +97,6 @@ fn main() -> Result<(), String> {
         }
     }
     info!("Initialization succeeded! Starting main loop...");
-    let mut poll_handler = PollHandler::new(&listener, wake);
     let mut buf = [0; 16];
     while !should_daemon_exit() {
         // Process wayland events
@@ -108,28 +107,52 @@ fn main() -> Result<(), String> {
             .prepare_read()
             .expect("failed to prepare the event queue's read");
 
-        poll_handler.block(read_guard.connection_fd().as_raw_fd());
+        let events = {
+            let connection_fd = read_guard.connection_fd();
+            let waker = unsafe { BorrowedFd::borrow_raw(wake) };
+            let mut fds = [
+                PollFd::new(&listener.0, PollFlags::POLLIN),
+                PollFd::new(&connection_fd, PollFlags::POLLIN | PollFlags::POLLRDBAND),
+                PollFd::new(&waker, PollFlags::POLLIN),
+            ];
 
-        if poll_handler.has_event(PollHandler::WAYLAND_FD) {
-            read_guard.read().expect("failed to read the event queue");
-            event_queue
-                .dispatch_pending(&mut daemon)
-                .expect("failed to dispatch events");
-        }
-
-        if poll_handler.has_event(PollHandler::SOCKET_FD) {
-            match listener.0.accept() {
-                Ok((stream, _addr)) => daemon.recv_socket_msg(stream),
-                Err(e) => match e.kind() {
-                    std::io::ErrorKind::WouldBlock => (),
-                    _ => return Err(format!("failed to accept incoming connection: {e}")),
+            match poll(&mut fds, -1) {
+                Ok(_) => (),
+                Err(e) => match e {
+                    nix::errno::Errno::EINTR => (),
+                    _ => panic!("failed to poll file descriptors: {e}"),
                 },
+            };
+
+            [fds[0].revents(), fds[1].revents(), fds[2].revents()]
+        };
+
+        if let Some(flags) = events[1] {
+            if !flags.is_empty() {
+                read_guard.read().expect("failed to read the event queue");
+                event_queue
+                    .dispatch_pending(&mut daemon)
+                    .expect("failed to dispatch events");
             }
         }
 
-        if poll_handler.has_event(PollHandler::WAKER_FD) {
-            if let Err(e) = nix::unistd::read(wake, &mut buf) {
-                error!("error reading pipe file descriptor: {e}");
+        if let Some(flags) = events[0] {
+            if !flags.is_empty() {
+                match listener.0.accept() {
+                    Ok((stream, _adr)) => daemon.recv_socket_msg(stream),
+                    Err(e) => match e.kind() {
+                        std::io::ErrorKind::WouldBlock => (),
+                        _ => return Err(format!("failed to accept incoming connection: {e}")),
+                    },
+                }
+            }
+        }
+
+        if let Some(flags) = events[2] {
+            if !flags.is_empty() {
+                if let Err(e) = nix::unistd::read(wake, &mut buf) {
+                    error!("error reading pipe file descriptor: {e}");
+                }
             }
         }
     }
@@ -200,46 +223,6 @@ impl Drop for SocketWrapper {
             error!("Failed to remove socket at {socket_addr:?}: {e}");
         }
         info!("Removed socket at {:?}", socket_addr);
-    }
-}
-
-struct PollHandler {
-    fds: [PollFd; 3],
-}
-
-impl PollHandler {
-    const SOCKET_FD: usize = 0;
-    const WAYLAND_FD: usize = 1;
-    const WAKER_FD: usize = 2;
-
-    pub fn new(listener: &SocketWrapper, waker: RawFd) -> Self {
-        Self {
-            fds: [
-                PollFd::new(listener.0.as_raw_fd(), PollFlags::POLLIN),
-                PollFd::new(0, PollFlags::POLLIN),
-                PollFd::new(waker, PollFlags::POLLIN),
-            ],
-        }
-    }
-
-    pub fn block(&mut self, wayland_fd: RawFd) {
-        self.fds[Self::WAYLAND_FD] =
-            PollFd::new(wayland_fd, PollFlags::POLLIN | PollFlags::POLLRDBAND);
-        match poll(&mut self.fds, -1) {
-            Ok(_) => (),
-            Err(e) => match e {
-                nix::errno::Errno::EINTR => (),
-                _ => panic!("failed to poll file descriptors: {e}"),
-            },
-        };
-    }
-
-    pub fn has_event(&self, fd_index: usize) -> bool {
-        if let Some(flags) = self.fds[fd_index].revents() {
-            !flags.is_empty()
-        } else {
-            false
-        }
     }
 }
 
@@ -430,6 +413,16 @@ impl CompositorHandler for Daemon {
                 return;
             }
         }
+    }
+
+    fn transform_changed(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _surface: &wl_surface::WlSurface,
+        _new_transform: wl_output::Transform,
+    ) {
+        // do not do anything for now
     }
 }
 
