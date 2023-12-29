@@ -310,7 +310,7 @@ pub fn read_socket(stream: &UnixStream) -> Result<Vec<u8>, String> {
                 if e.kind() == std::io::ErrorKind::WouldBlock && tries < 5 {
                     std::thread::sleep(Duration::from_millis(1));
                 } else {
-                  return Err(format!("failed to read serialized length: {e}"));
+                    return Err(format!("failed to read serialized length: {e}"));
                 }
             }
         }
