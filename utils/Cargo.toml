@@ -3,6 +3,7 @@ name = "utils"
 version = "0.8.1-master"
 authors = ["Leonardo Gibrowski Faé <leonardo.fae44@gmail.com>"]
 edition = "2021"
+license-file = "../LICENSE"
 
 [dependencies]
 lazy_static = "1.4"

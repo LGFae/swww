@@ -1,0 +1,35 @@
+name: Check
+
+on:
+  workflow_call:
+
+env:
+  CARGO_TERM_COLOR: always
+  SCCACHE_GHA_ENABLED: "true"
+  RUSTC_WRAPPER: "sccache"
+
+jobs:
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mozilla-actions/sccache-action@v0.0.3
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo clippy --workspace --locked --tests
+
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mozilla-actions/sccache-action@v0.0.3
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo fmt --all --check
+
+  sort:
+   runs-on: ubuntu-latest
+   steps:
+     - uses: actions/checkout@v4
+     - uses: mozilla-actions/sccache-action@v0.0.3
+     - uses: dtolnay/rust-toolchain@stable
+     - run: cargo install cargo-sort
+     - run: cargo sort --check --workspace

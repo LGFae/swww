@@ -1,0 +1,37 @@
+[advisories]
+db-path = "~/.cargo/advisory-db"
+db-urls = ["https://github.com/rustsec/advisory-db"]
+vulnerability = "deny"
+unmaintained = "deny"
+yanked = "deny"
+notice = "deny"
+ignore = []
+
+[bans]
+multiple-versions = "warn"
+wildcards = "warn"
+highlight = "all"
+# Certain crates/versions that will be skipped when doing duplicate detection.
+skip = [
+]
+# Crate dependency trees that will be skipped when doing duplicate detection.
+skip-tree = [
+]
+
+[licenses]
+# The lint level for crates which do not have a detectable license
+unlicensed = "deny"
+allow = [
+    "Apache-2.0",
+    "BSD-3-Clause",
+    "GPL-3.0",
+    "MIT",
+    "Unicode-DFS-2016",
+]
+default = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
