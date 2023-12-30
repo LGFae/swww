@@ -50,10 +50,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - run: echo "MSRV=$(tomlq -r '.package."rust-version"' Cargo.toml)" >> $GITHUB_OUTPUT
+        id: version
       - uses: mozilla-actions/sccache-action@v0.0.3
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.70.0
+          toolchain: ${{ steps.version.outputs.MSRV }}
       - uses: taiki-e/install-action@cargo-nextest
       - run: cargo build --workspace --locked --verbose
       - run: cargo nextest run --workspace --locked
