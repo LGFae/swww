@@ -107,7 +107,7 @@ fn process_swww_args(args: &Swww) -> Result<(), String> {
                     let img_path = utils::cache::get_previous_image_path(output)?;
                     #[allow(deprecated)]
                     if let Err(e) = process_swww_args(&Swww::Img(cli::Img {
-                        image: cli::CliImage::Path(PathBuf::from(img_path)),
+                        image: cli::parse_image(&img_path)?,
                         outputs: output.to_string(),
                         no_resize: false,
                         resize: ResizeStrategy::Crop,

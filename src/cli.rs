@@ -392,7 +392,7 @@ fn parse_bezier(raw: &str) -> Result<(f32, f32, f32, f32), String> {
     Ok(parsed)
 }
 
-fn parse_image(raw: &str) -> Result<CliImage, String> {
+pub fn parse_image(raw: &str) -> Result<CliImage, String> {
     if raw.starts_with("0x") {
         let color = from_hex(&raw[2..]);
         match color {
