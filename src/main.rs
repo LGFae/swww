@@ -150,10 +150,11 @@ fn make_request(args: &Swww) -> Result<Option<Request>, String> {
             let (dims, outputs) = get_dimensions_and_outputs(&requested_outputs)?;
             match &img.image {
                 cli::CliImage::Path(path) => {
-                    let imgbuf = ImgBuf::new(&path)?;
+                    let imgbuf = ImgBuf::new(path)?;
                     if imgbuf.is_animated() {
                         match std::thread::scope::<_, Result<_, String>>(|s1| {
-                            let animations = s1.spawn(|| make_animation_request(img, &dims, &outputs));
+                            let animations =
+                                s1.spawn(|| make_animation_request(img, &dims, &outputs));
                             let first_frame = imgbuf
                                 .into_frames()?
                                 .next()
@@ -162,7 +163,8 @@ fn make_request(args: &Swww) -> Result<Option<Request>, String> {
 
                             let img_request =
                                 make_img_request(img, frame_to_rgb(first_frame), &dims, &outputs)?;
-                            let animations = animations.join().unwrap_or_else(|e| Err(format!("{e:?}")));
+                            let animations =
+                                animations.join().unwrap_or_else(|e| Err(format!("{e:?}")));
 
                             let socket = connect_to_socket(5, 100)?;
                             Request::Img(img_request).send(&socket)?;
@@ -182,15 +184,14 @@ fn make_request(args: &Swww) -> Result<Option<Request>, String> {
                             img, img_raw, &dims, &outputs,
                         )?)))
                     }
-                },
+                }
                 cli::CliImage::Color(color) => {
                     let img_raw = image::RgbImage::from_pixel(1, 1, image::Rgb(*color));
-                        Ok(Some(Request::Img(make_img_request(
-                            img, img_raw, &dims, &outputs,
+                    Ok(Some(Request::Img(make_img_request(
+                        img, img_raw, &dims, &outputs,
                     )?)))
-                },
+                }
             }
-            
         }
         Swww::Init { .. } => Ok(Some(Request::Init)),
         Swww::Kill => Ok(Some(Request::Kill)),
@@ -209,39 +210,39 @@ fn make_img_request(
     for (dim, outputs) in dims.iter().zip(outputs) {
         unique_requests.push((
             match &img.image {
-                cli::CliImage::Path(path) => {
-                    ipc::Img {
-                        img: match img.resize {
-                            ResizeStrategy::No => img_pad(img_raw.clone(), *dim, &img.fill_color)?,
-                            ResizeStrategy::Crop => {
-                                img_resize_crop(img_raw.clone(), *dim, make_filter(&img.filter))?
-                            }
-                            ResizeStrategy::Fit => img_resize_fit(
-                                img_raw.clone(),
-                                *dim,
-                                make_filter(&img.filter),
-                                &img.fill_color,
-                            )?,
+                cli::CliImage::Path(path) => ipc::Img {
+                    img: match img.resize {
+                        ResizeStrategy::No => img_pad(img_raw.clone(), *dim, &img.fill_color)?,
+                        ResizeStrategy::Crop => {
+                            img_resize_crop(img_raw.clone(), *dim, make_filter(&img.filter))?
                         }
-                        .into_boxed_slice(),
-                        path: match path.canonicalize() {
-                            Ok(p) => p.to_string_lossy().to_string(),
-                            Err(e) => {
-                                if let Some("-") = path.to_str() {
-                                    "STDIN".to_string()
-                                } else {
-                                    return Err(format!("failed no canonicalize image path: {e}"));
-                                }
+                        ResizeStrategy::Fit => img_resize_fit(
+                            img_raw.clone(),
+                            *dim,
+                            make_filter(&img.filter),
+                            &img.fill_color,
+                        )?,
+                    }
+                    .into_boxed_slice(),
+                    path: match path.canonicalize() {
+                        Ok(p) => p.to_string_lossy().to_string(),
+                        Err(e) => {
+                            if let Some("-") = path.to_str() {
+                                "STDIN".to_string()
+                            } else {
+                                return Err(format!("failed no canonicalize image path: {e}"));
                             }
-                        },
-                    }
+                        }
+                    },
                 },
-                cli::CliImage::Color(color) => {
-                    ipc::Img {
-                        img: img_resize_crop(img_raw.clone(), *dim, make_filter(&cli::Filter::Nearest))?
-                        .into_boxed_slice(),
-                        path: format!("0x{:02x}{:02x}{:02x}", color[0], color[1], color[2]),
-                    }
+                cli::CliImage::Color(color) => ipc::Img {
+                    img: img_resize_crop(
+                        img_raw.clone(),
+                        *dim,
+                        make_filter(&cli::Filter::Nearest),
+                    )?
+                    .into_boxed_slice(),
+                    path: format!("0x{:02x}{:02x}{:02x}", color[0], color[1], color[2]),
                 },
             },
             outputs.to_owned().into_boxed_slice(),
@@ -312,7 +313,7 @@ fn make_animation_request(
             for (dim, outputs) in dims.iter().zip(outputs) {
                 //TODO: make cache work for all resize strategies
                 if img.resize == ResizeStrategy::Crop {
-                    match cache::load_animation_frames(&path, *dim) {
+                    match cache::load_animation_frames(path, *dim) {
                         Ok(Some(animation)) => {
                             animations.push((animation, outputs.to_owned().into_boxed_slice()));
                             continue;
@@ -322,7 +323,7 @@ fn make_animation_request(
                     }
                 }
 
-                let imgbuf = ImgBuf::new(&path)?;
+                let imgbuf = ImgBuf::new(path)?;
                 let animation = ipc::Animation {
                     path: path.to_string_lossy().to_string(),
                     dimensions: *dim,
@@ -338,13 +339,12 @@ fn make_animation_request(
                 animations.push((animation, outputs.to_owned().into_boxed_slice()));
             }
             Ok(animations.into_boxed_slice())
-        },
+        }
         cli::CliImage::Color(color) => Err(format!(
             "colors are not supported for animations: {:?}",
             color
         )),
     }
-    
 }
 
 fn split_cmdline_outputs(outputs: &str) -> Box<[String]> {

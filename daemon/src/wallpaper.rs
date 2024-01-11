@@ -120,7 +120,7 @@ impl Wallpaper {
                 id: AtomicUsize::new(0),
                 transition_finished: Arc::new(AtomicBool::new(false)),
             },
-            configured: AtomicBool::new(false)
+            configured: AtomicBool::new(false),
         }
     }
 

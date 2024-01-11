@@ -276,7 +276,7 @@ pub struct Img {
     ///
     ///The 'left', 'right', 'top' and 'bottom' options make the transition happen from that
     ///position to its opposite in the screen.
-    /// 
+    ///
     ///'none' is an alias to 'simple' that also sets the 'transition-step' to 255. This has the
     ///effect of the transition finishing instantly
     ///
@@ -394,10 +394,9 @@ fn parse_bezier(raw: &str) -> Result<(f32, f32, f32, f32), String> {
 
 pub fn parse_image(raw: &str) -> Result<CliImage, String> {
     if raw.starts_with("0x") {
-        let color = from_hex(&raw[2..]);
-        match color {
-            Ok(color) => return Ok(CliImage::Color(color)),
-            Err(_) => {},
+        let color = from_hex(raw.strip_prefix("0x").unwrap());
+        if let Ok(color) = color {
+            return Ok(CliImage::Color(color));
         }
     }
 
