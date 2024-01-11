@@ -125,6 +125,12 @@ impl CliPosition {
     }
 }
 
+#[derive(Clone)]
+pub enum CliImage {
+    Path(PathBuf),
+    Color([u8; 3]),
+}
+
 #[derive(Parser)]
 #[command(version, name = "swww")]
 ///A Solution to your Wayland Wallpaper Woes
@@ -215,7 +221,8 @@ pub enum ResizeStrategy {
 #[derive(Parser)]
 pub struct Img {
     /// Path to the image to display
-    pub path: PathBuf,
+    #[arg(value_parser = parse_image)]
+    pub image: CliImage,
 
     /// Comma separated list of outputs to display the image at.
     ///
@@ -383,6 +390,23 @@ fn parse_bezier(raw: &str) -> Result<(f32, f32, f32, f32), String> {
         return Err("Invalid bezier curve: 0,0,0,0 (try using 0,0,1,1 instead)".to_string());
     }
     Ok(parsed)
+}
+
+fn parse_image(raw: &str) -> Result<CliImage, String> {
+    if raw.starts_with("0x") {
+        let color = from_hex(&raw[2..]);
+        match color {
+            Ok(color) => return Ok(CliImage::Color(color)),
+            Err(_) => {},
+        }
+    }
+
+    let path = PathBuf::from(raw);
+    if !path.exists() {
+        return Err(format!("Path '{}' does not exist", raw));
+    }
+
+    Ok(CliImage::Path(path))
 }
 
 // parses Percents and numbers in format of "<coord1>,<coord2>"
