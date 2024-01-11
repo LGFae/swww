@@ -220,7 +220,7 @@ pub enum ResizeStrategy {
 
 #[derive(Parser)]
 pub struct Img {
-    /// Path to the image to display
+    /// Path of image or hexcode (starting with 0x) to display
     #[arg(value_parser = parse_image)]
     pub image: CliImage,
 
