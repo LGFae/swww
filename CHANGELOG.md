@@ -1,7 +1,41 @@
 ### Unreleased
 
 
-### 0.8.1-master
+### 0.8.2-master
+
+
+### 0.8.2
+
+#### **ATTENTION PACKAGE MAINTAINERS** 
+
+I've changed my username from `Horus645` to `LGFae`. This means you will have to
+update the remote url to `https://github.com/LGFae/swww`. Anyone who also has
+direct links to the old address should update them.
+
+I've done this because mostly to make it more professional looking. I've
+considered using two github accounts instead, but that would involve setting up
+multiple ssh keys on my machine and  included other complications. I deeply
+apologize for the inconvenience.
+
+#### Changes:
+
+  * update MSRV in README.md, by @micielski
+  * implemented a `--no-cache` flag for `swww init`
+  * fixes to the build script, by @m4rch3n1ng
+  * client waits for daemon to be ready on `swww init`
+  * more accurate image fit implementation
+  * added MSRV to Cargo.toml, by @akida31
+  * fix some documentation typos and inacuracies
+  * fix timings for transition frames
+  * fix capacity of Vec in `image_pad` function, by @MichaelOultram
+  * implement animated WebP Support, by @MichaelOultram
+  * some other memory optimizations, by @MichaelOultram
+  * implement `clear-cache` command
+  * we also automatically clear the cache from old `swww` versions now!
+
+Also, we have udpdated all crates versions so that they all match. This should
+help some package maintainers that were having difficulty setting `swww` up for
+e.g. Debian, I believe.
 
 
 ### 0.8.1
@@ -59,7 +93,7 @@ We have changed our serialization strategy from
 reductions, since `rkyv` does not use an intermidate buffer to deserialize its
 structures.
 
-#### Aditions:
+#### Additions:
 
 We have reworked the way we do synchronization between monitors. It should sync
 all monitors animations automatically.
