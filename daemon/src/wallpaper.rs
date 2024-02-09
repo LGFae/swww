@@ -143,7 +143,7 @@ impl Wallpaper {
     }
 
     pub fn get_dimensions(&self) -> (u32, u32) {
-        let (inner, _) = self.lock();
+        let inner = self.lock_inner();
         let width = inner.width.get() as u32;
         let height = inner.height.get() as u32;
         let scale_factor = inner.scale_factor.get() as u32;
@@ -156,8 +156,18 @@ impl Wallpaper {
     }
 
     #[inline]
-    fn lock_inner_mut(&self) -> (RwLockWriteGuard<WallpaperInner>, MutexGuard<SlotPool>) {
+    fn lock_mut(&self) -> (RwLockWriteGuard<WallpaperInner>, MutexGuard<SlotPool>) {
         (self.inner.write().unwrap(), self.pool.lock().unwrap())
+    }
+
+    #[inline]
+    fn lock_inner(&self) -> RwLockReadGuard<WallpaperInner> {
+        self.inner.read().unwrap()
+    }
+
+    #[inline]
+    fn lock_inner_mut(&self) -> RwLockWriteGuard<WallpaperInner> {
+        self.inner.write().unwrap()
     }
 
     pub fn canvas_change<F, T>(&self, f: F) -> T
@@ -182,7 +192,7 @@ impl Wallpaper {
 
     #[inline]
     pub fn get_img_info(&self) -> BgImg {
-        self.lock().0.img.clone()
+        self.lock_inner().img.clone()
     }
 
     #[inline]
@@ -215,7 +225,7 @@ impl Wallpaper {
 
     pub fn set_img_info(&self, img_info: BgImg) {
         log::debug!("output {} - drawing: {}", self.output_id, img_info);
-        self.lock_inner_mut().0.img = img_info;
+        self.lock_inner_mut().img = img_info;
     }
 
     pub fn draw(&self) {
@@ -244,7 +254,7 @@ impl Wallpaper {
         if let Some(s) = scale_factor {
             self.layer_surface.set_buffer_scale(s.get() as u32).unwrap();
         }
-        let (mut inner, mut pool) = self.lock_inner_mut();
+        let (mut inner, mut pool) = self.lock_mut();
         let width = width.unwrap_or(inner.width);
         let height = height.unwrap_or(inner.height);
         let scale_factor = scale_factor.unwrap_or(inner.scale_factor);
