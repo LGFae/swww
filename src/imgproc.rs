@@ -21,6 +21,13 @@ use crate::cli::ResizeStrategy;
 
 use super::cli;
 
+pub enum MaybeFrames<'a> {
+    /// Image has animated Frames (is webp or gif)
+    Animated(Frames<'a>),
+    /// Image is static (e.g. png or static webp)
+    NotAnimated(RgbImage),
+}
+
 pub enum ImgBuf {
     Stdin(BufReader<Stdin>),
     File(image::io::Reader<BufReader<File>>),
@@ -50,9 +57,42 @@ impl ImgBuf {
         }
     }
 
-    /// Is this ImgBuf an animated image?
-    pub fn is_animated(&self) -> bool {
-        matches!(self.format(), Some(ImageFormat::Gif | ImageFormat::WebP))
+    /// Get animation frames if the image is animated and else get the static image
+    pub fn get_animation_frames<'a>(self, img_path: &Path) -> Result<MaybeFrames<'a>, String> {
+        fn handle_webp<'a>(
+            reader: impl Read + 'a,
+            img_path: &Path,
+        ) -> Result<MaybeFrames<'a>, String> {
+            let decoder = WebPDecoder::new(reader)
+                .map_err(|e| format!("failed to decode webp during animation: {e}"))?;
+            if decoder.has_animation() {
+                Ok(MaybeFrames::Animated(decoder.into_frames()))
+            } else {
+                // FIXME: this is a bit unfortunate. Optimally we would not need to create
+                // the `ImgBuf` twice.
+                // Sadly [`into_reader`](https://docs.rs/image/latest/image/codecs/webp/struct.WebPDecoder.html#method.into_reader)
+                // is deprecated
+                let this = ImgBuf::new(img_path)?;
+                Ok(MaybeFrames::NotAnimated(this.decode()?))
+            }
+        }
+
+        Ok(match self.format() {
+            Some(ImageFormat::Gif) => MaybeFrames::Animated(
+                match self {
+                    ImgBuf::Stdin(reader) => GifDecoder::new(reader).map(|r| r.into_frames()),
+                    ImgBuf::File(reader) => {
+                        GifDecoder::new(reader.into_inner()).map(|r| r.into_frames())
+                    }
+                }
+                .map_err(|e| format!("failed to decode gif during animation: {e}"))?,
+            ),
+            Some(ImageFormat::WebP) => match self {
+                ImgBuf::Stdin(reader) => handle_webp(reader, img_path)?,
+                ImgBuf::File(reader) => handle_webp(reader.into_inner(), img_path)?,
+            },
+            _ => MaybeFrames::NotAnimated(self.decode()?),
+        })
     }
 
     /// Decode the ImgBuf into am RgbImage
