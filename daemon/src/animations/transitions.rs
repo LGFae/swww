@@ -137,12 +137,12 @@ impl Transition {
         while !done {
             done = true;
             for wallpaper in self.wallpapers.iter_mut() {
-                wallpaper.canvas_change(|canvas| {
+                let (_, buffer) = wallpaper.canvas_change(|canvas| {
                     for (old, new) in canvas.chunks_exact_mut(4).zip(new_img.chunks_exact(3)) {
                         change_cols!(step, old, new, done);
                     }
                 });
-                wallpaper.draw();
+                wallpaper.draw(&buffer);
             }
             self.send_frame(&mut now);
         }
@@ -155,7 +155,7 @@ impl Transition {
         let mut now = Instant::now();
         while start.elapsed().as_secs_f64() < seq.duration() {
             for wallpaper in self.wallpapers.iter_mut() {
-                wallpaper.canvas_change(|canvas| {
+                let (_, buffer) = wallpaper.canvas_change(|canvas| {
                     canvas
                         .par_chunks_exact_mut(4)
                         .zip(new_img.par_chunks_exact(3))
@@ -166,7 +166,7 @@ impl Transition {
                             }
                         });
                 });
-                wallpaper.draw();
+                wallpaper.draw(&buffer);
             }
             self.send_frame(&mut now);
             step = seq.now() as f64;
@@ -224,7 +224,7 @@ impl Transition {
 
         while start.elapsed().as_secs_f64() < seq.duration() {
             for wallpaper in self.wallpapers.iter_mut() {
-                wallpaper.canvas_change(|canvas| {
+                let (_, buffer) = wallpaper.canvas_change(|canvas| {
                     canvas
                         .par_chunks_exact_mut(4)
                         .zip(new_img.par_chunks_exact(3))
@@ -237,7 +237,7 @@ impl Transition {
                             }
                         });
                 });
-                wallpaper.draw();
+                wallpaper.draw(&buffer);
             }
             self.send_frame(&mut now);
 
@@ -285,7 +285,7 @@ impl Transition {
 
         while start.elapsed().as_secs_f64() < seq.duration() {
             for wallpaper in self.wallpapers.iter_mut() {
-                wallpaper.canvas_change(|canvas| {
+                let (_, buffer) = wallpaper.canvas_change(|canvas| {
                     canvas
                         .par_chunks_exact_mut(4)
                         .zip(new_img.par_chunks_exact(3))
@@ -298,7 +298,7 @@ impl Transition {
                             }
                         });
                 });
-                wallpaper.draw();
+                wallpaper.draw(&buffer);
             }
             self.send_frame(&mut now);
 
@@ -332,7 +332,7 @@ impl Transition {
         let mut now = Instant::now();
         while start.elapsed().as_secs_f64() < seq.duration() {
             for wallpaper in self.wallpapers.iter_mut() {
-                wallpaper.canvas_change(|canvas| {
+                let (_, buffer) = wallpaper.canvas_change(|canvas| {
                     canvas
                         .par_chunks_exact_mut(4)
                         .zip(new_img.par_chunks_exact(3))
@@ -351,7 +351,7 @@ impl Transition {
                             }
                         });
                 });
-                wallpaper.draw();
+                wallpaper.draw(&buffer);
             }
             self.send_frame(&mut now);
 
@@ -383,7 +383,7 @@ impl Transition {
         let mut now = Instant::now();
         while start.elapsed().as_secs_f64() < seq.duration() {
             for wallpaper in self.wallpapers.iter_mut() {
-                wallpaper.canvas_change(|canvas| {
+                let (_, buffer) = wallpaper.canvas_change(|canvas| {
                     canvas
                         .par_chunks_exact_mut(4)
                         .zip(new_img.par_chunks_exact(3))
@@ -402,7 +402,7 @@ impl Transition {
                             }
                         });
                 });
-                wallpaper.draw();
+                wallpaper.draw(&buffer);
             }
             self.send_frame(&mut now);
 

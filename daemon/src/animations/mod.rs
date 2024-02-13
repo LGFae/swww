@@ -140,14 +140,17 @@ impl Animator {
                             continue;
                         }
 
-                        if !wallpapers[i].canvas_change(|canvas| frame.unpack(canvas)) {
-                            error!("failed to unpack frame, canvas has the wrong size");
+                        let (success, buffer) =
+                            wallpapers[i].canvas_change(|canvas| frame.unpack(canvas));
+
+                        if !success {
+                            error!("failed to unpack frame, canvas is smaller than expected");
                             wallpapers.swap_remove(i);
                             tokens.swap_remove(i);
                             continue;
                         }
 
-                        wallpapers[i].draw();
+                        wallpapers[i].draw(&buffer);
                         i += 1;
                     }
 

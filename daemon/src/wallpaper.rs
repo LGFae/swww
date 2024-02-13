@@ -14,10 +14,15 @@ use smithay_client_toolkit::{
         wlr_layer::{Anchor, KeyboardInteractivity, LayerSurface},
         WaylandSurface,
     },
-    shm::slot::{Slot, SlotPool},
+    shm,
 };
 
-use wayland_client::protocol::{wl_shm, wl_surface::WlSurface};
+use wayland_client::protocol::{wl_buffer::WlBuffer, wl_shm, wl_surface::WlSurface};
+
+/// The memory pool wallpapers use
+pub type ShmPool = shm::multi::MultiPool<(WlSurface, u32)>;
+/// The memory pool, multithreaded
+pub type MtShmPool = Arc<Mutex<ShmPool>>;
 
 #[derive(Debug)]
 struct AnimationState {
@@ -44,12 +49,12 @@ impl Drop for AnimationToken {
 }
 
 /// Owns all the necessary information for drawing.
+#[derive(Debug)]
 struct WallpaperInner {
     width: NonZeroI32,
     height: NonZeroI32,
     scale_factor: NonZeroI32,
 
-    slot: Slot,
     img: BgImg,
 }
 
@@ -59,16 +64,12 @@ pub struct Wallpaper {
     layer_surface: LayerSurface,
 
     animation_state: AnimationState,
-    pool: Arc<Mutex<SlotPool>>,
+    pool: MtShmPool,
     pub configured: AtomicBool,
 }
 
 impl Wallpaper {
-    pub fn new(
-        output_info: OutputInfo,
-        layer_surface: LayerSurface,
-        pool: Arc<Mutex<SlotPool>>,
-    ) -> Self {
+    pub fn new(output_info: OutputInfo, layer_surface: LayerSurface, pool: MtShmPool) -> Self {
         let (width, height): (NonZeroI32, NonZeroI32) = if let Some(size) = output_info.logical_size
         {
             if size.0 == 0 || size.1 == 0 {
@@ -81,17 +82,6 @@ impl Wallpaper {
         };
 
         let scale_factor = NonZeroI32::new(output_info.scale_factor).unwrap();
-        let slot = pool
-            .lock()
-            .unwrap()
-            .new_slot(
-                width.get() as usize
-                    * height.get() as usize
-                    * scale_factor.get() as usize
-                    * scale_factor.get() as usize
-                    * 4,
-            )
-            .expect("failed to create slot in pool");
 
         // Configure the layer surface
         layer_surface.set_anchor(Anchor::all());
@@ -113,7 +103,6 @@ impl Wallpaper {
                 width,
                 height,
                 scale_factor,
-                slot,
                 img: BgImg::Color([0, 0, 0]),
             }),
             animation_state: AnimationState {
@@ -151,13 +140,13 @@ impl Wallpaper {
     }
 
     #[inline]
-    fn lock(&self) -> (RwLockReadGuard<WallpaperInner>, MutexGuard<SlotPool>) {
-        (self.inner.read().unwrap(), self.pool.lock().unwrap())
+    fn lock(&self) -> (RwLockReadGuard<WallpaperInner>, MutexGuard<ShmPool>) {
+        (self.lock_inner(), self.pool.lock().unwrap())
     }
 
     #[inline]
-    fn lock_mut(&self) -> (RwLockWriteGuard<WallpaperInner>, MutexGuard<SlotPool>) {
-        (self.inner.write().unwrap(), self.pool.lock().unwrap())
+    fn lock_mut(&self) -> (RwLockWriteGuard<WallpaperInner>, MutexGuard<ShmPool>) {
+        (self.lock_inner_mut(), self.pool.lock().unwrap())
     }
 
     #[inline]
@@ -170,23 +159,33 @@ impl Wallpaper {
         self.inner.write().unwrap()
     }
 
-    pub fn canvas_change<F, T>(&self, f: F) -> T
+    pub fn canvas_change<F, T>(&self, f: F) -> (T, WlBuffer)
     where
         F: FnOnce(&mut [u8]) -> T,
     {
-        let mut nano_sleep = 2000000; // start at 2 ms, half it every loop
+        let (inner, mut pool) = self.lock();
+        let width = inner.width.get() * inner.scale_factor.get();
+        let stride = width * 4;
+        let height = inner.height.get() * inner.scale_factor.get();
+        drop(inner);
+        let mut frame = 0u32;
         loop {
-            {
-                let (inner, mut pool) = self.lock();
-                if let Some(canvas) = inner.slot.canvas(&mut pool) {
-                    log::debug!("got canvas! - output {}", self.output_id);
-                    return f(canvas);
-                }
+            match pool.create_buffer(
+                width,
+                stride,
+                height,
+                &(self.layer_surface.wl_surface().clone(), frame),
+                wl_shm::Format::Xrgb8888,
+            ) {
+                Ok((_offset, buffer, canvas)) => return (f(canvas), buffer.clone()),
+                Err(e) => match e {
+                    smithay_client_toolkit::shm::multi::PoolError::InUse => frame += 1,
+                    smithay_client_toolkit::shm::multi::PoolError::Overlap => {
+                        pool.remove(&(self.layer_surface.wl_surface().clone(), frame));
+                    }
+                    smithay_client_toolkit::shm::multi::PoolError::NotFound => unreachable!(),
+                },
             }
-            log::debug!("failed to get canvas - output {}", self.output_id);
-            // sleep to mitigate busy waiting
-            std::thread::sleep(std::time::Duration::from_nanos(nano_sleep));
-            nano_sleep /= 2;
         }
     }
 
@@ -213,14 +212,15 @@ impl Wallpaper {
             .store(false, Ordering::Release);
     }
 
-    pub fn clear(&self, color: [u8; 3]) {
+    pub fn clear(&self, color: [u8; 3]) -> WlBuffer {
         self.canvas_change(|canvas| {
             for pixel in canvas.chunks_exact_mut(4) {
                 pixel[2] = color[0];
                 pixel[1] = color[1];
                 pixel[0] = color[2];
             }
-        });
+        })
+        .1
     }
 
     pub fn set_img_info(&self, img_info: BgImg) {
@@ -228,19 +228,14 @@ impl Wallpaper {
         self.lock_inner_mut().img = img_info;
     }
 
-    pub fn draw(&self) {
-        let (inner, mut pool) = self.lock();
-
+    pub fn draw(&self, buf: &WlBuffer) {
+        let inner = self.lock_inner();
         let width = inner.width.get() * inner.scale_factor.get();
         let height = inner.height.get() * inner.scale_factor.get();
-        let stride = width * 4;
-
-        let buf = pool
-            .create_buffer_in(&inner.slot, width, height, stride, wl_shm::Format::Xrgb8888)
-            .unwrap();
         drop(inner);
+
         let surface = self.layer_surface.wl_surface();
-        buf.attach_to(surface).unwrap();
+        surface.attach(Some(buf), 0, 0);
         surface.damage_buffer(0, 0, width, height);
         surface.commit();
     }
@@ -262,21 +257,25 @@ impl Wallpaper {
             return;
         }
         self.inc_animation_id();
+
+        // remove all buffers with the previous size
+        let mut frame = 0u32;
+        while pool
+            .remove(&(self.layer_surface.wl_surface().clone(), frame))
+            .is_some()
+        {
+            frame += 1;
+        }
+        drop(pool);
+
         inner.width = width;
         inner.height = height;
         inner.scale_factor = scale_factor;
-        inner.slot = pool
-            .new_slot(
-                inner.width.get() as usize
-                    * inner.height.get() as usize
-                    * inner.scale_factor.get() as usize
-                    * inner.scale_factor.get() as usize
-                    * 4,
-            )
-            .expect("failed to create slot");
+
         self.layer_surface
             .set_size(inner.width.get() as u32, inner.height.get() as u32);
         inner.img = BgImg::Color([0, 0, 0]);
+        drop(inner);
         self.layer_surface.commit();
         self.configured.store(false, Ordering::Release);
     }
