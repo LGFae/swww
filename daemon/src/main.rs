@@ -36,7 +36,7 @@ use smithay_client_toolkit::{
         wlr_layer::{Layer, LayerShell, LayerShellHandler, LayerSurface, LayerSurfaceConfigure},
         WaylandSurface,
     },
-    shm::{slot::SlotPool, Shm, ShmHandler},
+    shm::{multi::MultiPool, Shm, ShmHandler},
 };
 
 use wayland_client::{
@@ -233,7 +233,7 @@ struct Daemon {
     registry_state: RegistryState,
     output_state: OutputState,
     shm: Shm,
-    pool: Arc<Mutex<SlotPool>>,
+    pool: wallpaper::MtShmPool,
 
     // swww stuff
     wallpapers: Vec<Arc<Wallpaper>>,
@@ -251,7 +251,7 @@ impl Daemon {
         let layer_shell = LayerShell::bind(globals, qh).expect("layer shell is not available");
 
         let shm = Shm::bind(globals, qh).expect("wl_shm is not available");
-        let pool = SlotPool::new(256 * 256 * 4, &shm).expect("failed to create SlotPool");
+        let pool = MultiPool::new(&shm).expect("failed to create MultiPool");
 
         Self {
             // Outputs may be hotplugged at runtime, therefore we need to setup a registry state to
@@ -300,8 +300,8 @@ impl Daemon {
                         }
                         for wallpaper in wallpapers {
                             wallpaper.set_img_info(utils::ipc::BgImg::Color(color));
-                            wallpaper.clear(color);
-                            wallpaper.draw();
+                            let buffer = wallpaper.clear(color);
+                            wallpaper.draw(&buffer);
                         }
                         wake_poll();
                     }) {
@@ -409,7 +409,7 @@ impl CompositorHandler for Daemon {
     ) {
         for wallpaper in self.wallpapers.iter_mut() {
             if wallpaper.has_surface(surface) {
-                wallpaper.draw();
+                wallpaper.draw(&wallpaper.canvas_change(|_| {}).1);
                 return;
             }
         }

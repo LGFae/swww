@@ -101,7 +101,7 @@ impl ArchivedPosition {
     }
 }
 
-#[derive(PartialEq, Clone, Archive, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Clone, Archive, Serialize, Deserialize)]
 #[archive_attr(derive(PartialEq))]
 pub enum BgImg {
     Color([u8; 3]),
