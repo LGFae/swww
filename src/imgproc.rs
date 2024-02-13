@@ -1,6 +1,6 @@
 use fast_image_resize::{FilterType, PixelType, Resizer};
 use image::{
-    codecs::{gif::GifDecoder, webp::WebPDecoder},
+    codecs::{gif::GifDecoder, png::PngDecoder, webp::WebPDecoder},
     AnimationDecoder, DynamicImage, Frames, ImageFormat, RgbImage,
 };
 use std::{
@@ -66,6 +66,11 @@ impl ImgBuf {
                             .map_err(|e| format!("failed to decode Webp Image: {e}"))?
                             .has_animation()
                     }
+                    Some(ImageFormat::Png) => {
+                        PngDecoder::new(BufReader::new(File::open(path).unwrap()))
+                            .map_err(|e| format!("failed to decode Png Image: {e}"))?
+                            .is_apng()
+                    }
 
                     _ => false,
                 }
@@ -117,6 +122,10 @@ impl ImgBuf {
                     .into_frames()),
                 Some(ImageFormat::WebP) => Ok(WebPDecoder::new(reader)
                     .map_err(|e| format!("failed to decode webp during animation: {e}"))?
+                    .into_frames()),
+                Some(ImageFormat::Png) => Ok(PngDecoder::new(reader)
+                    .map_err(|e| format!("failed to decode png during animation: {e}"))?
+                    .apng()
                     .into_frames()),
                 _ => Err(format!("requested format has no decoder: {img_format:#?}")),
             }
