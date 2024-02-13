@@ -17,6 +17,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+      - run: cargo clippy --version
       - run: cargo clippy --workspace --locked --tests
 
   fmt:
@@ -27,4 +28,5 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
+      - run: cargo fmt --version
       - run: cargo fmt --all --check
