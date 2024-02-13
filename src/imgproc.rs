@@ -61,7 +61,7 @@ impl ImgBuf {
                 match reader.format() {
                     Some(ImageFormat::Gif) => true,
                     Some(ImageFormat::WebP) => {
-                        // Note: unwraping is safe because we already openned the file once before this
+                        // Note: unwrapping is safe because we already opened the file once before this
                         WebPDecoder::new(BufReader::new(File::open(path).unwrap()))
                             .map_err(|e| format!("failed to decode Webp Image: {e}"))?
                             .has_animation()
