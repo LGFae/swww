@@ -269,7 +269,7 @@ pub struct Img {
     ///
     ///The 'left', 'right', 'top' and 'bottom' options make the transition happen from that
     ///position to its opposite in the screen.
-    /// 
+    ///
     ///'none' is an alias to 'simple' that also sets the 'transition-step' to 255. This has the
     ///effect of the transition finishing instantly
     ///

@@ -21,9 +21,25 @@ use crate::cli::ResizeStrategy;
 
 use super::cli;
 
-pub enum ImgBuf {
+enum ImgBufInner {
     Stdin(BufReader<Stdin>),
     File(image::io::Reader<BufReader<File>>),
+}
+
+impl ImgBufInner {
+    /// Guess the format of the ImgBufInner
+    #[inline]
+    fn format(&self) -> Option<ImageFormat> {
+        match &self {
+            ImgBufInner::Stdin(_) => None, // not seekable
+            ImgBufInner::File(reader) => reader.format(),
+        }
+    }
+}
+
+pub struct ImgBuf {
+    inner: ImgBufInner,
+    is_animated: bool,
 }
 
 impl ImgBuf {
@@ -31,34 +47,51 @@ impl ImgBuf {
     pub fn new(path: &Path) -> Result<Self, String> {
         Ok(if let Some("-") = path.to_str() {
             let reader = BufReader::new(stdin());
-            Self::Stdin(reader)
+            Self {
+                inner: ImgBufInner::Stdin(reader),
+                is_animated: false,
+            }
         } else {
             let reader = image::io::Reader::open(path)
                 .map_err(|e| format!("failed to open image: {e}"))?
                 .with_guessed_format()
                 .map_err(|e| format!("failed to detect the image's format: {e}"))?;
 
-            Self::File(reader)
+            let is_animated = {
+                match reader.format() {
+                    Some(ImageFormat::Gif) => true,
+                    Some(ImageFormat::WebP) => {
+                        // Note: unwraping is safe because we already openned the file once before this
+                        WebPDecoder::new(BufReader::new(File::open(path).unwrap()))
+                            .map_err(|e| format!("failed to decode Webp Image: {e}"))?
+                            .has_animation()
+                    }
+
+                    _ => false,
+                }
+            };
+
+            Self {
+                inner: ImgBufInner::File(reader),
+                is_animated,
+            }
         })
     }
 
     /// Guess the format of the ImgBuf
     fn format(&self) -> Option<ImageFormat> {
-        match self {
-            ImgBuf::Stdin(_) => None, // not seekable
-            ImgBuf::File(reader) => reader.format(),
-        }
+        self.inner.format()
     }
 
-    /// Is this ImgBuf an animated image?
+    #[inline]
     pub fn is_animated(&self) -> bool {
-        matches!(self.format(), Some(ImageFormat::Gif | ImageFormat::WebP))
+        self.is_animated
     }
 
     /// Decode the ImgBuf into am RgbImage
     pub fn decode(self) -> Result<RgbImage, String> {
-        Ok(match self {
-            ImgBuf::Stdin(mut reader) => {
+        Ok(match self.inner {
+            ImgBufInner::Stdin(mut reader) => {
                 let mut buffer = Vec::new();
                 reader
                     .read_to_end(&mut buffer)
@@ -66,7 +99,7 @@ impl ImgBuf {
 
                 image::load_from_memory(&buffer)
             }
-            ImgBuf::File(reader) => reader.decode(),
+            ImgBufInner::File(reader) => reader.decode(),
         }
         .map_err(|e| format!("failed to decode image: {e}"))?
         .into_rgb8())
@@ -90,9 +123,9 @@ impl ImgBuf {
         }
 
         let img_format = self.format();
-        match self {
-            ImgBuf::Stdin(reader) => create_decoder(img_format, reader),
-            ImgBuf::File(reader) => create_decoder(img_format, reader.into_inner()),
+        match self.inner {
+            ImgBufInner::Stdin(reader) => create_decoder(img_format, reader),
+            ImgBufInner::File(reader) => create_decoder(img_format, reader.into_inner()),
         }
     }
 }
@@ -139,7 +172,10 @@ pub fn compress_frames(
         canvas = Some(img);
     }
     //Add the first frame we got earlier:
-    compressed_frames.push((BitPack::pack(&canvas.unwrap(), &first_img)?, first_duration));
+    compressed_frames.push((
+        BitPack::pack(canvas.as_ref().unwrap_or(&first_img), &first_img)?,
+        first_duration,
+    ));
     Ok(compressed_frames)
 }
 
