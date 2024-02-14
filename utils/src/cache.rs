@@ -125,7 +125,8 @@ pub fn load(output_name: &str) -> Result<(), String> {
 }
 
 pub fn clean() -> Result<(), String> {
-    std::fs::remove_dir_all(cache_dir()?).map_err(|e| format!("failed to remove cache directory: {e}"))
+    std::fs::remove_dir_all(cache_dir()?)
+        .map_err(|e| format!("failed to remove cache directory: {e}"))
 }
 
 fn clean_previous_verions(cache_dir: &Path) {
