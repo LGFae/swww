@@ -18,92 +18,149 @@
 use lzzzz::lz4f;
 use rkyv::{Archive, Deserialize, Serialize};
 
-lazy_static::lazy_static! {
-    static ref COMPRESSION_PREFERENCES: lz4f::Preferences = lz4f::PreferencesBuilder::new()
-            .block_size(lz4f::BlockSize::Max256KB)
-            .compression_level(9)
-            .build();
+#[inline(always)]
+fn count_equals(s1: &[u8], s2: &[u8], mut i: usize) -> usize {
+    let mut equals = 0;
+    while i + 7 < s1.len() {
+        let a: u64 = unsafe { s1.as_ptr().add(i).cast::<u64>().read_unaligned() };
+        let b: u64 = unsafe { s2.as_ptr().add(i).cast::<u64>().read_unaligned() };
+        let cmp = a ^ b;
+        if cmp != 0 {
+            equals += cmp.trailing_zeros() as usize / 24;
+            return equals;
+        }
+        equals += 2;
+        i += 6;
+    }
+
+    while i + 2 < s1.len() {
+        let a = unsafe { s1.get_unchecked(i..i + 3) };
+        let b = unsafe { s2.get_unchecked(i..i + 3) };
+        if a != b {
+            break;
+        }
+        equals += 1;
+        i += 3;
+    }
+    equals
 }
 
-/// This calculates the difference between the current(cur) frame and the next(goal).
-/// The closure you pass is run at every difference. It dictates the update logic of the current
-/// frame. With that, you can control whether all different pixels changed are updated, or only the
-/// ones at a certain position. It is meant to be used primarily when writing transitions
-fn pack_bytes(cur: &[u8], goal: &[u8]) -> Box<[u8]> {
-    let mut v = Vec::with_capacity(goal.len());
+#[inline(always)]
+fn count_different(s1: &[u8], s2: &[u8], mut i: usize) -> usize {
+    let mut different = 0;
+    while i + 2 < s1.len() {
+        let a = unsafe { s1.get_unchecked(i..i + 3) };
+        let b = unsafe { s2.get_unchecked(i..i + 3) };
+        if a == b {
+            break;
+        }
+        different += 1;
+        i += 3;
+    }
+    different
+}
 
-    let mut iter = zip_eq(pixels(cur), pixels(goal));
-    let mut to_add = Vec::with_capacity(333); // 100 pixels
-    while let Some((mut cur, mut goal)) = iter.next() {
-        let mut equals = 0;
-        while cur == goal {
-            equals += 1;
-            match iter.next() {
-                None => {
-                    if !v.is_empty() {
-                        v.push(0);
-                    }
-                    return v.into_boxed_slice();
-                }
-                Some((c, g)) => {
-                    cur = c;
-                    goal = g;
-                }
-            }
+/// This calculates the difference between the current(cur) frame and the next(goal)
+pub fn pack_bytes(cur: &[u8], goal: &[u8]) -> Box<[u8]> {
+    let mut v = Vec::with_capacity((goal.len() * 5) / 8);
+
+    let mut i = 0;
+    while i < cur.len() {
+        let equals = count_equals(cur, goal, i);
+        i += equals * 3;
+
+        if i >= cur.len() {
+            return v.into_boxed_slice();
         }
 
-        let mut diffs = 0;
-        while cur != goal {
-            to_add.extend_from_slice(goal);
-            diffs += 1;
-            match iter.next() {
-                None => break,
-                Some((c, g)) => {
-                    cur = c;
-                    goal = g;
-                }
-            }
-        }
+        let start = i;
+        let diffs = count_different(cur, goal, i);
+        i += diffs * 3;
+
         let j = v.len() + equals / 255;
-        v.resize(1 + v.len() + equals / 255 + diffs / 255, 255);
+        v.resize(1 + j + diffs / 255, 255);
         v[j] = (equals % 255) as u8;
         v.push((diffs % 255) as u8);
-        v.append(&mut to_add);
+
+        v.extend_from_slice(unsafe { goal.get_unchecked(start..i) });
+        i += 3;
     }
     v.push(0);
     v.into_boxed_slice()
 }
 
 fn unpack_bytes(buf: &mut [u8], diff: &[u8]) {
-    let buf_chunks = pixels_mut(buf);
+    let len = diff.len();
+    let buf = buf.as_mut_ptr();
+    let diff = diff.as_ptr();
+
     let mut diff_idx = 0;
     let mut pix_idx = 0;
-    while diff_idx < diff.len() - 1 {
-        while diff[diff_idx] == u8::MAX {
+    while diff_idx + 1 < len {
+        while unsafe { diff.add(diff_idx).read() } == u8::MAX {
             pix_idx += u8::MAX as usize;
             diff_idx += 1;
         }
-        pix_idx += diff[diff_idx] as usize;
+        pix_idx += unsafe { diff.add(diff_idx).read() } as usize;
         diff_idx += 1;
 
         let mut to_cpy = 0;
-        while diff[diff_idx] == u8::MAX {
+        while unsafe { diff.add(diff_idx).read() } == u8::MAX {
             to_cpy += u8::MAX as usize;
             diff_idx += 1;
         }
-        to_cpy += diff[diff_idx] as usize;
+        to_cpy += unsafe { diff.add(diff_idx).read() } as usize;
         diff_idx += 1;
 
         for _ in 0..to_cpy {
-            unsafe {
-                buf_chunks
-                    .get_unchecked_mut(pix_idx)
-                    .clone_from_slice(diff.get_unchecked(diff_idx..diff_idx + 4));
-            }
+            unsafe { std::ptr::copy_nonoverlapping(diff.add(diff_idx), buf.add(pix_idx * 4), 4) }
             diff_idx += 3;
             pix_idx += 1;
         }
         pix_idx += 1;
+    }
+}
+
+/// Struct responsible for compressing our data. We use it to cache vector extensions that might
+/// speed up compression, as well as our lz4 compression configuration preferences
+#[derive(Default)]
+pub struct Compressor {
+    preferences: lz4f::Preferences,
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    ssse3_support: bool,
+}
+
+impl Compressor {
+    pub fn new() -> Self {
+        Self {
+            preferences: lz4f::PreferencesBuilder::new()
+                .block_size(lz4f::BlockSize::Max256KB)
+                .compression_level(9)
+                .build(),
+
+            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+            ssse3_support: is_x86_feature_detected!("ssse3"),
+        }
+    }
+
+    /// Compresses a frame of animation by getting the difference between the previous and the
+    /// current frame, and then running lz4
+    pub fn compress(&self, prev: &[u8], cur: &[u8]) -> Result<BitPack, String> {
+        let bit_pack = pack_bytes(prev, cur);
+
+        if bit_pack.is_empty() {
+            return Ok(BitPack {
+                inner: Box::new([]),
+                expected_buf_size: (cur.len() / 3) * 4,
+            });
+        }
+
+        let mut v = Vec::with_capacity(bit_pack.len() / 2);
+        lz4f::compress_to_vec(&bit_pack, &mut v, &self.preferences).map_err(|e| e.to_string())?;
+        Ok(BitPack {
+            inner: v.into_boxed_slice(),
+            expected_buf_size: (cur.len() / 3) * 4,
+        })
     }
 }
 
@@ -117,28 +174,6 @@ pub struct BitPack {
 }
 
 impl BitPack {
-    /// Compresses a frame of animation by getting the difference between the previous and the
-    /// current frame.
-    /// IMPORTANT: this will change `prev` into `cur`, that's why it needs to be 'mut'
-    pub fn pack(prev: &[u8], cur: &[u8]) -> Result<Self, String> {
-        let bit_pack = pack_bytes(prev, cur);
-        if bit_pack.is_empty() {
-            return Ok(BitPack {
-                inner: Box::new([]),
-                expected_buf_size: (cur.len() / 3) * 4,
-            });
-        }
-
-        let mut v = Vec::with_capacity(bit_pack.len() / 2);
-        match lzzzz::lz4f::compress_to_vec(&bit_pack, &mut v, &COMPRESSION_PREFERENCES) {
-            Ok(_) => Ok(BitPack {
-                inner: v.into_boxed_slice(),
-                expected_buf_size: (cur.len() / 3) * 4,
-            }),
-            Err(e) => Err(e.to_string()),
-        }
-    }
-
     ///return whether unpacking was successful. Note it can only fail if `buf.len() !=
     ///expected_buf_size`
     #[must_use]
@@ -161,14 +196,14 @@ impl BitPack {
 impl ArchivedBitPack {
     ///return whether unpacking was successful. Note it can only fail if `buf.len() !=
     ///expected_buf_size`
+    ///This function is identical to its NonArchived counterpart
     #[must_use]
     pub fn unpack(&self, buf: &mut [u8]) -> bool {
-        if buf.len()
-            == self
-                .expected_buf_size
-                .deserialize(&mut rkyv::Infallible)
-                .unwrap()
-        {
+        let expected_len = self
+            .expected_buf_size
+            .deserialize(&mut rkyv::Infallible)
+            .unwrap();
+        if buf.len() == expected_len {
             if !self.inner.is_empty() {
                 let mut v = Vec::with_capacity(self.inner.len() * 3);
                 // Note: panics will never happen because BitPacked is *always* only produced
@@ -183,63 +218,9 @@ impl ArchivedBitPack {
     }
 }
 
-// Utility functions. Largely copied from the Itertools and Bytemuck crates
-
-/// An iterator which iterates two other iterators simultaneously
-/// Copy pasted from the Iterator crate, and adapted for our purposes
-#[must_use = "iterator adaptors are lazy and do nothing unless consumed"]
-struct ZipEq<'a, I> {
-    a: std::slice::Iter<'a, I>,
-    b: std::slice::Iter<'a, I>,
-}
-
-fn zip_eq<'a, I>(i: &'a [I], j: &'a [I]) -> ZipEq<'a, I> {
-    if i.len() != j.len() {
-        unreachable!(
-            "Iterators of zip_eq have different sizes: {}, {}",
-            i.len(),
-            j.len()
-        );
-    }
-    ZipEq {
-        a: i.iter(),
-        b: j.iter(),
-    }
-}
-
-impl<'a, I> Iterator for ZipEq<'a, I> {
-    type Item = (&'a I, &'a I);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match (self.a.next(), self.b.next()) {
-            (None, None) => None,
-            (Some(a), Some(b)) => Some((a, b)),
-            _ => unsafe { std::hint::unreachable_unchecked() },
-        }
-    }
-}
-
-// The functions below were copy pasted and adapted from the bytemuck crate:
-
-#[inline]
-fn pixels(img: &[u8]) -> &[[u8; 3]] {
-    if img.len() % 3 != 0 {
-        unreachable!("Calling pixels with a wrongly formatted image");
-    }
-    unsafe { core::slice::from_raw_parts(img.as_ptr().cast::<[u8; 3]>(), img.len() / 3) }
-}
-
-#[inline]
-fn pixels_mut(img: &mut [u8]) -> &mut [[u8; 4]] {
-    if img.len() % 4 != 0 {
-        unreachable!("Calling pixels_mut with a wrongly formatted image");
-    }
-    unsafe { core::slice::from_raw_parts_mut(img.as_ptr() as *mut [u8; 4], img.len() / 4) }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::BitPack;
+    use super::*;
     use rand::prelude::random;
 
     fn buf_from(slice: &[u8]) -> Vec<u8> {
@@ -256,7 +237,7 @@ mod tests {
     fn should_compress_and_decompress_to_same_info_small() {
         let frame1 = [1, 2, 3, 4, 5, 6];
         let frame2 = [1, 2, 3, 6, 5, 4];
-        let compressed = BitPack::pack(&frame1, &frame2).unwrap();
+        let compressed = Compressor::new().compress(&frame1, &frame2).unwrap();
 
         let mut buf = buf_from(&frame1);
         assert!(compressed.unpack(&mut buf));
@@ -284,9 +265,14 @@ mod tests {
             }
 
             let mut compressed = Vec::with_capacity(20);
-            compressed.push(BitPack::pack(original.last().unwrap(), &original[0]).unwrap());
+            let compressor = Compressor::new();
+            compressed.push(
+                compressor
+                    .compress(original.last().unwrap(), &original[0])
+                    .unwrap(),
+            );
             for i in 1..20 {
-                compressed.push(BitPack::pack(&original[i - 1], &original[i]).unwrap());
+                compressed.push(compressor.compress(&original[i - 1], &original[i]).unwrap());
             }
 
             let mut buf = buf_from(original.last().unwrap());
@@ -325,10 +311,15 @@ mod tests {
                 original.push(v);
             }
 
+            let compressor = Compressor::new();
             let mut compressed = Vec::with_capacity(20);
-            compressed.push(BitPack::pack(original.last().unwrap(), &original[0]).unwrap());
+            compressed.push(
+                compressor
+                    .compress(original.last().unwrap(), &original[0])
+                    .unwrap(),
+            );
             for i in 1..20 {
-                compressed.push(BitPack::pack(&original[i - 1], &original[i]).unwrap());
+                compressed.push(compressor.compress(&original[i - 1], &original[i]).unwrap());
             }
 
             let mut buf = buf_from(original.last().unwrap());

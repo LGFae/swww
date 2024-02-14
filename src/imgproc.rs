@@ -13,7 +13,7 @@ use std::{
 };
 
 use utils::{
-    comp_decomp::BitPack,
+    comp_decomp::{BitPack, Compressor},
     ipc::{self, Coord, Position},
 };
 
@@ -151,6 +151,7 @@ pub fn compress_frames(
     resize: ResizeStrategy,
     color: &[u8; 3],
 ) -> Result<Vec<(BitPack, Duration)>, String> {
+    let compressor = Compressor::new();
     let mut compressed_frames = Vec::new();
 
     // The first frame should always exist
@@ -175,14 +176,14 @@ pub fn compress_frames(
         };
 
         compressed_frames.push((
-            BitPack::pack(canvas.as_ref().unwrap_or(&first_img), &img)?,
+            compressor.compress(canvas.as_ref().unwrap_or(&first_img), &img)?,
             duration,
         ));
         canvas = Some(img);
     }
     //Add the first frame we got earlier:
     compressed_frames.push((
-        BitPack::pack(canvas.as_ref().unwrap_or(&first_img), &first_img)?,
+        compressor.compress(canvas.as_ref().unwrap_or(&first_img), &first_img)?,
         first_duration,
     ));
     Ok(compressed_frames)

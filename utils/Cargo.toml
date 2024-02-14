@@ -6,7 +6,6 @@ edition = "2021"
 license-file = "../LICENSE"
 
 [dependencies]
-lazy_static = "1.4"
 lzzzz = "=1.0.4"
 rkyv = "0.7"
 
