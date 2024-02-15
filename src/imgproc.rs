@@ -13,7 +13,7 @@ use std::{
 };
 
 use utils::{
-    comp_decomp::{BitPack, Compressor},
+    compression::{BitPack, Compressor},
     ipc::{self, Coord, Position},
 };
 

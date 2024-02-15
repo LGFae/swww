@@ -1,3 +1,3 @@
 pub mod cache;
-pub mod comp_decomp;
+pub mod compression;
 pub mod ipc;
