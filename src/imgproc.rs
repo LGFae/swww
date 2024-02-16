@@ -157,7 +157,7 @@ pub fn compress_frames(
     // The first frame should always exist
     let first = frames.next().unwrap().unwrap();
     let first_duration = first.delay().numer_denom_ms();
-    let first_duration = Duration::from_millis((first_duration.0 / first_duration.1).into());
+    let mut first_duration = Duration::from_millis((first_duration.0 / first_duration.1).into());
     let first_img = match resize {
         ResizeStrategy::No => img_pad(frame_to_rgb(first), dim, color)?,
         ResizeStrategy::Crop => img_resize_crop(frame_to_rgb(first), dim, filter)?,
@@ -175,17 +175,34 @@ pub fn compress_frames(
             ResizeStrategy::Fit => img_resize_fit(frame_to_rgb(frame), dim, filter, color)?,
         };
 
-        compressed_frames.push((
-            compressor.compress(canvas.as_ref().unwrap_or(&first_img), &img)?,
-            duration,
-        ));
+        if let Some(canvas) = canvas.as_ref() {
+            match compressor.compress(canvas, &img) {
+                Some(bytes) => compressed_frames.push((bytes, duration)),
+                None => match compressed_frames.last_mut() {
+                    Some(last) => last.1 += duration,
+                    None => first_duration += duration,
+                },
+            }
+        } else {
+            match compressor.compress(&first_img, &img) {
+                Some(bytes) => compressed_frames.push((bytes, duration)),
+                None => first_duration += duration,
+            }
+        }
         canvas = Some(img);
     }
+
     //Add the first frame we got earlier:
-    compressed_frames.push((
-        compressor.compress(canvas.as_ref().unwrap_or(&first_img), &first_img)?,
-        first_duration,
-    ));
+    if let Some(canvas) = canvas.as_ref() {
+        match compressor.compress(canvas, &first_img) {
+            Some(bytes) => compressed_frames.push((bytes, first_duration)),
+            None => match compressed_frames.last_mut() {
+                Some(last) => last.1 += first_duration,
+                None => first_duration += first_duration,
+            },
+        }
+    }
+
     Ok(compressed_frames)
 }
 

@@ -42,7 +42,7 @@ pub fn compression_and_decompression(c: &mut Criterion) {
     let mut compressor = Compressor::new();
     let mut comp = c.benchmark_group("compression");
     comp.bench_function("Full", |b| {
-        b.iter(|| black_box(compressor.compress(&prev, &cur).ok()))
+        b.iter(|| black_box(compressor.compress(&prev, &cur).is_some()))
     });
     comp.finish();
 

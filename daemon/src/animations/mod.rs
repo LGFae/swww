@@ -109,7 +109,7 @@ impl Animator {
             .stack_size(STACK_SIZE) //the default of 2MB is way too overkill for this
             .spawn_scoped(scope, move || {
                 /* We only need to animate if we have > 1 frame */
-                if animation.animation.len() == 1 {
+                if animation.animation.len() <= 1 {
                     return;
                 }
                 log::debug!("Starting animation");
@@ -148,12 +148,12 @@ impl Animator {
                             continue;
                         }
 
-                        let success = wallpapers[i].canvas_change(|canvas| {
+                        let result = wallpapers[i].canvas_change(|canvas| {
                             decompressor.decompress_archived(frame, canvas)
                         });
 
-                        if !success {
-                            error!("failed to unpack frame, canvas is smaller than expected");
+                        if let Err(e) = result {
+                            error!("failed to unpack frame: {e}");
                             wallpapers.swap_remove(i);
                             tokens.swap_remove(i);
                             continue;

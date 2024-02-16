@@ -82,7 +82,7 @@ pub(super) fn pack_bytes(cur: &[u8], goal: &[u8], v: &mut Vec<u8>) {
         i += equals * 3;
 
         if i >= cur.len() {
-            return;
+            break;
         }
 
         let start = i;
@@ -97,7 +97,11 @@ pub(super) fn pack_bytes(cur: &[u8], goal: &[u8], v: &mut Vec<u8>) {
         v.extend_from_slice(unsafe { goal.get_unchecked(start..i) });
         i += 3;
     }
-    v.push(0);
+
+    if !v.is_empty() {
+        // add one extra zero to prevent access out of bounds later during decompression
+        v.push(0)
+    }
 }
 
 #[cfg(test)]

@@ -55,6 +55,7 @@ pub struct Compressor {
 }
 
 impl Compressor {
+    #[inline]
     pub fn new() -> Self {
         cpu::init();
         Self { buf: Vec::new() }
@@ -62,7 +63,17 @@ impl Compressor {
 
     /// Compresses a frame of animation by getting the difference between the previous and the
     /// current frame, and then running lz4
-    pub fn compress(&mut self, prev: &[u8], cur: &[u8]) -> Result<BitPack, String> {
+    ///
+    /// # Returns:
+    ///   * None if the two frames are identical
+    ///   * Some(bytes) if compression yielded something
+    ///
+    /// # Panics:
+    ///   * `prev.len() != cur.len()`
+    ///   * the len of the diff buffer is larger than 0x7E000000. In practice, this can only
+    ///   happen for 64k monitors and beyond
+    #[inline]
+    pub fn compress(&mut self, prev: &[u8], cur: &[u8]) -> Option<BitPack> {
         assert_eq!(
             prev.len(),
             cur.len(),
@@ -73,11 +84,7 @@ impl Compressor {
         pack_bytes(prev, cur, &mut self.buf);
 
         if self.buf.is_empty() {
-            return Ok(BitPack {
-                inner: Box::new([]),
-                expected_buf_size: (cur.len() / 3) * 4,
-                compressed_size: 0,
-            });
+            return None;
         }
 
         // This should only be a problem with 64k monitors and beyond, (hopefully) far into the future
@@ -98,7 +105,7 @@ impl Compressor {
             ) as usize
         };
         v.truncate(n);
-        Ok(BitPack {
+        Some(BitPack {
             inner: v.into_boxed_slice(),
             expected_buf_size: (cur.len() / 3) * 4,
             compressed_size: self.buf.len() as i32,
@@ -114,6 +121,7 @@ pub struct Decompressor {
 }
 
 impl Drop for Decompressor {
+    #[inline]
     fn drop(&mut self) {
         if self.cap > 0 {
             let layout = std::alloc::Layout::array::<u8>(self.cap).unwrap();
@@ -124,6 +132,7 @@ impl Drop for Decompressor {
 
 impl Decompressor {
     #[allow(clippy::new_without_default)]
+    #[inline]
     pub fn new() -> Self {
         cpu::init();
         Self {
@@ -132,7 +141,7 @@ impl Decompressor {
         }
     }
 
-    pub fn ensure_capacity(&mut self, goal: usize) {
+    fn ensure_capacity(&mut self, goal: usize) {
         if self.cap >= goal {
             return;
         }
@@ -161,72 +170,78 @@ impl Decompressor {
 
     ///returns whether unpacking was successful. Note it can only fail if `buf.len() !=
     ///expected_buf_size`
-    pub fn decompress(&mut self, bitpack: &BitPack, buf: &mut [u8]) -> bool {
-        if buf.len() == bitpack.expected_buf_size {
-            if !bitpack.inner.is_empty() {
-                self.ensure_capacity(bitpack.compressed_size as usize);
-
-                // Note: errors will never happen because BitPacked is *always* only produced
-                // with correct lz4 compression
-                unsafe {
-                    LZ4_decompress_safe(
-                        bitpack.inner.as_ptr() as _,
-                        self.ptr.as_ptr() as _,
-                        bitpack.inner.len() as c_int,
-                        bitpack.compressed_size as c_int,
-                    );
-                }
-
-                let v = unsafe {
-                    std::slice::from_raw_parts_mut(
-                        self.ptr.as_ptr(),
-                        bitpack.compressed_size as usize,
-                    )
-                };
-
-                unpack_bytes(buf, v);
-            }
-            true
-        } else {
-            false
+    #[inline]
+    pub fn decompress(&mut self, bitpack: &BitPack, buf: &mut [u8]) -> Result<(), String> {
+        if buf.len() != bitpack.expected_buf_size {
+            return Err(format!(
+                "buf has len {}, but expected len is {}",
+                buf.len(),
+                bitpack.expected_buf_size
+            ));
         }
+        self.ensure_capacity(bitpack.compressed_size as usize);
+
+        // Note: errors will never happen because BitPacked is *always* only produced
+        // with correct lz4 compression
+        unsafe {
+            LZ4_decompress_safe(
+                bitpack.inner.as_ptr() as _,
+                self.ptr.as_ptr() as _,
+                bitpack.inner.len() as c_int,
+                bitpack.compressed_size as c_int,
+            );
+        }
+
+        let v = unsafe {
+            std::slice::from_raw_parts_mut(self.ptr.as_ptr(), bitpack.compressed_size as usize)
+        };
+        unpack_bytes(buf, v);
+
+        Ok(())
     }
 
     ///returns whether unpacking was successful. Note it can only fail if `buf.len() !=
     ///expected_buf_size`
     ///This function is identical to its non-archived counterpart
-    pub fn decompress_archived(&mut self, archived: &ArchivedBitPack, buf: &mut [u8]) -> bool {
+    #[inline]
+    pub fn decompress_archived(
+        &mut self,
+        archived: &ArchivedBitPack,
+        buf: &mut [u8],
+    ) -> Result<(), String> {
         let expected_len: usize = archived
             .expected_buf_size
             .deserialize(&mut rkyv::Infallible)
             .unwrap();
-        if buf.len() == expected_len {
-            if !archived.inner.is_empty() {
-                let cap: i32 = archived
-                    .compressed_size
-                    .deserialize(&mut rkyv::Infallible)
-                    .unwrap();
-                self.ensure_capacity(cap as usize);
-
-                // Note: errors will never happen because BitPacked is *always* only produced
-                // with correct lz4 compression
-                unsafe {
-                    LZ4_decompress_safe(
-                        archived.inner.as_ptr() as _,
-                        self.ptr.as_ptr() as _,
-                        archived.inner.len() as c_int,
-                        cap as c_int,
-                    );
-                }
-
-                let v = unsafe { std::slice::from_raw_parts_mut(self.ptr.as_ptr(), cap as usize) };
-
-                unpack_bytes(buf, v);
-            }
-            true
-        } else {
-            false
+        if buf.len() != expected_len {
+            return Err(format!(
+                "buf has len {}, but expected len is {}",
+                buf.len(),
+                expected_len
+            ));
         }
+
+        let cap: i32 = archived
+            .compressed_size
+            .deserialize(&mut rkyv::Infallible)
+            .unwrap();
+        self.ensure_capacity(cap as usize);
+
+        // Note: errors will never happen because BitPacked is *always* only produced
+        // with correct lz4 compression
+        unsafe {
+            LZ4_decompress_safe(
+                archived.inner.as_ptr() as _,
+                self.ptr.as_ptr() as _,
+                archived.inner.len() as c_int,
+                cap as c_int,
+            );
+        }
+
+        let v = unsafe { std::slice::from_raw_parts_mut(self.ptr.as_ptr(), cap as usize) };
+        unpack_bytes(buf, v);
+
+        Ok(())
     }
 }
 
@@ -252,7 +267,9 @@ mod tests {
         let compressed = Compressor::new().compress(&frame1, &frame2).unwrap();
 
         let mut buf = buf_from(&frame1);
-        assert!(Decompressor::new().decompress(&compressed, &mut buf));
+        assert!(Decompressor::new()
+            .decompress(&compressed, &mut buf)
+            .is_ok());
         for i in 0..2 {
             for j in 0..3 {
                 assert_eq!(
@@ -290,7 +307,7 @@ mod tests {
 
             let mut buf = buf_from(original.last().unwrap());
             for i in 0..20 {
-                assert!(decompressor.decompress(&compressed[i], &mut buf));
+                assert!(decompressor.decompress(&compressed[i], &mut buf).is_ok());
                 let mut j = 0;
                 let mut l = 0;
                 while j < 3000 {
@@ -344,7 +361,7 @@ mod tests {
 
             let mut buf = buf_from(original.last().unwrap());
             for i in 0..20 {
-                assert!(decompressor.decompress(&compressed[i], &mut buf));
+                assert!(decompressor.decompress(&compressed[i], &mut buf).is_ok());
                 let mut j = 0;
                 let mut l = 0;
                 while j < 3000 {

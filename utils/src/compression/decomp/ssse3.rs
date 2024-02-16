@@ -3,40 +3,48 @@
 pub(super) unsafe fn unpack_bytes(buf: &mut [u8], diff: &[u8]) {
     use std::arch::x86_64 as intr;
 
-    let len = diff.len();
-    let buf = buf.as_mut_ptr();
-    let diff = diff.as_ptr();
+    // The very final byte is just padding to let us read 4 bytes at once without going out of
+    // bounds
+    let len = diff.len() - 1;
+    let buf_ptr = buf.as_mut_ptr();
+    let diff_ptr = diff.as_ptr();
     let mask = intr::_mm_set_epi8(-1, 11, 10, 9, -1, 8, 7, 6, -1, 5, 4, 3, -1, 2, 1, 0);
 
     let mut diff_idx = 0;
     let mut pix_idx = 0;
     while diff_idx + 1 < len {
-        while diff.add(diff_idx).read() == u8::MAX {
+        while diff_ptr.add(diff_idx).read() == u8::MAX {
             pix_idx += u8::MAX as usize;
             diff_idx += 1;
         }
-        pix_idx += diff.add(diff_idx).read() as usize;
+        pix_idx += diff_ptr.add(diff_idx).read() as usize;
         diff_idx += 1;
 
         let mut to_cpy = 0;
-        while diff.add(diff_idx).read() == u8::MAX {
+        while diff_ptr.add(diff_idx).read() == u8::MAX {
             to_cpy += u8::MAX as usize;
             diff_idx += 1;
         }
-        to_cpy += diff.add(diff_idx).read() as usize;
+        to_cpy += diff_ptr.add(diff_idx).read() as usize;
         diff_idx += 1;
 
         while to_cpy > 4 {
-            let d = intr::_mm_loadu_si128(diff.add(diff_idx).cast());
+            let d = intr::_mm_loadu_si128(diff_ptr.add(diff_idx).cast());
             let to_store = intr::_mm_shuffle_epi8(d, mask);
-            intr::_mm_storeu_si128(buf.add(pix_idx * 4).cast(), to_store);
+            intr::_mm_storeu_si128(buf_ptr.add(pix_idx * 4).cast(), to_store);
 
             diff_idx += 12;
             pix_idx += 4;
             to_cpy -= 4;
         }
         for _ in 0..to_cpy {
-            std::ptr::copy_nonoverlapping(diff.add(diff_idx), buf.add(pix_idx * 4), 4);
+            debug_assert!(
+                diff_idx + 3 < diff.len(),
+                "diff_idx + 3: {}, diff.len(): {}",
+                diff_idx + 3,
+                diff.len()
+            );
+            std::ptr::copy_nonoverlapping(diff_ptr.add(diff_idx), buf_ptr.add(pix_idx * 4), 4);
             diff_idx += 3;
             pix_idx += 1;
         }
