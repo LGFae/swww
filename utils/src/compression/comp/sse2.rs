@@ -63,16 +63,14 @@ unsafe fn count_different(s1: &[u8], s2: &[u8], mut i: usize) -> usize {
 
 #[inline]
 #[target_feature(enable = "sse2")]
-pub(super) unsafe fn pack_bytes(cur: &[u8], goal: &[u8]) -> Box<[u8]> {
-    let mut v = Vec::with_capacity((goal.len() * 5) / 8);
-
+pub(super) unsafe fn pack_bytes(cur: &[u8], goal: &[u8], v: &mut Vec<u8>) {
     let mut i = 0;
     while i < cur.len() {
         let equals = count_equals(cur, goal, i);
         i += equals * 3;
 
         if i >= cur.len() {
-            return v.into_boxed_slice();
+            return;
         }
 
         let start = i;
@@ -88,7 +86,6 @@ pub(super) unsafe fn pack_bytes(cur: &[u8], goal: &[u8]) -> Box<[u8]> {
         i += 3;
     }
     v.push(0);
-    v.into_boxed_slice()
 }
 
 #[cfg(test)]
@@ -137,7 +134,8 @@ mod tests {
         }
         let frame1 = [1, 2, 3, 4, 5, 6];
         let frame2 = [1, 2, 3, 6, 5, 4];
-        let compressed = unsafe { pack_bytes(&frame1, &frame2) };
+        let mut compressed = Vec::new();
+        unsafe { pack_bytes(&frame1, &frame2, &mut compressed) };
 
         let mut buf = buf_from(&frame1);
         unpack_bytes(&mut buf, &compressed);
@@ -168,9 +166,13 @@ mod tests {
             }
 
             let mut compressed = Vec::with_capacity(20);
-            compressed.push(unsafe { pack_bytes(original.last().unwrap(), &original[0]) });
+            let mut buf = Vec::new();
+            unsafe { pack_bytes(original.last().unwrap(), &original[0], &mut buf) }
+            compressed.push(buf.clone().into_boxed_slice());
             for i in 1..20 {
-                compressed.push(unsafe { pack_bytes(&original[i - 1], &original[i]) });
+                buf.clear();
+                unsafe { pack_bytes(&original[i - 1], &original[i], &mut buf) }
+                compressed.push(buf.clone().into_boxed_slice());
             }
 
             let mut buf = buf_from(original.last().unwrap());
@@ -220,9 +222,13 @@ mod tests {
             }
 
             let mut compressed = Vec::with_capacity(20);
-            compressed.push(unsafe { pack_bytes(original.last().unwrap(), &original[0]) });
+            let mut buf = Vec::new();
+            unsafe { pack_bytes(original.last().unwrap(), &original[0], &mut buf) }
+            compressed.push(buf.clone().into_boxed_slice());
             for i in 1..20 {
-                compressed.push(unsafe { pack_bytes(&original[i - 1], &original[i]) });
+                buf.clear();
+                unsafe { pack_bytes(&original[i - 1], &original[i], &mut buf) }
+                compressed.push(buf.clone().into_boxed_slice());
             }
 
             let mut buf = buf_from(original.last().unwrap());

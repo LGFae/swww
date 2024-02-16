@@ -39,7 +39,7 @@ fn buf_from(slice: &[u8]) -> Vec<u8> {
 pub fn compression_and_decompression(c: &mut Criterion) {
     let (prev, cur) = generate_data();
 
-    let compressor = Compressor::new();
+    let mut compressor = Compressor::new();
     let mut comp = c.benchmark_group("compression");
     comp.bench_function("Full", |b| {
         b.iter(|| black_box(compressor.compress(&prev, &cur).ok()))

@@ -66,7 +66,8 @@ mod tests {
         }
         let frame1 = [1, 2, 3, 4, 5, 6];
         let frame2 = [1, 2, 3, 6, 5, 4];
-        let compressed = pack_bytes(&frame1, &frame2);
+        let mut compressed = Vec::new();
+        pack_bytes(&frame1, &frame2, &mut compressed);
 
         let mut buf = buf_from(&frame1);
         unsafe { unpack_bytes(&mut buf, &compressed) }
@@ -97,9 +98,13 @@ mod tests {
             }
 
             let mut compressed = Vec::with_capacity(20);
-            compressed.push(pack_bytes(original.last().unwrap(), &original[0]));
+            let mut buf = Vec::new();
+            pack_bytes(original.last().unwrap(), &original[0], &mut buf);
+            compressed.push(buf.clone().into_boxed_slice());
             for i in 1..20 {
-                compressed.push(pack_bytes(&original[i - 1], &original[i]));
+                buf.clear();
+                pack_bytes(&original[i - 1], &original[i], &mut buf);
+                compressed.push(buf.clone().into_boxed_slice());
             }
 
             let mut buf = buf_from(original.last().unwrap());
@@ -148,9 +153,13 @@ mod tests {
             }
 
             let mut compressed = Vec::with_capacity(20);
-            compressed.push(pack_bytes(original.last().unwrap(), &original[0]));
+            let mut buf = Vec::new();
+            pack_bytes(original.last().unwrap(), &original[0], &mut buf);
+            compressed.push(buf.clone().into_boxed_slice());
             for i in 1..20 {
-                compressed.push(pack_bytes(&original[i - 1], &original[i]));
+                buf.clear();
+                pack_bytes(&original[i - 1], &original[i], &mut buf);
+                compressed.push(buf.clone().into_boxed_slice());
             }
 
             let mut buf = buf_from(original.last().unwrap());

@@ -50,26 +50,29 @@ pub struct BitPack {
 /// Struct responsible for compressing our data. We use it to cache vector extensions that might
 /// speed up compression
 #[derive(Default)]
-pub struct Compressor;
+pub struct Compressor {
+    buf: Vec<u8>,
+}
 
 impl Compressor {
     pub fn new() -> Self {
         cpu::init();
-        Self {}
+        Self { buf: Vec::new() }
     }
 
     /// Compresses a frame of animation by getting the difference between the previous and the
     /// current frame, and then running lz4
-    pub fn compress(&self, prev: &[u8], cur: &[u8]) -> Result<BitPack, String> {
+    pub fn compress(&mut self, prev: &[u8], cur: &[u8]) -> Result<BitPack, String> {
         assert_eq!(
             prev.len(),
             cur.len(),
             "swww cannot currently deal with animations whose frames have different sizes!"
         );
 
-        let bit_pack = pack_bytes(prev, cur);
+        self.buf.clear();
+        pack_bytes(prev, cur, &mut self.buf);
 
-        if bit_pack.is_empty() {
+        if self.buf.is_empty() {
             return Ok(BitPack {
                 inner: Box::new([]),
                 expected_buf_size: (cur.len() / 3) * 4,
@@ -79,17 +82,17 @@ impl Compressor {
 
         // This should only be a problem with 64k monitors and beyond, (hopefully) far into the future
         assert!(
-            bit_pack.len() <= LZ4_MAX_INPUT_SIZE,
+            self.buf.len() <= LZ4_MAX_INPUT_SIZE,
             "frame is too large! cannot compress with LZ4!"
         );
 
-        let size = unsafe { LZ4_compressBound(bit_pack.len() as c_int) } as usize;
+        let size = unsafe { LZ4_compressBound(self.buf.len() as c_int) } as usize;
         let mut v = vec![0; size];
         let n = unsafe {
             LZ4_compress_HC(
-                bit_pack.as_ptr().cast(),
+                self.buf.as_ptr().cast(),
                 v.as_mut_ptr() as _,
-                bit_pack.len() as c_int,
+                self.buf.len() as c_int,
                 size as c_int,
                 9,
             ) as usize
@@ -98,7 +101,7 @@ impl Compressor {
         Ok(BitPack {
             inner: v.into_boxed_slice(),
             expected_buf_size: (cur.len() / 3) * 4,
-            compressed_size: bit_pack.len() as i32,
+            compressed_size: self.buf.len() as i32,
         })
     }
 }
@@ -274,7 +277,7 @@ mod tests {
             }
 
             let mut compressed = Vec::with_capacity(20);
-            let compressor = Compressor::new();
+            let mut compressor = Compressor::new();
             let mut decompressor = Decompressor::new();
             compressed.push(
                 compressor
@@ -327,7 +330,7 @@ mod tests {
                 original.push(v);
             }
 
-            let compressor = Compressor::new();
+            let mut compressor = Compressor::new();
             let mut decompressor = Decompressor::new();
             let mut compressed = Vec::with_capacity(20);
             compressed.push(

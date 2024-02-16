@@ -151,7 +151,7 @@ pub fn compress_frames(
     resize: ResizeStrategy,
     color: &[u8; 3],
 ) -> Result<Vec<(BitPack, Duration)>, String> {
-    let compressor = Compressor::new();
+    let mut compressor = Compressor::new();
     let mut compressed_frames = Vec::new();
 
     // The first frame should always exist

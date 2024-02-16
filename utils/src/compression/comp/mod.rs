@@ -66,17 +66,15 @@ pub(super) unsafe fn count_different(s1: &[u8], s2: &[u8], mut i: usize) -> usiz
 
 /// This calculates the difference between the current(cur) frame and the next(goal)
 #[inline(always)]
-pub(super) fn pack_bytes(cur: &[u8], goal: &[u8]) -> Box<[u8]> {
+pub(super) fn pack_bytes(cur: &[u8], goal: &[u8], v: &mut Vec<u8>) {
     // use the most efficient implementation available:
     #[cfg(not(test))] // when testing, we want to use the specific implementation
     {
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         if super::cpu::features::sse2() {
-            return unsafe { sse2::pack_bytes(cur, goal) };
+            return unsafe { sse2::pack_bytes(cur, goal, v) };
         }
     }
-
-    let mut v = Vec::with_capacity((goal.len() * 5) / 8);
 
     let mut i = 0;
     while i < cur.len() {
@@ -84,7 +82,7 @@ pub(super) fn pack_bytes(cur: &[u8], goal: &[u8]) -> Box<[u8]> {
         i += equals * 3;
 
         if i >= cur.len() {
-            return v.into_boxed_slice();
+            return;
         }
 
         let start = i;
@@ -100,7 +98,6 @@ pub(super) fn pack_bytes(cur: &[u8], goal: &[u8]) -> Box<[u8]> {
         i += 3;
     }
     v.push(0);
-    v.into_boxed_slice()
 }
 
 #[cfg(test)]
