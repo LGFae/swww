@@ -1,6 +1,6 @@
 #[inline]
 #[target_feature(enable = "sse2")]
-pub(in super::super) unsafe fn count_equals(s1: &[u8], s2: &[u8], mut i: usize) -> usize {
+unsafe fn count_equals(s1: &[u8], s2: &[u8], mut i: usize) -> usize {
     use std::arch::x86_64 as intr;
     let mut equals = 0;
     while i + 15 < s1.len() {
@@ -30,7 +30,7 @@ pub(in super::super) unsafe fn count_equals(s1: &[u8], s2: &[u8], mut i: usize) 
 
 #[inline]
 #[target_feature(enable = "sse2")]
-pub(in super::super) unsafe fn count_different(s1: &[u8], s2: &[u8], mut i: usize) -> usize {
+unsafe fn count_different(s1: &[u8], s2: &[u8], mut i: usize) -> usize {
     use std::arch::x86_64 as intr;
     let mut diff = 0;
     while i + 15 < s1.len() {
@@ -39,7 +39,7 @@ pub(in super::super) unsafe fn count_different(s1: &[u8], s2: &[u8], mut i: usiz
         let cmp = intr::_mm_cmpeq_epi8(a, b);
         let mask = intr::_mm_movemask_epi8(cmp);
         // we only care about the case where all three bytes are equal
-        let mask = mask & (mask >> 1) & (mask >> 2);
+        let mask = (mask & (mask >> 1) & (mask >> 2)) & 0b001001001001001;
         if mask != 0 {
             let tz = mask.trailing_zeros() as usize;
             diff += (tz + 2) / 3;
@@ -63,7 +63,7 @@ pub(in super::super) unsafe fn count_different(s1: &[u8], s2: &[u8], mut i: usiz
 
 #[inline]
 #[target_feature(enable = "sse2")]
-pub(in super::super) unsafe fn pack_bytes(cur: &[u8], goal: &[u8]) -> Box<[u8]> {
+pub(super) unsafe fn pack_bytes(cur: &[u8], goal: &[u8]) -> Box<[u8]> {
     let mut v = Vec::with_capacity((goal.len() * 5) / 8);
 
     let mut i = 0;
@@ -201,12 +201,19 @@ mod tests {
         }
         for _ in 0..10 {
             let mut original = Vec::with_capacity(20);
-            for _ in 0..20 {
-                let mut v = Vec::with_capacity(3000);
-                for _ in 0..2000 {
+            for j in 0..20 {
+                let mut v = Vec::with_capacity(3006);
+                v.extend([j, 0, 0, 0, 0, j]);
+                for _ in 0..750 {
                     v.push(random::<u8>());
                 }
-                for i in 0..1000 {
+                for i in 0..750 {
+                    v.push((i % 255) as u8);
+                }
+                for _ in 0..750 {
+                    v.push(random::<u8>());
+                }
+                for i in 0..750 {
                     v.push((i % 255) as u8);
                 }
                 original.push(v);

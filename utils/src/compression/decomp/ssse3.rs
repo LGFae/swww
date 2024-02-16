@@ -1,6 +1,6 @@
 #[inline]
 #[target_feature(enable = "ssse3")]
-pub(in super::super) unsafe fn unpack_bytes(buf: &mut [u8], diff: &[u8]) {
+pub(super) unsafe fn unpack_bytes(buf: &mut [u8], diff: &[u8]) {
     use std::arch::x86_64 as intr;
 
     let len = diff.len();
@@ -132,10 +132,16 @@ mod tests {
             let mut original = Vec::with_capacity(20);
             for _ in 0..20 {
                 let mut v = Vec::with_capacity(3000);
-                for _ in 0..2000 {
+                for _ in 0..750 {
                     v.push(random::<u8>());
                 }
-                for i in 0..1000 {
+                for i in 0..750 {
+                    v.push((i % 255) as u8);
+                }
+                for _ in 0..750 {
+                    v.push(random::<u8>());
+                }
+                for i in 0..750 {
                     v.push((i % 255) as u8);
                 }
                 original.push(v);

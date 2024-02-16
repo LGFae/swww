@@ -50,7 +50,7 @@ pub fn compression_and_decompression(c: &mut Criterion) {
     let bitpack = compressor.compress(&prev, &cur).unwrap();
     let mut canvas = buf_from(&prev);
 
-    let decompressor = Decompressor::new();
+    let mut decompressor = Decompressor::new();
     decomp.bench_function("Full", |b| {
         b.iter(|| black_box(decompressor.decompress(&bitpack, &mut canvas)))
     });

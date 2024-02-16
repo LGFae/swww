@@ -1,27 +1,40 @@
-//! # Compression Strategy
+//! # Compression utilities
 //!
-//! For every pixel, we drop the alpha part; I don't think anyone will use transparency for a
-//! background (nor if it even makes sense)
-//!
-//! For what's left, we store only the difference from the last frame to this one. We do that as
-//! follows:
-//! * First, we count how many pixels didn't change. We store that value as a u8.
-//!   Every time the u8 hits the max (i.e. 255, or 0xFF), we push in onto the vector
-//!   and restart the counting.
-//! * Once we find a pixel that has changed, we count, starting from that one, how many changed,
-//!   the same way we counted above (i.e. store as u8, every time it hits the max push and restart
-//!   the counting)
-//! * Then, we store all the new bytes.
-//! * Start from the top until we are done with the image
-//!
-//! The default implementation lies in this file. Architecture-specific implementations that make
-//! use of specialized instructions lie in other submodules.
+//! Our compression strategy is documented in `comp/mod.rs`
 
-use lzzzz::lz4f;
+use comp::pack_bytes;
+use decomp::unpack_bytes;
+use std::ffi::{c_char, c_int};
+
 use rkyv::{Archive, Deserialize, Serialize};
 mod comp;
 mod cpu;
 mod decomp;
+
+/// extracted from lz4.h
+const LZ4_MAX_INPUT_SIZE: usize = 0x7E000000;
+
+extern "C" {
+    /// This is guaranteed to succeed if dst_cap >= LZ4_compressBound
+    fn LZ4_compress_HC(
+        src: *const c_char,
+        dst: *mut c_char,
+        src_len: c_int,
+        dst_cap: c_int,
+        comp_level: c_int,
+    ) -> c_int;
+
+    /// Only fails when src is malformed, or dst_cap is insufficient
+    fn LZ4_decompress_safe(
+        src: *const c_char,
+        dst: *mut c_char,
+        compressed_size: c_int,
+        dst_cap: c_int,
+    ) -> c_int;
+
+    /// Only works for input_size <= LZ4_MAX_INPUT_SIZE
+    fn LZ4_compressBound(input_size: c_int) -> c_int;
+}
 
 /// This struct represents the cached difference between the previous frame and the next
 #[derive(Archive, Serialize, Deserialize)]
@@ -30,24 +43,19 @@ pub struct BitPack {
     /// This field will ensure we won't ever try to unpack the images on a buffer of the wrong size,
     /// which ultimately is what allows us to use unsafe in the unpack_bytes function
     expected_buf_size: usize,
+
+    compressed_size: i32,
 }
 
 /// Struct responsible for compressing our data. We use it to cache vector extensions that might
-/// speed up compression, as well as our lz4 compression configuration preferences
+/// speed up compression
 #[derive(Default)]
-pub struct Compressor {
-    preferences: lz4f::Preferences,
-}
+pub struct Compressor;
 
 impl Compressor {
     pub fn new() -> Self {
         cpu::init();
-        Self {
-            preferences: lz4f::PreferencesBuilder::new()
-                .block_size(lz4f::BlockSize::Max256KB)
-                .compression_level(9)
-                .build(),
-        }
+        Self {}
     }
 
     /// Compresses a frame of animation by getting the difference between the previous and the
@@ -59,55 +67,121 @@ impl Compressor {
             "swww cannot currently deal with animations whose frames have different sizes!"
         );
 
-        let bit_pack = 'pack: {
-            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-            if cpu::features::sse2() {
-                break 'pack (unsafe { comp::sse2::pack_bytes(prev, cur) });
-            }
-            pack_bytes(prev, cur)
-        };
+        let bit_pack = pack_bytes(prev, cur);
 
         if bit_pack.is_empty() {
             return Ok(BitPack {
                 inner: Box::new([]),
                 expected_buf_size: (cur.len() / 3) * 4,
+                compressed_size: 0,
             });
         }
 
-        let mut v = Vec::with_capacity(bit_pack.len() / 2);
-        lz4f::compress_to_vec(&bit_pack, &mut v, &self.preferences).map_err(|e| e.to_string())?;
+        // This should only be a problem with 64k monitors and beyond, (hopefully) far into the future
+        assert!(
+            bit_pack.len() <= LZ4_MAX_INPUT_SIZE,
+            "frame is too large! cannot compress with LZ4!"
+        );
+
+        let size = unsafe { LZ4_compressBound(bit_pack.len() as c_int) } as usize;
+        let mut v = vec![0; size];
+        let n = unsafe {
+            LZ4_compress_HC(
+                bit_pack.as_ptr().cast(),
+                v.as_mut_ptr() as _,
+                bit_pack.len() as c_int,
+                size as c_int,
+                9,
+            ) as usize
+        };
+        v.truncate(n);
         Ok(BitPack {
             inner: v.into_boxed_slice(),
             expected_buf_size: (cur.len() / 3) * 4,
+            compressed_size: bit_pack.len() as i32,
         })
     }
 }
 
-#[derive(Default)]
-pub struct Decompressor;
+pub struct Decompressor {
+    /// this pointer stores an inner buffer we need to speed up decompression
+    /// note we explicitly do not care about its length
+    ptr: std::ptr::NonNull<u8>,
+    cap: usize,
+}
+
+impl Drop for Decompressor {
+    fn drop(&mut self) {
+        if self.cap > 0 {
+            let layout = std::alloc::Layout::array::<u8>(self.cap).unwrap();
+            unsafe { std::alloc::dealloc(self.ptr.as_ptr(), layout) }
+        }
+    }
+}
 
 impl Decompressor {
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         cpu::init();
-        Self {}
+        Self {
+            ptr: std::ptr::NonNull::dangling(),
+            cap: 0,
+        }
+    }
+
+    pub fn ensure_capacity(&mut self, goal: usize) {
+        if self.cap >= goal {
+            return;
+        }
+
+        let ptr = if self.cap == 0 {
+            let layout = std::alloc::Layout::array::<u8>(goal).unwrap();
+            let p = unsafe { std::alloc::alloc(layout) };
+            match std::ptr::NonNull::new(p) {
+                Some(p) => p,
+                None => std::alloc::handle_alloc_error(layout),
+            }
+        } else {
+            let old_layout = std::alloc::Layout::array::<u8>(self.cap).unwrap();
+            let new_layout = std::alloc::Layout::array::<u8>(goal).unwrap();
+            let p =
+                unsafe { std::alloc::realloc(self.ptr.as_ptr(), old_layout, new_layout.size()) };
+            match std::ptr::NonNull::new(p) {
+                Some(p) => p,
+                None => std::alloc::handle_alloc_error(new_layout),
+            }
+        };
+
+        self.ptr = ptr;
+        self.cap = goal;
     }
 
     ///returns whether unpacking was successful. Note it can only fail if `buf.len() !=
     ///expected_buf_size`
-    pub fn decompress(&self, bitpack: &BitPack, buf: &mut [u8]) -> bool {
+    pub fn decompress(&mut self, bitpack: &BitPack, buf: &mut [u8]) -> bool {
         if buf.len() == bitpack.expected_buf_size {
             if !bitpack.inner.is_empty() {
-                let mut v = Vec::with_capacity(bitpack.inner.len() * 3);
-                // Note: panics will never happen because BitPacked is *always* only produced
-                // with correct lz4 compression
-                lz4f::decompress_to_vec(&bitpack.inner, &mut v).unwrap();
+                self.ensure_capacity(bitpack.compressed_size as usize);
 
-                #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-                if cpu::features::ssse3() {
-                    unsafe { decomp::ssse3::unpack_bytes(buf, &v) }
-                    return true;
+                // Note: errors will never happen because BitPacked is *always* only produced
+                // with correct lz4 compression
+                unsafe {
+                    LZ4_decompress_safe(
+                        bitpack.inner.as_ptr() as _,
+                        self.ptr.as_ptr() as _,
+                        bitpack.inner.len() as c_int,
+                        bitpack.compressed_size as c_int,
+                    );
                 }
-                unpack_bytes(buf, &v);
+
+                let v = unsafe {
+                    std::slice::from_raw_parts_mut(
+                        self.ptr.as_ptr(),
+                        bitpack.compressed_size as usize,
+                    )
+                };
+
+                unpack_bytes(buf, v);
             }
             true
         } else {
@@ -118,24 +192,33 @@ impl Decompressor {
     ///returns whether unpacking was successful. Note it can only fail if `buf.len() !=
     ///expected_buf_size`
     ///This function is identical to its non-archived counterpart
-    pub fn decompress_archived(&self, archived: &ArchivedBitPack, buf: &mut [u8]) -> bool {
+    pub fn decompress_archived(&mut self, archived: &ArchivedBitPack, buf: &mut [u8]) -> bool {
         let expected_len: usize = archived
             .expected_buf_size
             .deserialize(&mut rkyv::Infallible)
             .unwrap();
         if buf.len() == expected_len {
             if !archived.inner.is_empty() {
-                let mut v = Vec::with_capacity(archived.inner.len() * 3);
-                // Note: panics will never happen because BitPacked is *always* only produced
-                // with correct lz4 compression
-                lz4f::decompress_to_vec(&archived.inner, &mut v).unwrap();
+                let cap: i32 = archived
+                    .compressed_size
+                    .deserialize(&mut rkyv::Infallible)
+                    .unwrap();
+                self.ensure_capacity(cap as usize);
 
-                #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-                if cpu::features::ssse3() {
-                    unsafe { decomp::ssse3::unpack_bytes(buf, &v) }
-                    return true;
+                // Note: errors will never happen because BitPacked is *always* only produced
+                // with correct lz4 compression
+                unsafe {
+                    LZ4_decompress_safe(
+                        archived.inner.as_ptr() as _,
+                        self.ptr.as_ptr() as _,
+                        archived.inner.len() as c_int,
+                        cap as c_int,
+                    );
                 }
-                unpack_bytes(buf, &v);
+
+                let v = unsafe { std::slice::from_raw_parts_mut(self.ptr.as_ptr(), cap as usize) };
+
+                unpack_bytes(buf, v);
             }
             true
         } else {
@@ -144,140 +227,10 @@ impl Decompressor {
     }
 }
 
-/// SAFETY: s1.len() must be equal to s2.len()
-#[inline(always)]
-unsafe fn count_equals(s1: &[u8], s2: &[u8], mut i: usize) -> usize {
-    let mut equals = 0;
-    while i + 7 < s1.len() {
-        let a: u64 = unsafe { s1.as_ptr().add(i).cast::<u64>().read_unaligned() };
-        let b: u64 = unsafe { s2.as_ptr().add(i).cast::<u64>().read_unaligned() };
-        let cmp = a ^ b;
-        if cmp != 0 {
-            equals += cmp.trailing_zeros() as usize / 24;
-            return equals;
-        }
-        equals += 2;
-        i += 6;
-    }
-
-    while i + 2 < s1.len() {
-        let a = unsafe { s1.get_unchecked(i..i + 3) };
-        let b = unsafe { s2.get_unchecked(i..i + 3) };
-        if a != b {
-            break;
-        }
-        equals += 1;
-        i += 3;
-    }
-    equals
-}
-
-/// SAFETY: s1.len() must be equal to s2.len()
-#[inline(always)]
-unsafe fn count_different(s1: &[u8], s2: &[u8], mut i: usize) -> usize {
-    let mut different = 0;
-    while i + 2 < s1.len() {
-        let a = unsafe { s1.get_unchecked(i..i + 3) };
-        let b = unsafe { s2.get_unchecked(i..i + 3) };
-        if a == b {
-            break;
-        }
-        different += 1;
-        i += 3;
-    }
-    different
-}
-
-/// This calculates the difference between the current(cur) frame and the next(goal)
-#[inline]
-fn pack_bytes(cur: &[u8], goal: &[u8]) -> Box<[u8]> {
-    let mut v = Vec::with_capacity((goal.len() * 5) / 8);
-
-    let mut i = 0;
-    while i < cur.len() {
-        let equals = unsafe { count_equals(cur, goal, i) };
-        i += equals * 3;
-
-        if i >= cur.len() {
-            return v.into_boxed_slice();
-        }
-
-        let start = i;
-        let diffs = unsafe { count_different(cur, goal, i) };
-        i += diffs * 3;
-
-        let j = v.len() + equals / 255;
-        v.resize(1 + j + diffs / 255, 255);
-        v[j] = (equals % 255) as u8;
-        v.push((diffs % 255) as u8);
-
-        v.extend_from_slice(unsafe { goal.get_unchecked(start..i) });
-        i += 3;
-    }
-    v.push(0);
-    v.into_boxed_slice()
-}
-
-fn unpack_bytes(buf: &mut [u8], diff: &[u8]) {
-    let len = diff.len();
-    let buf = buf.as_mut_ptr();
-    let diff = diff.as_ptr();
-
-    let mut diff_idx = 0;
-    let mut pix_idx = 0;
-    while diff_idx + 1 < len {
-        while unsafe { diff.add(diff_idx).read() } == u8::MAX {
-            pix_idx += u8::MAX as usize;
-            diff_idx += 1;
-        }
-        pix_idx += unsafe { diff.add(diff_idx).read() } as usize;
-        diff_idx += 1;
-
-        let mut to_cpy = 0;
-        while unsafe { diff.add(diff_idx).read() } == u8::MAX {
-            to_cpy += u8::MAX as usize;
-            diff_idx += 1;
-        }
-        to_cpy += unsafe { diff.add(diff_idx).read() } as usize;
-        diff_idx += 1;
-
-        for _ in 0..to_cpy {
-            unsafe { std::ptr::copy_nonoverlapping(diff.add(diff_idx), buf.add(pix_idx * 4), 4) }
-            diff_idx += 3;
-            pix_idx += 1;
-        }
-        pix_idx += 1;
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use rand::prelude::random;
-
-    #[test]
-    fn count_equal_test() {
-        let a = [0u8; 102];
-        assert_eq!(unsafe { count_equals(&a, &a, 0) }, 102 / 3);
-        for i in [0, 10, 20, 30, 40, 50, 60, 70, 80, 90] {
-            let mut b = a;
-            b[i] = 1;
-            assert_eq!(unsafe { count_equals(&a, &b, 0) }, i / 3, "i: {i}");
-        }
-    }
-
-    #[test]
-    fn count_diffs_test() {
-        let a = [0u8; 102];
-        assert_eq!(unsafe { count_different(&a, &a, 0) }, 0,);
-        for i in [10, 20, 30, 40, 50, 60, 70, 80, 90, 102] {
-            let mut b = a;
-            for x in &mut b[..i] {
-                *x = 1;
-            }
-            assert_eq!(unsafe { count_different(&a, &b, 0) }, (i + 2) / 3, "i: {i}");
-        }
-    }
 
     fn buf_from(slice: &[u8]) -> Vec<u8> {
         let mut v = Vec::new();
@@ -322,7 +275,7 @@ mod tests {
 
             let mut compressed = Vec::with_capacity(20);
             let compressor = Compressor::new();
-            let decompressor = Decompressor::new();
+            let mut decompressor = Decompressor::new();
             compressed.push(
                 compressor
                     .compress(original.last().unwrap(), &original[0])
@@ -375,7 +328,7 @@ mod tests {
             }
 
             let compressor = Compressor::new();
-            let decompressor = Decompressor::new();
+            let mut decompressor = Decompressor::new();
             let mut compressed = Vec::with_capacity(20);
             compressed.push(
                 compressor

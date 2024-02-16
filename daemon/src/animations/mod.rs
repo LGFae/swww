@@ -134,7 +134,7 @@ impl Animator {
 
                 let mut now = std::time::Instant::now();
 
-                let decompressor = Decompressor::new();
+                let mut decompressor = Decompressor::new();
                 for (frame, duration) in animation.animation.iter().cycle() {
                     let duration: Duration = duration.deserialize(&mut rkyv::Infallible).unwrap();
                     barrier.wait(duration.div_f32(2.0));
