@@ -207,7 +207,15 @@ pub fn img_pad(
     let (padded_w, padded_h) = (padded_w as usize, padded_h as usize);
     let mut padded = Vec::with_capacity(padded_h * padded_w * 3);
 
-    let img = image::imageops::crop(&mut img, 0, 0, dimensions.0, dimensions.1).to_image();
+    let img = {
+        if img.width() > dimensions.0 || img.height() > dimensions.1 {
+            let left = (img.width() - dimensions.0) / 2;
+            let top = (img.height() - dimensions.1) / 2;
+            image::imageops::crop(&mut img, left, top, dimensions.0, dimensions.1).to_image()
+        } else {
+            image::imageops::crop(&mut img, 0, 0, dimensions.0, dimensions.1).to_image()
+        }
+    };
     let (img_w, img_h) = img.dimensions();
     let (img_w, img_h) = (img_w as usize, img_h as usize);
     let raw_img = img.into_vec();
