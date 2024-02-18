@@ -33,18 +33,18 @@ struct AnimationState {
 #[derive(Debug)]
 pub struct AnimationToken {
     id: usize,
-    transition_finished: Arc<AtomicBool>,
+    transition_done: Arc<AtomicBool>,
 }
 
 impl AnimationToken {
-    pub fn transition_finished(&self) -> bool {
-        self.transition_finished.load(Ordering::Acquire)
+    pub fn is_transition_done(&self) -> bool {
+        self.transition_done.load(Ordering::Acquire)
     }
-}
 
-impl Drop for AnimationToken {
-    fn drop(&mut self) {
-        self.transition_finished.store(true, Ordering::Release);
+    pub fn set_transition_done(&self, wallpaper: &Wallpaper) {
+        if wallpaper.has_animation_id(self) {
+            self.transition_done.store(true, Ordering::Release);
+        }
     }
 }
 
@@ -199,13 +199,13 @@ impl Wallpaper {
         let id = self.animation_state.id.load(Ordering::Acquire);
         AnimationToken {
             id,
-            transition_finished: Arc::clone(&self.animation_state.transition_finished),
+            transition_done: Arc::clone(&self.animation_state.transition_finished),
         }
     }
 
-    /// This will stop all animations with the current id
+    /// Stops all animations with the current id, by increasing that id
     #[inline]
-    pub fn inc_animation_id(&self) {
+    pub fn stop_animations(&self) {
         self.animation_state.id.fetch_add(1, Ordering::AcqRel);
         self.animation_state
             .transition_finished
@@ -256,7 +256,7 @@ impl Wallpaper {
         if (width, height, scale_factor) == (inner.width, inner.height, inner.scale_factor) {
             return;
         }
-        self.inc_animation_id();
+        self.stop_animations();
 
         // remove all buffers with the previous size
         let mut frame = 0u32;

@@ -103,6 +103,9 @@ impl Transition {
             ArchivedTransitionType::Fade => self.fade(new_img),
         };
         debug!("Transitions finished");
+        for (wallpaper, token) in self.wallpapers.iter().zip(self.animation_tokens) {
+            token.set_transition_done(wallpaper);
+        }
     }
 
     fn send_frame(&mut self, now: &mut Instant) {
