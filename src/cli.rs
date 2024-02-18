@@ -322,7 +322,7 @@ pub struct Img {
     ///Also note this is **different** from the transition-step. That one controls by how much we
     ///approach the new image every frame.
     #[arg(long, env = "SWWW_TRANSITION_FPS", default_value = "30")]
-    pub transition_fps: u8,
+    pub transition_fps: u16,
 
     ///This is used for the 'wipe' and 'wave' transitions. It controls the angle of the wipe
     ///
