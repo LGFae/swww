@@ -114,7 +114,7 @@ impl Animator {
 
                 for (wallpaper, token) in wallpapers.iter().zip(&tokens) {
                     loop {
-                        if !wallpaper.has_animation_id(token) || token.transition_finished() {
+                        if !wallpaper.has_animation_id(token) || token.is_transition_done() {
                             break;
                         }
                         let duration: Duration = animation.animation[0]
