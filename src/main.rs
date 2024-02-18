@@ -116,7 +116,7 @@ fn process_swww_args(args: &Swww) -> Result<(), String> {
                         transition_type: cli::TransitionType::None,
                         transition_step: u8::MAX,
                         transition_duration: 0.0,
-                        transition_fps: u8::MAX,
+                        transition_fps: 30,
                         transition_angle: 0.0,
                         transition_pos: cli::CliPosition {
                             x: cli::CliCoord::Pixel(0.0),

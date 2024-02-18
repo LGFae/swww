@@ -183,7 +183,7 @@ pub struct Transition {
     pub transition_type: TransitionType,
     pub duration: f32,
     pub step: u8,
-    pub fps: u8,
+    pub fps: u16,
     pub angle: f64,
     pub pos: Position,
     pub bezier: (f32, f32, f32, f32),
