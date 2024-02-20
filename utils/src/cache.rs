@@ -119,7 +119,10 @@ pub fn load(output_name: &str) -> Result<(), String> {
         ])
         .spawn()
     {
-        Ok(_) => Ok(()),
+        Ok(mut child) => match child.wait() {
+            Ok(_) => Ok(()),
+            Err(e) => Err(format!("child process failed: {e}")),
+        },
         Err(e) => Err(format!("failed to spawn child process: {e}")),
     }
 }
