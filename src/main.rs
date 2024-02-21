@@ -1,5 +1,10 @@
 use clap::Parser;
-use std::{os::unix::net::UnixStream, path::PathBuf, process::Stdio, time::Duration};
+use std::{
+    os::unix::net::UnixStream,
+    path::PathBuf,
+    process::{Child, Stdio},
+    time::Duration,
+};
 
 use utils::{
     cache,
@@ -14,7 +19,7 @@ use cli::{ResizeStrategy, Swww};
 
 fn main() -> Result<(), String> {
     let swww = Swww::parse();
-    if let Swww::Init { no_daemon, .. } = &swww {
+    let should_wait = if let Swww::Init { no_daemon, .. } = &swww {
         match is_daemon_running() {
             Ok(false) => {
                 let socket_path = get_socket_path();
@@ -43,13 +48,24 @@ fn main() -> Result<(), String> {
                 }
             }
         }
-        spawn_daemon(*no_daemon)?;
+
+        let child = spawn_daemon(*no_daemon)?;
         if *no_daemon {
-            return Ok(());
+            Some(child)
+        } else {
+            None
         }
-    }
+    } else {
+        None
+    };
 
     process_swww_args(&swww)?;
+
+    if let Some(mut child) = should_wait {
+        if let Err(e) = child.wait() {
+            return Err(format!("swww-daemon did not run successfully: {e}"));
+        }
+    }
 
     Ok(())
 }
@@ -324,16 +340,16 @@ fn split_cmdline_outputs(outputs: &str) -> Box<[String]> {
         .collect()
 }
 
-fn spawn_daemon(no_daemon: bool) -> Result<(), String> {
+fn spawn_daemon(no_daemon: bool) -> Result<Child, String> {
     let mut cmd = std::process::Command::new("swww-daemon");
     if no_daemon {
-        match cmd.status() {
-            Ok(_) => Ok(()),
+        match cmd.spawn() {
+            Ok(child) => Ok(child),
             Err(e) => Err(format!("error spawning swww-daemon: {e}")),
         }
     } else {
         match cmd.stdout(Stdio::null()).stderr(Stdio::null()).spawn() {
-            Ok(_) => Ok(()),
+            Ok(child) => Ok(child),
             Err(e) => Err(format!("error spawning swww-daemon: {e}")),
         }
     }
