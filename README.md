@@ -23,10 +23,9 @@
 
 To build, clone this repository and run:
 ```
-cargo build --release
+make install
 ```
-Then, put **both binaries** `target/release/swww` and
-`target/release/swww-daemon` in your  path. Optionally, autocompletion scripts
+Optionally, autocompletion scripts
 for bash, zsh, fish and elvish are offered in the `completions` directory.
 
 #### Man pages:
