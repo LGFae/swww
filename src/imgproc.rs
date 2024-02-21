@@ -295,9 +295,9 @@ pub fn img_resize_fit(
         };
 
         let src = match fast_image_resize::Image::from_vec_u8(
-            // We unwrap below because we know the images's dimensions should never be 0
-            NonZeroU32::new(img_w).unwrap(),
-            NonZeroU32::new(img_h).unwrap(),
+            // We use unchecked below because we know the images's dimensions should never be 0
+            unsafe { NonZeroU32::new_unchecked(img_w) },
+            unsafe { NonZeroU32::new_unchecked(img_h) },
             img.into_raw(),
             PixelType::U8x3,
         ) {
@@ -305,9 +305,9 @@ pub fn img_resize_fit(
             Err(e) => return Err(e.to_string()),
         };
 
-        // We unwrap below because we know the outputs's dimensions should never be 0
-        let new_w = NonZeroU32::new(trg_w).unwrap();
-        let new_h = NonZeroU32::new(trg_h).unwrap();
+        // We use unchecked below because we know the outputs's dimensions should never be 0
+        let new_w = unsafe { NonZeroU32::new_unchecked(trg_w) };
+        let new_h = unsafe { NonZeroU32::new_unchecked(trg_h) };
 
         let mut dst = fast_image_resize::Image::new(new_w, new_h, PixelType::U8x3);
         let mut dst_view = dst.view_mut();
@@ -340,9 +340,9 @@ pub fn img_resize_crop(
     let (img_w, img_h) = img.dimensions();
     let mut resized_img = if (img_w, img_h) != (width, height) {
         let src = match fast_image_resize::Image::from_vec_u8(
-            // We unwrap below because we know the images's dimensions should never be 0
-            NonZeroU32::new(img_w).unwrap(),
-            NonZeroU32::new(img_h).unwrap(),
+            // We use unchecked below because we know the images's dimensions should never be 0
+            unsafe { NonZeroU32::new_unchecked(img_w) },
+            unsafe { NonZeroU32::new_unchecked(img_h) },
             img.into_raw(),
             PixelType::U8x3,
         ) {
@@ -350,9 +350,9 @@ pub fn img_resize_crop(
             Err(e) => return Err(e.to_string()),
         };
 
-        // We unwrap below because we know the outputs's dimensions should never be 0
-        let new_w = NonZeroU32::new(width).unwrap();
-        let new_h = NonZeroU32::new(height).unwrap();
+        // We use unchecked below because we know the outputs's dimensions should never be 0
+        let new_w = unsafe { NonZeroU32::new_unchecked(width) };
+        let new_h = unsafe { NonZeroU32::new_unchecked(height) };
         let mut src_view = src.view();
         src_view.set_crop_box_to_fit_dst_size(new_w, new_h, Some((0.5, 0.5)));
 

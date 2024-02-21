@@ -394,7 +394,11 @@ impl CompositorHandler for Daemon {
     ) {
         for wallpaper in self.wallpapers.iter_mut() {
             if wallpaper.has_surface(surface) {
-                wallpaper.resize(None, None, Some(NonZeroI32::new(new_factor).unwrap()));
+                wallpaper.resize(
+                    None,
+                    None,
+                    Some(unsafe { NonZeroI32::new_unchecked(new_factor) }),
+                );
                 return;
             }
         }
@@ -502,10 +506,11 @@ impl OutputHandler for Daemon {
                 for wallpaper in self.wallpapers.iter_mut() {
                     if wallpaper.has_id(output_info.id) {
                         let (width, height) = (
-                            Some(NonZeroI32::new(output_size.0).unwrap()),
-                            Some(NonZeroI32::new(output_size.1).unwrap()),
+                            Some(unsafe { NonZeroI32::new_unchecked(output_size.0) }),
+                            Some(unsafe { NonZeroI32::new_unchecked(output_size.1) }),
                         );
-                        let scale_factor = Some(NonZeroI32::new(output_info.scale_factor).unwrap());
+                        let scale_factor =
+                            Some(unsafe { NonZeroI32::new_unchecked(output_info.scale_factor) });
                         wallpaper.resize(width, height, scale_factor);
                         return;
                     }

@@ -81,7 +81,7 @@ impl Wallpaper {
             (256.try_into().unwrap(), 256.try_into().unwrap())
         };
 
-        let scale_factor = NonZeroI32::new(output_info.scale_factor).unwrap();
+        let scale_factor = unsafe { NonZeroI32::new_unchecked(output_info.scale_factor) };
 
         // Configure the layer surface
         layer_surface.set_anchor(Anchor::all());
