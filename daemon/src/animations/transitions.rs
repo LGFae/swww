@@ -42,7 +42,7 @@ macro_rules! change_cols {
     };
 }
 
-pub struct Transition {
+pub(super) struct Transition {
     animation_tokens: Vec<AnimationToken>,
     wallpapers: Vec<Arc<Wallpaper>>,
     dimensions: (u32, u32),
@@ -59,7 +59,7 @@ pub struct Transition {
 
 /// All transitions return whether or not they completed
 impl Transition {
-    pub fn new(
+    pub(super) fn new(
         wallpapers: Vec<Arc<Wallpaper>>,
         dimensions: (u32, u32),
         transition: utils::ipc::ArchivedTransition,
@@ -92,7 +92,7 @@ impl Transition {
         }
     }
 
-    pub fn execute(mut self, new_img: &[u8]) {
+    pub(super) fn execute(mut self, new_img: &[u8]) {
         debug!("Starting transitions");
         match self.transition_type {
             ArchivedTransitionType::Simple => self.simple(new_img),
@@ -140,12 +140,12 @@ impl Transition {
         while !done {
             done = true;
             for wallpaper in self.wallpapers.iter_mut() {
-                let (_, buffer) = wallpaper.canvas_change(|canvas| {
+                wallpaper.canvas_change(|canvas| {
                     for (old, new) in canvas.chunks_exact_mut(4).zip(new_img.chunks_exact(3)) {
                         change_cols!(step, old, new, done);
                     }
                 });
-                wallpaper.draw(&buffer);
+                wallpaper.draw();
             }
             self.send_frame(&mut now);
         }
@@ -158,7 +158,7 @@ impl Transition {
         let mut now = Instant::now();
         while start.elapsed().as_secs_f64() < seq.duration() {
             for wallpaper in self.wallpapers.iter_mut() {
-                let (_, buffer) = wallpaper.canvas_change(|canvas| {
+                wallpaper.canvas_change(|canvas| {
                     canvas
                         .par_chunks_exact_mut(4)
                         .zip(new_img.par_chunks_exact(3))
@@ -169,7 +169,7 @@ impl Transition {
                             }
                         });
                 });
-                wallpaper.draw(&buffer);
+                wallpaper.draw();
             }
             self.send_frame(&mut now);
             step = seq.now() as f64;
@@ -227,7 +227,7 @@ impl Transition {
 
         while start.elapsed().as_secs_f64() < seq.duration() {
             for wallpaper in self.wallpapers.iter_mut() {
-                let (_, buffer) = wallpaper.canvas_change(|canvas| {
+                wallpaper.canvas_change(|canvas| {
                     canvas
                         .par_chunks_exact_mut(4)
                         .zip(new_img.par_chunks_exact(3))
@@ -240,7 +240,7 @@ impl Transition {
                             }
                         });
                 });
-                wallpaper.draw(&buffer);
+                wallpaper.draw();
             }
             self.send_frame(&mut now);
 
@@ -288,7 +288,7 @@ impl Transition {
 
         while start.elapsed().as_secs_f64() < seq.duration() {
             for wallpaper in self.wallpapers.iter_mut() {
-                let (_, buffer) = wallpaper.canvas_change(|canvas| {
+                wallpaper.canvas_change(|canvas| {
                     canvas
                         .par_chunks_exact_mut(4)
                         .zip(new_img.par_chunks_exact(3))
@@ -301,7 +301,7 @@ impl Transition {
                             }
                         });
                 });
-                wallpaper.draw(&buffer);
+                wallpaper.draw();
             }
             self.send_frame(&mut now);
 
@@ -335,7 +335,7 @@ impl Transition {
         let mut now = Instant::now();
         while start.elapsed().as_secs_f64() < seq.duration() {
             for wallpaper in self.wallpapers.iter_mut() {
-                let (_, buffer) = wallpaper.canvas_change(|canvas| {
+                wallpaper.canvas_change(|canvas| {
                     canvas
                         .par_chunks_exact_mut(4)
                         .zip(new_img.par_chunks_exact(3))
@@ -354,7 +354,7 @@ impl Transition {
                             }
                         });
                 });
-                wallpaper.draw(&buffer);
+                wallpaper.draw();
             }
             self.send_frame(&mut now);
 
@@ -386,7 +386,7 @@ impl Transition {
         let mut now = Instant::now();
         while start.elapsed().as_secs_f64() < seq.duration() {
             for wallpaper in self.wallpapers.iter_mut() {
-                let (_, buffer) = wallpaper.canvas_change(|canvas| {
+                wallpaper.canvas_change(|canvas| {
                     canvas
                         .par_chunks_exact_mut(4)
                         .zip(new_img.par_chunks_exact(3))
@@ -405,7 +405,7 @@ impl Transition {
                             }
                         });
                 });
-                wallpaper.draw(&buffer);
+                wallpaper.draw();
             }
             self.send_frame(&mut now);
 

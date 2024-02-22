@@ -22,12 +22,12 @@ use self::anim_barrier::ArcAnimBarrier;
 ///The default thread stack size of 2MiB is way too overkill for our purposes
 const STACK_SIZE: usize = 1 << 17; //128KiB
 
-pub struct Animator {
+pub(super) struct Animator {
     anim_barrier: ArcAnimBarrier,
 }
 
 impl Animator {
-    pub fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
             anim_barrier: ArcAnimBarrier::new(),
         }
@@ -69,7 +69,11 @@ impl Animator {
         }
     }
 
-    pub fn transition(&mut self, bytes: Vec<u8>, wallpapers: Vec<Vec<Arc<Wallpaper>>>) -> Answer {
+    pub(super) fn transition(
+        &mut self,
+        bytes: Vec<u8>,
+        wallpapers: Vec<Vec<Arc<Wallpaper>>>,
+    ) -> Answer {
         match thread::Builder::new()
             .stack_size(1 << 15)
             .name("transition spawner".to_string())
@@ -140,8 +144,7 @@ impl Animator {
                             continue;
                         }
 
-                        let (success, buffer) =
-                            wallpapers[i].canvas_change(|canvas| frame.unpack(canvas));
+                        let success = wallpapers[i].canvas_change(|canvas| frame.unpack(canvas));
 
                         if !success {
                             error!("failed to unpack frame, canvas is smaller than expected");
@@ -150,7 +153,7 @@ impl Animator {
                             continue;
                         }
 
-                        wallpapers[i].draw(&buffer);
+                        wallpapers[i].draw();
                         i += 1;
                     }
 
@@ -169,7 +172,11 @@ impl Animator {
         }
     }
 
-    pub fn animate(&mut self, bytes: Vec<u8>, wallpapers: Vec<Vec<Arc<Wallpaper>>>) -> Answer {
+    pub(super) fn animate(
+        &mut self,
+        bytes: Vec<u8>,
+        wallpapers: Vec<Vec<Arc<Wallpaper>>>,
+    ) -> Answer {
         let barrier = self.anim_barrier.clone();
         match thread::Builder::new()
             .stack_size(1 << 15)
