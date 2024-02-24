@@ -141,6 +141,9 @@ pub enum Swww {
     ///Defaults to filling all outputs with black.
     Clear(Clear),
 
+    ///Restores the last displayed image on the specified outputs.
+    Restore(Restore),
+
     ///Clears the swww cache.
     ///
     ///We currently store the address of the last file set as wallpaper for each monitor, as well
@@ -210,6 +213,15 @@ pub enum ResizeStrategy {
     Crop,
     /// Resize the image to fit inside the screen, preserving the original aspect ratio
     Fit,
+}
+
+#[derive(Parser)]
+pub struct Restore {
+    /// Comma separated list of outputs to restore.
+    ///
+    /// If it isn't set, all outputs will be restored.
+    #[arg(short, long, default_value = "")]
+    pub outputs: String,
 }
 
 #[derive(Parser)]
