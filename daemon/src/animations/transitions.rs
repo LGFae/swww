@@ -55,6 +55,7 @@ pub(super) struct Transition {
     bezier: BezierCurve,
     wave: (f32, f32),
     invert_y: bool,
+    color_channels: usize,
 }
 
 /// All transitions return whether or not they completed
@@ -89,6 +90,7 @@ impl Transition {
             ),
             wave: transition.wave,
             invert_y: transition.invert_y,
+            color_channels: crate::pixel_format().channels() as usize,
         }
     }
 
@@ -141,7 +143,10 @@ impl Transition {
             done = true;
             for wallpaper in self.wallpapers.iter_mut() {
                 wallpaper.canvas_change(|canvas| {
-                    for (old, new) in canvas.chunks_exact_mut(4).zip(new_img.chunks_exact(3)) {
+                    for (old, new) in canvas
+                        .chunks_exact_mut(self.color_channels)
+                        .zip(new_img.chunks_exact(3))
+                    {
                         change_cols!(step, old, new, done);
                     }
                 });
@@ -160,7 +165,7 @@ impl Transition {
             for wallpaper in self.wallpapers.iter_mut() {
                 wallpaper.canvas_change(|canvas| {
                     canvas
-                        .par_chunks_exact_mut(4)
+                        .par_chunks_exact_mut(self.color_channels)
                         .zip(new_img.par_chunks_exact(3))
                         .for_each(|(old_pix, new_pix)| {
                             for (old_col, new_col) in old_pix.iter_mut().zip(new_pix) {
@@ -229,7 +234,7 @@ impl Transition {
             for wallpaper in self.wallpapers.iter_mut() {
                 wallpaper.canvas_change(|canvas| {
                     canvas
-                        .par_chunks_exact_mut(4)
+                        .par_chunks_exact_mut(self.color_channels)
                         .zip(new_img.par_chunks_exact(3))
                         .enumerate()
                         .for_each(|(i, (old, new))| {
@@ -290,7 +295,7 @@ impl Transition {
             for wallpaper in self.wallpapers.iter_mut() {
                 wallpaper.canvas_change(|canvas| {
                     canvas
-                        .par_chunks_exact_mut(4)
+                        .par_chunks_exact_mut(self.color_channels)
                         .zip(new_img.par_chunks_exact(3))
                         .enumerate()
                         .for_each(|(i, (old, new))| {
@@ -337,7 +342,7 @@ impl Transition {
             for wallpaper in self.wallpapers.iter_mut() {
                 wallpaper.canvas_change(|canvas| {
                     canvas
-                        .par_chunks_exact_mut(4)
+                        .par_chunks_exact_mut(self.color_channels)
                         .zip(new_img.par_chunks_exact(3))
                         .enumerate()
                         .for_each(|(i, (old, new))| {
@@ -388,7 +393,7 @@ impl Transition {
             for wallpaper in self.wallpapers.iter_mut() {
                 wallpaper.canvas_change(|canvas| {
                     canvas
-                        .par_chunks_exact_mut(4)
+                        .par_chunks_exact_mut(self.color_channels)
                         .zip(new_img.par_chunks_exact(3))
                         .enumerate()
                         .for_each(|(i, (old, new))| {

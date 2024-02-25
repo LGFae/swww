@@ -12,7 +12,7 @@ use std::{
 
 use rkyv::{Deserialize, Infallible};
 
-use crate::ipc::Animation;
+use crate::ipc::{Animation, PixelFormat};
 
 pub fn store(output_name: &str, img_path: &str) -> Result<(), String> {
     let mut filepath = cache_dir()?;
@@ -26,7 +26,11 @@ pub fn store(output_name: &str, img_path: &str) -> Result<(), String> {
 }
 
 pub fn store_animation_frames(animation: &Animation) -> Result<(), String> {
-    let filename = animation_filename(&PathBuf::from(&animation.path), animation.dimensions);
+    let filename = animation_filename(
+        &PathBuf::from(&animation.path),
+        animation.dimensions,
+        animation.pixel_format,
+    );
     let mut filepath = cache_dir()?;
     filepath.push(&filename);
 
@@ -50,8 +54,9 @@ pub fn store_animation_frames(animation: &Animation) -> Result<(), String> {
 pub fn load_animation_frames(
     path: &Path,
     dimensions: (u32, u32),
+    pixel_format: PixelFormat,
 ) -> Result<Option<Animation>, String> {
-    let filename = animation_filename(path, dimensions);
+    let filename = animation_filename(path, dimensions, pixel_format);
     let cache_dir = cache_dir()?;
     let mut filepath = cache_dir.clone();
     filepath.push(filename);
@@ -155,7 +160,7 @@ fn clean_previous_verions(cache_dir: &Path) {
 
         // only the images we've cached will have a _v token, indicating their version
         if let Some(i) = filename.rfind("_v") {
-            if &filename[i..] != current_version {
+            if &filename[i + 2..] != current_version {
                 if let Err(e) = std::fs::remove_file(entry.path()) {
                     eprintln!(
                         "WARNING: failed to remove cache file {} of old swww version {:?}",
@@ -194,12 +199,13 @@ fn cache_dir() -> Result<PathBuf, String> {
 }
 
 #[must_use]
-fn animation_filename(path: &Path, dimensions: (u32, u32)) -> PathBuf {
+fn animation_filename(path: &Path, dimensions: (u32, u32), pixel_format: PixelFormat) -> PathBuf {
     format!(
-        "{}__{}x{}_v{}",
+        "{}__{}x{}_{:?}_v{}",
         path.to_string_lossy().replace('/', "_"),
         dimensions.0,
         dimensions.1,
+        pixel_format,
         env!("CARGO_PKG_VERSION"),
     )
     .into()

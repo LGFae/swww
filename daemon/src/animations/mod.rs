@@ -149,7 +149,7 @@ impl Animator {
                         }
 
                         let result = wallpapers[i].canvas_change(|canvas| {
-                            decompressor.decompress_archived(frame, canvas)
+                            decompressor.decompress_archived(frame, canvas, crate::pixel_format())
                         });
 
                         if let Err(e) = result {

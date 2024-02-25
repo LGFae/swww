@@ -1,6 +1,6 @@
 #[inline]
 #[target_feature(enable = "ssse3")]
-pub(super) unsafe fn unpack_bytes(buf: &mut [u8], diff: &[u8]) {
+pub(super) unsafe fn unpack_bytes_4channels(buf: &mut [u8], diff: &[u8]) {
     use std::arch::x86_64 as intr;
 
     // The very final byte is just padding to let us read 4 bytes at once without going out of
@@ -78,7 +78,7 @@ mod tests {
         unsafe { pack_bytes(&frame1, &frame2, &mut compressed) }
 
         let mut buf = buf_from(&frame1);
-        unsafe { unpack_bytes(&mut buf, &compressed) }
+        unsafe { unpack_bytes_4channels(&mut buf, &compressed) }
         for i in 0..2 {
             for j in 0..3 {
                 assert_eq!(
@@ -117,7 +117,7 @@ mod tests {
 
             let mut buf = buf_from(original.last().unwrap());
             for i in 0..20 {
-                unsafe { unpack_bytes(&mut buf, &compressed[i]) }
+                unsafe { unpack_bytes_4channels(&mut buf, &compressed[i]) }
                 let mut j = 0;
                 let mut l = 0;
                 while j < 3000 {
@@ -172,7 +172,7 @@ mod tests {
 
             let mut buf = buf_from(original.last().unwrap());
             for i in 0..20 {
-                unsafe { unpack_bytes(&mut buf, &compressed[i]) }
+                unsafe { unpack_bytes_4channels(&mut buf, &compressed[i]) }
                 let mut j = 0;
                 let mut l = 0;
                 while j < 3000 {

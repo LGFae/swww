@@ -7,13 +7,13 @@ pub(super) mod ssse3;
 /// diff must be a slice produced by a BitPack
 /// buf must have the EXACT expected size by the BitPack
 #[inline(always)]
-pub(super) fn unpack_bytes(buf: &mut [u8], diff: &[u8]) {
+pub(super) fn unpack_bytes_4channels(buf: &mut [u8], diff: &[u8]) {
     // use the most efficient implementation available:
     #[cfg(not(test))] // when testing, we want to use the specific implementation
     {
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         if super::cpu::features::ssse3() {
-            return unsafe { ssse3::unpack_bytes(buf, diff) };
+            return unsafe { ssse3::unpack_bytes_4channels(buf, diff) };
         }
     }
 
@@ -56,5 +56,48 @@ pub(super) fn unpack_bytes(buf: &mut [u8], diff: &[u8]) {
             pix_idx += 1;
         }
         pix_idx += 1;
+    }
+}
+
+#[inline(always)]
+pub(super) fn unpack_bytes_3channels(buf: &mut [u8], diff: &[u8]) {
+    // The very final byte is just padding to let us read 4 bytes at once without going out of
+    // bounds
+    let len = diff.len() - 1;
+    let buf_ptr = buf.as_mut_ptr();
+    let diff_ptr = diff.as_ptr();
+
+    let mut diff_idx = 0;
+    let mut pix_idx = 0;
+    while diff_idx + 1 < len {
+        while unsafe { diff_ptr.add(diff_idx).read() } == u8::MAX {
+            pix_idx += u8::MAX as usize;
+            diff_idx += 1;
+        }
+        pix_idx += unsafe { diff_ptr.add(diff_idx).read() } as usize;
+        diff_idx += 1;
+
+        let mut to_cpy = 0;
+        while unsafe { diff_ptr.add(diff_idx).read() } == u8::MAX {
+            to_cpy += u8::MAX as usize;
+            diff_idx += 1;
+        }
+        to_cpy += unsafe { diff_ptr.add(diff_idx).read() } as usize;
+        diff_idx += 1;
+
+        debug_assert!(
+            diff_idx + to_cpy * 3 <= diff.len(),
+            "diff_idx: {diff_idx}, to_copy: {to_cpy} diff.len(): {}",
+            diff.len()
+        );
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                diff_ptr.add(diff_idx),
+                buf_ptr.add(pix_idx * 3),
+                to_cpy * 3,
+            );
+        }
+        diff_idx += to_cpy * 3;
+        pix_idx += to_cpy + 1;
     }
 }

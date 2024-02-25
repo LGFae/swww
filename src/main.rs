@@ -282,7 +282,7 @@ fn make_animation_request(
     for (dim, outputs) in dims.iter().zip(outputs) {
         //TODO: make cache work for all resize strategies
         if img.resize == ResizeStrategy::Crop {
-            match cache::load_animation_frames(&img.path, *dim) {
+            match cache::load_animation_frames(&img.path, *dim, pixel_format.de()) {
                 Ok(Some(animation)) => {
                     animations.push((animation, outputs.to_owned().into_boxed_slice()));
                     continue;
@@ -305,6 +305,7 @@ fn make_animation_request(
                 &img.fill_color,
             )?
             .into_boxed_slice(),
+            pixel_format: pixel_format.de(),
         };
         animations.push((animation, outputs.to_owned().into_boxed_slice()));
     }

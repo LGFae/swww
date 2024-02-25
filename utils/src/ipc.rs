@@ -138,8 +138,8 @@ impl fmt::Display for ArchivedBgImg {
     }
 }
 
-#[derive(Clone, Copy, Archive, Serialize, PartialEq)]
-#[archive_attr(derive(Clone, Copy))]
+#[derive(Clone, Copy, Debug, Archive, Serialize, Deserialize, PartialEq)]
+#[archive_attr(derive(Clone, Copy, Debug))]
 pub enum PixelFormat {
     /// No swap, can copy directly onto WlBuffer
     Brg,
@@ -154,7 +154,7 @@ pub enum PixelFormat {
 impl PixelFormat {
     #[inline]
     #[must_use]
-    pub fn channels(&self) -> u8 {
+    pub const fn channels(&self) -> u8 {
         match self {
             Self::Rgb => 3,
             Self::Brg => 3,
@@ -165,7 +165,18 @@ impl PixelFormat {
 
     #[inline]
     #[must_use]
-    pub fn can_copy_directly_onto_wl_buffer(&self) -> bool {
+    pub const fn must_swap_r_and_b_channels(&self) -> bool {
+        match self {
+            Self::Brg => false,
+            Self::Rgb => true,
+            Self::Xbgr => false,
+            Self::Xrgb => true,
+        }
+    }
+
+    #[inline]
+    #[must_use]
+    pub const fn can_copy_directly_onto_wl_buffer(&self) -> bool {
         match self {
             Self::Brg => true,
             Self::Rgb => true,
@@ -178,13 +189,30 @@ impl PixelFormat {
 impl ArchivedPixelFormat {
     #[inline]
     #[must_use]
-    pub fn must_swap_r_and_b_channels(&self) -> bool {
+    pub const fn channels(&self) -> u8 {
+        match self {
+            Self::Rgb => 3,
+            Self::Brg => 3,
+            Self::Xbgr => 4,
+            Self::Xrgb => 4,
+        }
+    }
+
+    #[inline]
+    #[must_use]
+    pub const fn must_swap_r_and_b_channels(&self) -> bool {
         match self {
             Self::Brg => false,
             Self::Rgb => true,
             Self::Xbgr => false,
             Self::Xrgb => true,
         }
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn de(&self) -> PixelFormat {
+        self.deserialize(&mut rkyv::Infallible).unwrap()
     }
 }
 
@@ -260,6 +288,7 @@ pub struct Animation {
     pub animation: Box<[(BitPack, Duration)]>,
     pub path: String,
     pub dimensions: (u32, u32),
+    pub pixel_format: PixelFormat,
 }
 
 pub type AnimationRequest = Box<[(Animation, Box<[String]>)]>;

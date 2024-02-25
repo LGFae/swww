@@ -575,29 +575,27 @@ impl Dispatch<WlShm, GlobalData> for Daemon {
         _qhandle: &QueueHandle<Self>,
     ) {
         match event {
-            wl_shm::Event::Format { format: wenum } => {
-                match wenum {
-                    wayland_client::WEnum::Value(format) => {
-                        //if format == wl_shm::Format::Bgr888 {
-                        //    shm_format = wl_shm::Format::Bgr888;
-                        //    pixel_format = PixelFormat::Brg;
-                        //    break;
-                        //} else if format == wl_shm::Format::Rgb888 {
-                        //    shm_format = wl_shm::Format::Rgb888;
-                        //    pixel_format = PixelFormat::Rgb;
-                        /*} else*/
-                        if format == wl_shm::Format::Xbgr8888
-                            && state.pixel_format == PixelFormat::Xrgb
-                        {
-                            state.shm_format = wl_shm::Format::Xbgr8888;
-                            state.pixel_format = PixelFormat::Xbgr;
-                        }
-                    }
-                    wayland_client::WEnum::Unknown(v) => {
-                        error!("Received unknown shm format number {v} from server")
+            wl_shm::Event::Format { format: wenum } => match wenum {
+                wayland_client::WEnum::Value(format) => {
+                    if format == wl_shm::Format::Bgr888 {
+                        state.shm_format = wl_shm::Format::Bgr888;
+                        state.pixel_format = PixelFormat::Brg;
+                    } else if format == wl_shm::Format::Rgb888
+                        && state.pixel_format != PixelFormat::Brg
+                    {
+                        state.shm_format = wl_shm::Format::Rgb888;
+                        state.pixel_format = PixelFormat::Rgb;
+                    } else if format == wl_shm::Format::Xbgr8888
+                        && state.pixel_format == PixelFormat::Xrgb
+                    {
+                        state.shm_format = wl_shm::Format::Xbgr8888;
+                        state.pixel_format = PixelFormat::Xbgr;
                     }
                 }
-            }
+                wayland_client::WEnum::Unknown(v) => {
+                    error!("Received unknown shm format number {v} from server")
+                }
+            },
             e => warn!("Unhandled WlShm event: {e:?}"),
         }
     }

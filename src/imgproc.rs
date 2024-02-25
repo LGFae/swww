@@ -177,7 +177,7 @@ pub fn compress_frames(
         };
 
         if let Some(canvas) = canvas.as_ref() {
-            match compressor.compress(canvas, &img) {
+            match compressor.compress(canvas, &img, format) {
                 Some(bytes) => compressed_frames.push((bytes, duration)),
                 None => match compressed_frames.last_mut() {
                     Some(last) => last.1 += duration,
@@ -185,7 +185,7 @@ pub fn compress_frames(
                 },
             }
         } else {
-            match compressor.compress(&first_img, &img) {
+            match compressor.compress(&first_img, &img, format) {
                 Some(bytes) => compressed_frames.push((bytes, duration)),
                 None => first_duration += duration,
             }
@@ -195,7 +195,7 @@ pub fn compress_frames(
 
     //Add the first frame we got earlier:
     if let Some(canvas) = canvas.as_ref() {
-        match compressor.compress(canvas, &first_img) {
+        match compressor.compress(canvas, &first_img, format) {
             Some(bytes) => compressed_frames.push((bytes, first_duration)),
             None => match compressed_frames.last_mut() {
                 Some(last) => last.1 += first_duration,

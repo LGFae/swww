@@ -3,10 +3,12 @@
 //! Our compression strategy is documented in `comp/mod.rs`
 
 use comp::pack_bytes;
-use decomp::unpack_bytes;
+use decomp::{unpack_bytes_3channels, unpack_bytes_4channels};
 use std::ffi::{c_char, c_int};
 
 use rkyv::{Archive, Deserialize, Serialize};
+
+use crate::ipc::{ArchivedPixelFormat, PixelFormat};
 mod comp;
 mod cpu;
 mod decomp;
@@ -79,7 +81,12 @@ impl Compressor {
     ///   * the len of the diff buffer is larger than 0x7E000000. In practice, this can only
     ///   happen for 64k monitors and beyond
     #[inline]
-    pub fn compress(&mut self, prev: &[u8], cur: &[u8]) -> Option<BitPack> {
+    pub fn compress(
+        &mut self,
+        prev: &[u8],
+        cur: &[u8],
+        pixel_format: ArchivedPixelFormat,
+    ) -> Option<BitPack> {
         assert_eq!(
             prev.len(),
             cur.len(),
@@ -114,9 +121,16 @@ impl Compressor {
             ) as usize
         };
         v.truncate(n);
+
+        let expected_buf_size = if pixel_format.channels() == 3 {
+            cur.len()
+        } else {
+            (cur.len() / 3) * 4
+        };
+
         Some(BitPack {
             inner: v.into_boxed_slice(),
-            expected_buf_size: (cur.len() / 3) * 4,
+            expected_buf_size,
             compressed_size: self.buf.len() as i32,
         })
     }
@@ -180,7 +194,12 @@ impl Decompressor {
     ///returns whether unpacking was successful. Note it can only fail if `buf.len() !=
     ///expected_buf_size`
     #[inline]
-    pub fn decompress(&mut self, bitpack: &BitPack, buf: &mut [u8]) -> Result<(), String> {
+    pub fn decompress(
+        &mut self,
+        bitpack: &BitPack,
+        buf: &mut [u8],
+        pixel_format: PixelFormat,
+    ) -> Result<(), String> {
         if buf.len() != bitpack.expected_buf_size {
             return Err(format!(
                 "buf has len {}, but expected len is {}",
@@ -206,7 +225,12 @@ impl Decompressor {
         let v = unsafe {
             std::slice::from_raw_parts_mut(self.ptr.as_ptr(), bitpack.compressed_size as usize)
         };
-        unpack_bytes(buf, v);
+
+        if pixel_format.can_copy_directly_onto_wl_buffer() {
+            unpack_bytes_3channels(buf, v);
+        } else {
+            unpack_bytes_4channels(buf, v);
+        }
 
         Ok(())
     }
@@ -219,6 +243,7 @@ impl Decompressor {
         &mut self,
         archived: &ArchivedBitPack,
         buf: &mut [u8],
+        pixel_format: PixelFormat,
     ) -> Result<(), String> {
         let expected_len: usize = archived
             .expected_buf_size
@@ -252,7 +277,12 @@ impl Decompressor {
         // SAFETY: the call to self.ensure_capacity guarantees the pointer has the necessary size
         // to hold all the data
         let v = unsafe { std::slice::from_raw_parts_mut(self.ptr.as_ptr(), cap as usize) };
-        unpack_bytes(buf, v);
+
+        if pixel_format.can_copy_directly_onto_wl_buffer() {
+            unpack_bytes_3channels(buf, v);
+        } else {
+            unpack_bytes_4channels(buf, v);
+        }
 
         Ok(())
     }
@@ -263,7 +293,13 @@ mod tests {
     use super::*;
     use rand::prelude::random;
 
-    fn buf_from(slice: &[u8]) -> Vec<u8> {
+    const C_FORMS: [ArchivedPixelFormat; 2] = [ArchivedPixelFormat::Xrgb, ArchivedPixelFormat::Rgb];
+    const D_FORMS: [PixelFormat; 2] = [PixelFormat::Xrgb, PixelFormat::Rgb];
+
+    fn buf_from(slice: &[u8], original_channels: usize) -> Vec<u8> {
+        if original_channels == 3 {
+            return slice.to_vec();
+        }
         let mut v = Vec::new();
         for pix in slice.chunks_exact(3) {
             v.extend_from_slice(pix);
@@ -275,65 +311,77 @@ mod tests {
     #[test]
     //Use this when annoying problems show up
     fn small() {
-        let frame1 = [1, 2, 3, 4, 5, 6];
-        let frame2 = [1, 2, 3, 6, 5, 4];
-        let compressed = Compressor::new().compress(&frame1, &frame2).unwrap();
+        for (c_form, d_form) in C_FORMS.into_iter().zip(D_FORMS) {
+            let frame1 = [1, 2, 3, 4, 5, 6];
+            let frame2 = [1, 2, 3, 6, 5, 4];
+            let compressed = Compressor::new()
+                .compress(&frame1, &frame2, c_form)
+                .unwrap();
 
-        let mut buf = buf_from(&frame1);
-        assert!(Decompressor::new()
-            .decompress(&compressed, &mut buf)
-            .is_ok());
-        for i in 0..2 {
-            for j in 0..3 {
-                assert_eq!(
-                    frame2[i * 3 + j],
-                    buf[i * 4 + j],
-                    "\nframe2: {frame2:?}, buf: {buf:?}\n"
-                );
+            let mut buf = buf_from(&frame1, c_form.channels().into());
+            Decompressor::new()
+                .decompress(&compressed, &mut buf, d_form)
+                .unwrap();
+            for i in 0..2 {
+                for j in 0..3 {
+                    assert_eq!(
+                        frame2[i * 3 + j],
+                        buf[i * c_form.channels() as usize + j],
+                        "\nframe2: {frame2:?}, buf: {buf:?}\n"
+                    );
+                }
             }
         }
     }
 
     #[test]
     fn total_random() {
-        for _ in 0..10 {
-            let mut original = Vec::with_capacity(20);
-            for _ in 0..20 {
-                let mut v = Vec::with_capacity(3000);
-                for _ in 0..3000 {
-                    v.push(random::<u8>());
-                }
-                original.push(v);
-            }
-
-            let mut compressed = Vec::with_capacity(20);
-            let mut compressor = Compressor::new();
-            let mut decompressor = Decompressor::new();
-            compressed.push(
-                compressor
-                    .compress(original.last().unwrap(), &original[0])
-                    .unwrap(),
-            );
-            for i in 1..20 {
-                compressed.push(compressor.compress(&original[i - 1], &original[i]).unwrap());
-            }
-
-            let mut buf = buf_from(original.last().unwrap());
-            for i in 0..20 {
-                assert!(decompressor.decompress(&compressed[i], &mut buf).is_ok());
-                let mut j = 0;
-                let mut l = 0;
-                while j < 3000 {
-                    for k in 0..3 {
-                        assert_eq!(
-                            buf[j + l + k],
-                            original[i][j + k],
-                            "Failed at index: {}",
-                            j + k
-                        );
+        for (c_form, d_form) in C_FORMS.into_iter().zip(D_FORMS) {
+            for _ in 0..10 {
+                let mut original = Vec::with_capacity(20);
+                for _ in 0..20 {
+                    let mut v = Vec::with_capacity(3000);
+                    for _ in 0..3000 {
+                        v.push(random::<u8>());
                     }
-                    j += 3;
-                    l += 1;
+                    original.push(v);
+                }
+
+                let mut compressed = Vec::with_capacity(20);
+                let mut compressor = Compressor::new();
+                let mut decompressor = Decompressor::new();
+                compressed.push(
+                    compressor
+                        .compress(original.last().unwrap(), &original[0], c_form)
+                        .unwrap(),
+                );
+                for i in 1..20 {
+                    compressed.push(
+                        compressor
+                            .compress(&original[i - 1], &original[i], c_form)
+                            .unwrap(),
+                    );
+                }
+
+                let mut buf = buf_from(original.last().unwrap(), c_form.channels().into());
+                for i in 0..20 {
+                    decompressor
+                        .decompress(&compressed[i], &mut buf, d_form)
+                        .unwrap();
+                    let mut j = 0;
+                    let mut l = 0;
+                    while j < 3000 {
+                        for k in 0..3 {
+                            assert_eq!(
+                                buf[j + l + k],
+                                original[i][j + k],
+                                "Failed at index: {}",
+                                j + k
+                            );
+                        }
+                        j += 3;
+                        l += !d_form.can_copy_directly_onto_wl_buffer() as usize;
+                    }
                 }
             }
         }
@@ -341,53 +389,61 @@ mod tests {
 
     #[test]
     fn full() {
-        for _ in 0..10 {
-            let mut original = Vec::with_capacity(20);
-            for _ in 0..20 {
-                let mut v = Vec::with_capacity(3000);
-                for _ in 0..750 {
-                    v.push(random::<u8>());
-                }
-                for i in 0..750 {
-                    v.push((i % 255) as u8);
-                }
-                for _ in 0..750 {
-                    v.push(random::<u8>());
-                }
-                for i in 0..750 {
-                    v.push((i % 255) as u8);
-                }
-                original.push(v);
-            }
-
-            let mut compressor = Compressor::new();
-            let mut decompressor = Decompressor::new();
-            let mut compressed = Vec::with_capacity(20);
-            compressed.push(
-                compressor
-                    .compress(original.last().unwrap(), &original[0])
-                    .unwrap(),
-            );
-            for i in 1..20 {
-                compressed.push(compressor.compress(&original[i - 1], &original[i]).unwrap());
-            }
-
-            let mut buf = buf_from(original.last().unwrap());
-            for i in 0..20 {
-                assert!(decompressor.decompress(&compressed[i], &mut buf).is_ok());
-                let mut j = 0;
-                let mut l = 0;
-                while j < 3000 {
-                    for k in 0..3 {
-                        assert_eq!(
-                            buf[j + l + k],
-                            original[i][j + k],
-                            "Failed at index: {}",
-                            j + k
-                        );
+        for (c_form, d_form) in C_FORMS.into_iter().zip(D_FORMS) {
+            for _ in 0..10 {
+                let mut original = Vec::with_capacity(20);
+                for _ in 0..20 {
+                    let mut v = Vec::with_capacity(3000);
+                    for _ in 0..750 {
+                        v.push(random::<u8>());
                     }
-                    j += 3;
-                    l += 1;
+                    for i in 0..750 {
+                        v.push((i % 255) as u8);
+                    }
+                    for _ in 0..750 {
+                        v.push(random::<u8>());
+                    }
+                    for i in 0..750 {
+                        v.push((i % 255) as u8);
+                    }
+                    original.push(v);
+                }
+
+                let mut compressor = Compressor::new();
+                let mut decompressor = Decompressor::new();
+                let mut compressed = Vec::with_capacity(20);
+                compressed.push(
+                    compressor
+                        .compress(original.last().unwrap(), &original[0], c_form)
+                        .unwrap(),
+                );
+                for i in 1..20 {
+                    compressed.push(
+                        compressor
+                            .compress(&original[i - 1], &original[i], c_form)
+                            .unwrap(),
+                    );
+                }
+
+                let mut buf = buf_from(original.last().unwrap(), c_form.channels().into());
+                for i in 0..20 {
+                    decompressor
+                        .decompress(&compressed[i], &mut buf, d_form)
+                        .unwrap();
+                    let mut j = 0;
+                    let mut l = 0;
+                    while j < 3000 {
+                        for k in 0..3 {
+                            assert_eq!(
+                                buf[j + l + k],
+                                original[i][j + k],
+                                "Failed at index: {}",
+                                j + k
+                            );
+                        }
+                        j += 3;
+                        l += !d_form.can_copy_directly_onto_wl_buffer() as usize;
+                    }
                 }
             }
         }
