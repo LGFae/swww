@@ -49,20 +49,18 @@ fn main() -> Result<(), String> {
         }
     }
 
-    if let Swww::Init { .. } | Swww::Img(_) | Swww::Restore(_) | Swww::Clear(_) = &swww {
-        let mut configured = false;
-        while !configured {
-            let socket = connect_to_socket(5, 100)?;
-            Request::Init.send(&socket)?;
-            let bytes = read_socket(&socket)?;
-            let answer = Answer::receive(&bytes);
-            if let ArchivedAnswer::Init(c) = answer {
-                configured = *c;
-            } else {
-                return Err("Daemon did not return Answer::Init, as expected".to_string());
-            }
-            std::thread::sleep(Duration::from_millis(1));
+    let mut configured = false;
+    while !configured {
+        let socket = connect_to_socket(5, 100)?;
+        Request::Init.send(&socket)?;
+        let bytes = read_socket(&socket)?;
+        let answer = Answer::receive(&bytes);
+        if let ArchivedAnswer::Init(c) = answer {
+            configured = *c;
+        } else {
+            return Err("Daemon did not return Answer::Init, as expected".to_string());
         }
+        std::thread::sleep(Duration::from_millis(1));
     }
 
     process_swww_args(&swww)?;
