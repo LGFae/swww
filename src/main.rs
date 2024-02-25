@@ -49,6 +49,10 @@ fn main() -> Result<(), String> {
         }
     }
 
+    if let Swww::ClearCache = &swww {
+        return cache::clean();
+    }
+
     let mut configured = false;
     while !configured {
         let socket = connect_to_socket(5, 100)?;
@@ -116,10 +120,7 @@ fn make_request(args: &Swww) -> Result<Option<Request>, String> {
             restore_from_cache(&requested_outputs)?;
             Ok(None)
         }
-        Swww::ClearCache => {
-            cache::clean()?;
-            Ok(None)
-        }
+        Swww::ClearCache => unreachable!("there is no request for clear-cache"),
         Swww::Img(img) => {
             let requested_outputs = split_cmdline_outputs(&img.outputs);
             let (dims, outputs) = get_dimensions_and_outputs(&requested_outputs)?;
