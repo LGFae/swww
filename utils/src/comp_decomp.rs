@@ -39,7 +39,12 @@ fn pack_bytes(cur: &[u8], goal: &[u8]) -> Box<[u8]> {
         while cur == goal {
             equals += 1;
             match iter.next() {
-                None => return v.into_boxed_slice(),
+                None => {
+                    if !v.is_empty() {
+                        v.push(0);
+                    }
+                    return v.into_boxed_slice();
+                }
                 Some((c, g)) => {
                     cur = c;
                     goal = g;
