@@ -217,7 +217,7 @@ pub type ImageRequest = (Transition, Box<[(Img, Box<[String]>)]>);
 pub enum Request {
     Animation(AnimationRequest),
     Clear(Clear),
-    Init,
+    Ping,
     Kill,
     Query,
     Img(ImageRequest),
@@ -272,7 +272,7 @@ pub enum Answer {
     Ok,
     Err(String),
     Info(Box<[BgInfo]>),
-    Init(bool),
+    Ping(bool),
 }
 
 impl Answer {

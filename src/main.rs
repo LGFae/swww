@@ -49,6 +49,20 @@ fn main() -> Result<(), String> {
         }
     }
 
+    let mut configured = false;
+    while !configured {
+        let socket = connect_to_socket(5, 100)?;
+        Request::Ping.send(&socket)?;
+        let bytes = read_socket(&socket)?;
+        let answer = Answer::receive(&bytes);
+        if let ArchivedAnswer::Ping(c) = answer {
+            configured = *c;
+        } else {
+            return Err("Daemon did not return Answer::Ping, as expected".to_string());
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
+
     process_swww_args(&swww)?;
 
     Ok(())
@@ -84,25 +98,8 @@ fn process_swww_args(args: &Swww) -> Result<(), String> {
                 ));
             }
         }
-        ArchivedAnswer::Init(configured) => {
-            let mut configured = *configured;
-            while !configured {
-                std::thread::sleep(Duration::from_millis(1));
-                let socket = connect_to_socket(5, 100)?;
-                Request::Init.send(&socket)?;
-                let bytes = read_socket(&socket)?;
-                let answer = Answer::receive(&bytes);
-                if let ArchivedAnswer::Init(c) = answer {
-                    configured = *c;
-                } else {
-                    return Err("Daemon did not return Answer::Init, as expected".to_string());
-                }
-            }
-            if let Swww::Init { no_cache, .. } = args {
-                if !*no_cache {
-                    restore_from_cache(&[])?;
-                }
-            }
+        ArchivedAnswer::Ping(_) => {
+            return Ok(());
         }
     }
     Ok(())
@@ -159,7 +156,12 @@ fn make_request(args: &Swww) -> Result<Option<Request>, String> {
                 )?)))
             }
         }
-        Swww::Init { .. } => Ok(Some(Request::Init)),
+        Swww::Init { no_cache, .. } => {
+            if !*no_cache {
+                restore_from_cache(&[])?;
+            }
+            Ok(None)
+        }
         Swww::Kill => Ok(Some(Request::Kill)),
         Swww::Query => Ok(Some(Request::Query)),
     }

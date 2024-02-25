@@ -309,7 +309,7 @@ impl Daemon {
                     Err(e) => Answer::Err(format!("failed to spawn `clear` thread: {e}")),
                 }
             }
-            ArchivedRequest::Init => Answer::Init(
+            ArchivedRequest::Ping => Answer::Ping(
                 self.wallpapers
                     .iter()
                     .all(|w| w.configured.load(std::sync::atomic::Ordering::Acquire)),
