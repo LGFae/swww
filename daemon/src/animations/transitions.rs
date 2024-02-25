@@ -14,34 +14,6 @@ use keyframe::{
     functions::BezierCurve, keyframes, mint::Vector2, num_traits::Pow, AnimationSequence,
 };
 
-macro_rules! change_cols {
-    ($step:ident, $old:ident, $new:ident, $done:ident) => {
-        for (old_col, new_col) in $old.iter_mut().zip($new) {
-            if old_col.abs_diff(*new_col) < $step {
-                *old_col = *new_col;
-            } else if *old_col > *new_col {
-                *old_col -= $step;
-                $done = false;
-            } else {
-                *old_col += $step;
-                $done = false;
-            }
-        }
-    };
-
-    ($step:ident, $old:ident, $new:ident) => {
-        for (old_col, new_col) in $old.iter_mut().zip($new) {
-            if old_col.abs_diff(*new_col) < $step {
-                *old_col = *new_col;
-            } else if *old_col > *new_col {
-                *old_col -= $step;
-            } else {
-                *old_col += $step;
-            }
-        }
-    };
-}
-
 pub(super) struct Transition {
     animation_tokens: Vec<AnimationToken>,
     wallpapers: Vec<Arc<Wallpaper>>,
@@ -139,20 +111,50 @@ impl Transition {
         let step = self.step;
         let mut now = Instant::now();
         let mut done = false;
-        while !done {
-            done = true;
-            for wallpaper in self.wallpapers.iter_mut() {
-                wallpaper.canvas_change(|canvas| {
-                    for (old, new) in canvas
-                        .chunks_exact_mut(self.color_channels)
-                        .zip(new_img.chunks_exact(3))
-                    {
-                        change_cols!(step, old, new, done);
-                    }
-                });
-                wallpaper.draw();
+        if self.color_channels == 4 {
+            while !done {
+                done = true;
+                for wallpaper in self.wallpapers.iter_mut() {
+                    wallpaper.canvas_change(|canvas| {
+                        for (old, new) in canvas.chunks_exact_mut(4).zip(new_img.chunks_exact(3)) {
+                            for (old, new) in old.iter_mut().zip(new) {
+                                if old.abs_diff(*new) < step {
+                                    *old = *new;
+                                } else if *old > *new {
+                                    *old -= step;
+                                    done = false;
+                                } else {
+                                    *old += step;
+                                    done = false;
+                                }
+                            }
+                        }
+                    });
+                    wallpaper.draw();
+                }
+                self.send_frame(&mut now);
             }
-            self.send_frame(&mut now);
+        } else {
+            while !done {
+                done = true;
+                for wallpaper in self.wallpapers.iter_mut() {
+                    wallpaper.canvas_change(|canvas| {
+                        for (old, new) in canvas.iter_mut().zip(new_img) {
+                            if old.abs_diff(*new) < step {
+                                *old = *new;
+                            } else if *old > *new {
+                                *old -= step;
+                                done = false;
+                            } else {
+                                *old += step;
+                                done = false;
+                            }
+                        }
+                    });
+                    wallpaper.draw();
+                }
+                self.send_frame(&mut now);
+            }
         }
     }
 
@@ -162,20 +164,9 @@ impl Transition {
 
         let mut now = Instant::now();
         while start.elapsed().as_secs_f64() < seq.duration() {
-            for wallpaper in self.wallpapers.iter_mut() {
-                wallpaper.canvas_change(|canvas| {
-                    canvas
-                        .par_chunks_exact_mut(self.color_channels)
-                        .zip(new_img.par_chunks_exact(3))
-                        .for_each(|(old_pix, new_pix)| {
-                            for (old_col, new_col) in old_pix.iter_mut().zip(new_pix) {
-                                *old_col =
-                                    (*old_col as f64 * (1.0 - step) + *new_col as f64 * step) as u8;
-                            }
-                        });
-                });
-                wallpaper.draw();
-            }
+            self.draw_all(new_img, |_, old_col, new_col| {
+                *old_col = (*old_col as f64 * (1.0 - step) + *new_col as f64 * step) as u8;
+            });
             self.send_frame(&mut now);
             step = seq.now() as f64;
             seq.advance_to(start.elapsed().as_secs_f64());
@@ -231,22 +222,13 @@ impl Transition {
         let step = self.step;
 
         while start.elapsed().as_secs_f64() < seq.duration() {
-            for wallpaper in self.wallpapers.iter_mut() {
-                wallpaper.canvas_change(|canvas| {
-                    canvas
-                        .par_chunks_exact_mut(self.color_channels)
-                        .zip(new_img.par_chunks_exact(3))
-                        .enumerate()
-                        .for_each(|(i, (old, new))| {
-                            let pix_x = i % width;
-                            let pix_y = height - i / width;
-                            if is_low(pix_x as f64, pix_y as f64, offset) {
-                                change_cols!(step, old, new);
-                            }
-                        });
-                });
-                wallpaper.draw();
-            }
+            self.draw_all(new_img, |i, old, new| {
+                let pix_x = i % width;
+                let pix_y = height - i / width;
+                if is_low(pix_x as f64, pix_y as f64, offset) {
+                    change_byte(step, old, new);
+                }
+            });
             self.send_frame(&mut now);
 
             offset = seq.now() as f64;
@@ -292,22 +274,13 @@ impl Transition {
         let step = self.step;
 
         while start.elapsed().as_secs_f64() < seq.duration() {
-            for wallpaper in self.wallpapers.iter_mut() {
-                wallpaper.canvas_change(|canvas| {
-                    canvas
-                        .par_chunks_exact_mut(self.color_channels)
-                        .zip(new_img.par_chunks_exact(3))
-                        .enumerate()
-                        .for_each(|(i, (old, new))| {
-                            let pix_x = i % width;
-                            let pix_y = height - i / width;
-                            if is_low(pix_x as f64, pix_y as f64, offset, circle_radius) {
-                                change_cols!(step, old, new);
-                            }
-                        });
-                });
-                wallpaper.draw();
-            }
+            self.draw_all(new_img, |i, old, new| {
+                let pix_x = i % width;
+                let pix_y = height - i / width;
+                if is_low(pix_x as f64, pix_y as f64, offset, circle_radius) {
+                    change_byte(step, old, new);
+                }
+            });
             self.send_frame(&mut now);
 
             offset = seq.now() as f64;
@@ -336,31 +309,21 @@ impl Transition {
         let (width, height) = (width as usize, height as usize);
         let (center_x, center_y) = (center_x as usize, center_y as usize);
 
+        let step = self.step;
         let (mut seq, start) = self.bezier_seq(0.0, dist_end);
         let mut now = Instant::now();
         while start.elapsed().as_secs_f64() < seq.duration() {
-            for wallpaper in self.wallpapers.iter_mut() {
-                wallpaper.canvas_change(|canvas| {
-                    canvas
-                        .par_chunks_exact_mut(self.color_channels)
-                        .zip(new_img.par_chunks_exact(3))
-                        .enumerate()
-                        .for_each(|(i, (old, new))| {
-                            let pix_x = i % width;
-                            let pix_y = height - i / width;
-                            let diff_x = pix_x.abs_diff(center_x);
-                            let diff_y = pix_y.abs_diff(center_y);
-                            let pix_center_dist = f32::sqrt((diff_x.pow(2) + diff_y.pow(2)) as f32);
-                            if pix_center_dist <= dist_center {
-                                let step = self
-                                    .step
-                                    .saturating_add((dist_center - pix_center_dist).log2() as u8);
-                                change_cols!(step, old, new);
-                            }
-                        });
-                });
-                wallpaper.draw();
-            }
+            self.draw_all(new_img, |i, old, new| {
+                let pix_x = i % width;
+                let pix_y = height - i / width;
+                let diff_x = pix_x.abs_diff(center_x);
+                let diff_y = pix_y.abs_diff(center_y);
+                let pix_center_dist = f32::sqrt((diff_x.pow(2) + diff_y.pow(2)) as f32);
+                if pix_center_dist <= dist_center {
+                    let step = step.saturating_add((dist_center - pix_center_dist).log2() as u8);
+                    change_byte(step, old, new);
+                }
+            });
             self.send_frame(&mut now);
 
             dist_center = seq.now();
@@ -387,31 +350,21 @@ impl Transition {
         let (width, height) = (width as usize, height as usize);
         let (center_x, center_y) = (center_x as usize, center_y as usize);
 
+        let step = self.step;
         let (mut seq, start) = self.bezier_seq(dist_center, 0.0);
         let mut now = Instant::now();
         while start.elapsed().as_secs_f64() < seq.duration() {
-            for wallpaper in self.wallpapers.iter_mut() {
-                wallpaper.canvas_change(|canvas| {
-                    canvas
-                        .par_chunks_exact_mut(self.color_channels)
-                        .zip(new_img.par_chunks_exact(3))
-                        .enumerate()
-                        .for_each(|(i, (old, new))| {
-                            let pix_x = i % width;
-                            let pix_y = height - i / width;
-                            let diff_x = pix_x.abs_diff(center_x);
-                            let diff_y = pix_y.abs_diff(center_y);
-                            let pix_center_dist = f32::sqrt((diff_x.pow(2) + diff_y.pow(2)) as f32);
-                            if pix_center_dist >= dist_center {
-                                let step = self
-                                    .step
-                                    .saturating_add((pix_center_dist - dist_center).log2() as u8);
-                                change_cols!(step, old, new);
-                            }
-                        });
-                });
-                wallpaper.draw();
-            }
+            self.draw_all(new_img, |i, old, new| {
+                let pix_x = i % width;
+                let pix_y = height - i / width;
+                let diff_x = pix_x.abs_diff(center_x);
+                let diff_y = pix_y.abs_diff(center_y);
+                let pix_center_dist = f32::sqrt((diff_x.pow(2) + diff_y.pow(2)) as f32);
+                if pix_center_dist >= dist_center {
+                    let step = step.saturating_add((pix_center_dist - dist_center).log2() as u8);
+                    change_byte(step, old, new);
+                }
+            });
             self.send_frame(&mut now);
 
             dist_center = seq.now();
@@ -419,5 +372,53 @@ impl Transition {
         }
         self.step = 4 + self.step / 4;
         self.simple(new_img)
+    }
+
+    /// Runs pixels_change_fn for every byte in the old img
+    #[inline(always)]
+    fn draw_all<F>(&mut self, new_img: &[u8], pixels_change_fn: F)
+    where
+        F: FnOnce(usize, &mut u8, &u8) + Copy + Send + Sync,
+    {
+        if self.color_channels == 4 {
+            for wallpaper in self.wallpapers.iter_mut() {
+                wallpaper.canvas_change(|canvas| {
+                    canvas
+                        .par_chunks_exact_mut(4)
+                        .zip(new_img.par_chunks_exact(3))
+                        .enumerate()
+                        .for_each(|(i, (old, new))| {
+                            for (old, new) in old.iter_mut().zip(new) {
+                                pixels_change_fn(i, old, new);
+                            }
+                        });
+                });
+                wallpaper.draw();
+            }
+        } else {
+            for wallpaper in self.wallpapers.iter_mut() {
+                wallpaper.canvas_change(|canvas| {
+                    canvas
+                        .par_iter_mut()
+                        .zip(new_img.par_iter())
+                        .enumerate()
+                        .for_each(|(i, (old, new))| {
+                            pixels_change_fn(i / 3, old, new);
+                        });
+                });
+                wallpaper.draw();
+            }
+        }
+    }
+}
+
+#[inline(always)]
+fn change_byte(step: u8, old: &mut u8, new: &u8) {
+    if old.abs_diff(*new) < step {
+        *old = *new;
+    } else if *old > *new {
+        *old -= step;
+    } else {
+        *old += step;
     }
 }
