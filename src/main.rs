@@ -3,7 +3,10 @@ use std::{os::unix::net::UnixStream, path::PathBuf, process::Stdio, time::Durati
 
 use utils::{
     cache,
-    ipc::{self, get_socket_path, read_socket, AnimationRequest, Answer, ArchivedAnswer, Request},
+    ipc::{
+        self, get_socket_path, read_socket, AnimationRequest, Answer, ArchivedAnswer,
+        ArchivedPixelFormat, Request,
+    },
 };
 
 mod imgproc;
@@ -123,11 +126,12 @@ fn make_request(args: &Swww) -> Result<Option<Request>, String> {
         Swww::ClearCache => unreachable!("there is no request for clear-cache"),
         Swww::Img(img) => {
             let requested_outputs = split_cmdline_outputs(&img.outputs);
-            let (dims, outputs) = get_dimensions_and_outputs(&requested_outputs)?;
+            let (format, dims, outputs) = get_format_dims_and_outputs(&requested_outputs)?;
             let imgbuf = ImgBuf::new(&img.path)?;
             if imgbuf.is_animated() {
                 match std::thread::scope::<_, Result<_, String>>(|s1| {
-                    let animations = s1.spawn(|| make_animation_request(img, &dims, &outputs));
+                    let animations =
+                        s1.spawn(|| make_animation_request(img, &dims, format, &outputs));
                     let first_frame = imgbuf
                         .into_frames()?
                         .next()
@@ -135,7 +139,7 @@ fn make_request(args: &Swww) -> Result<Option<Request>, String> {
                         .map_err(|e| format!("unable to decode first frame: {e}"))?;
 
                     let img_request =
-                        make_img_request(img, frame_to_rgb(first_frame), &dims, &outputs)?;
+                        make_img_request(img, frame_to_rgb(first_frame), format, &dims, &outputs)?;
                     let animations = animations.join().unwrap_or_else(|e| Err(format!("{e:?}")));
 
                     let socket = connect_to_socket(5, 100)?;
@@ -153,7 +157,7 @@ fn make_request(args: &Swww) -> Result<Option<Request>, String> {
             } else {
                 let img_raw = imgbuf.decode()?;
                 Ok(Some(Request::Img(make_img_request(
-                    img, img_raw, &dims, &outputs,
+                    img, img_raw, format, &dims, &outputs,
                 )?)))
             }
         }
@@ -171,38 +175,44 @@ fn make_request(args: &Swww) -> Result<Option<Request>, String> {
 fn make_img_request(
     img: &cli::Img,
     img_raw: image::RgbImage,
+    pixel_format: ArchivedPixelFormat,
     dims: &[(u32, u32)],
     outputs: &[Vec<String>],
 ) -> Result<ipc::ImageRequest, String> {
     let transition = make_transition(img);
     let mut unique_requests = Vec::with_capacity(dims.len());
     for (dim, outputs) in dims.iter().zip(outputs) {
-        unique_requests.push((
-            ipc::Img {
-                img: match img.resize {
-                    ResizeStrategy::No => img_pad(img_raw.clone(), *dim, &img.fill_color)?,
-                    ResizeStrategy::Crop => {
-                        img_resize_crop(img_raw.clone(), *dim, make_filter(&img.filter))?
-                    }
-                    ResizeStrategy::Fit => img_resize_fit(
-                        img_raw.clone(),
-                        *dim,
-                        make_filter(&img.filter),
-                        &img.fill_color,
-                    )?,
+        let path = match img.path.canonicalize() {
+            Ok(p) => p.to_string_lossy().to_string(),
+            Err(e) => {
+                if let Some("-") = img.path.to_str() {
+                    "STDIN".to_string()
+                } else {
+                    return Err(format!("failed no canonicalize image path: {e}"));
                 }
-                .into_boxed_slice(),
-                path: match img.path.canonicalize() {
-                    Ok(p) => p.to_string_lossy().to_string(),
-                    Err(e) => {
-                        if let Some("-") = img.path.to_str() {
-                            "STDIN".to_string()
-                        } else {
-                            return Err(format!("failed no canonicalize image path: {e}"));
-                        }
-                    }
-                },
-            },
+            }
+        };
+
+        let img = match img.resize {
+            ResizeStrategy::No => img_pad(img_raw.clone(), *dim, pixel_format, &img.fill_color)?,
+            ResizeStrategy::Crop => img_resize_crop(
+                img_raw.clone(),
+                *dim,
+                pixel_format,
+                make_filter(&img.filter),
+            )?,
+            ResizeStrategy::Fit => img_resize_fit(
+                img_raw.clone(),
+                *dim,
+                pixel_format,
+                make_filter(&img.filter),
+                &img.fill_color,
+            )?,
+        }
+        .into_boxed_slice();
+
+        unique_requests.push((
+            ipc::Img { img, path },
             outputs.to_owned().into_boxed_slice(),
         ));
     }
@@ -211,9 +221,9 @@ fn make_img_request(
 }
 
 #[allow(clippy::type_complexity)]
-fn get_dimensions_and_outputs(
+fn get_format_dims_and_outputs(
     requested_outputs: &[String],
-) -> Result<(Vec<(u32, u32)>, Vec<Vec<String>>), String> {
+) -> Result<(ArchivedPixelFormat, Vec<(u32, u32)>, Vec<Vec<String>>), String> {
     let mut outputs: Vec<Vec<String>> = Vec::new();
     let mut dims: Vec<(u32, u32)> = Vec::new();
     let mut imgs: Vec<ipc::BgImg> = Vec::new();
@@ -225,7 +235,9 @@ fn get_dimensions_and_outputs(
     let answer = Answer::receive(&bytes);
     match answer {
         ArchivedAnswer::Info(infos) => {
+            let mut format = ArchivedPixelFormat::Xrgb;
             for info in infos.iter() {
+                format = info.pixel_format;
                 let info_img = info.img.de();
                 let name = info.name.to_string();
                 if !requested_outputs.is_empty() && !requested_outputs.contains(&name) {
@@ -251,7 +263,7 @@ fn get_dimensions_and_outputs(
             if outputs.is_empty() {
                 Err("none of the requested outputs are valid".to_owned())
             } else {
-                Ok((dims, outputs))
+                Ok((format, dims, outputs))
             }
         }
         ArchivedAnswer::Err(e) => Err(format!("daemon error when sending query: {e}")),
@@ -262,6 +274,7 @@ fn get_dimensions_and_outputs(
 fn make_animation_request(
     img: &cli::Img,
     dims: &[(u32, u32)],
+    pixel_format: ArchivedPixelFormat,
     outputs: &[Vec<String>],
 ) -> Result<AnimationRequest, String> {
     let filter = make_filter(&img.filter);
@@ -286,6 +299,7 @@ fn make_animation_request(
             animation: compress_frames(
                 imgbuf.into_frames()?,
                 *dim,
+                pixel_format,
                 filter,
                 img.resize,
                 &img.fill_color,
@@ -389,7 +403,7 @@ fn is_daemon_running() -> Result<bool, String> {
 }
 
 fn restore_from_cache(requested_outputs: &[String]) -> Result<(), String> {
-    let (_, outputs) = get_dimensions_and_outputs(requested_outputs)?;
+    let (_, _, outputs) = get_format_dims_and_outputs(requested_outputs)?;
 
     for output in outputs.iter().flatten() {
         let img_path = utils::cache::get_previous_image_path(output)?;

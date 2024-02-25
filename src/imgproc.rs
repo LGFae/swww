@@ -14,7 +14,7 @@ use std::{
 
 use utils::{
     compression::{BitPack, Compressor},
-    ipc::{self, Coord, Position},
+    ipc::{self, ArchivedPixelFormat, Coord, Position},
 };
 
 use crate::cli::ResizeStrategy;
@@ -147,6 +147,7 @@ pub fn frame_to_rgb(frame: image::Frame) -> RgbImage {
 pub fn compress_frames(
     mut frames: Frames,
     dim: (u32, u32),
+    format: ArchivedPixelFormat,
     filter: FilterType,
     resize: ResizeStrategy,
     color: &[u8; 3],
@@ -159,9 +160,9 @@ pub fn compress_frames(
     let first_duration = first.delay().numer_denom_ms();
     let mut first_duration = Duration::from_millis((first_duration.0 / first_duration.1).into());
     let first_img = match resize {
-        ResizeStrategy::No => img_pad(frame_to_rgb(first), dim, color)?,
-        ResizeStrategy::Crop => img_resize_crop(frame_to_rgb(first), dim, filter)?,
-        ResizeStrategy::Fit => img_resize_fit(frame_to_rgb(first), dim, filter, color)?,
+        ResizeStrategy::No => img_pad(frame_to_rgb(first), dim, format, color)?,
+        ResizeStrategy::Crop => img_resize_crop(frame_to_rgb(first), dim, format, filter)?,
+        ResizeStrategy::Fit => img_resize_fit(frame_to_rgb(first), dim, format, filter, color)?,
     };
 
     let mut canvas: Option<Vec<u8>> = None;
@@ -170,9 +171,9 @@ pub fn compress_frames(
         let duration = Duration::from_millis((dur_num / dur_div).into());
 
         let img = match resize {
-            ResizeStrategy::No => img_pad(frame_to_rgb(frame), dim, color)?,
-            ResizeStrategy::Crop => img_resize_crop(frame_to_rgb(frame), dim, filter)?,
-            ResizeStrategy::Fit => img_resize_fit(frame_to_rgb(frame), dim, filter, color)?,
+            ResizeStrategy::No => img_pad(frame_to_rgb(frame), dim, format, color)?,
+            ResizeStrategy::Crop => img_resize_crop(frame_to_rgb(frame), dim, format, filter)?,
+            ResizeStrategy::Fit => img_resize_fit(frame_to_rgb(frame), dim, format, filter, color)?,
         };
 
         if let Some(canvas) = canvas.as_ref() {
@@ -219,8 +220,13 @@ pub fn make_filter(filter: &cli::Filter) -> fast_image_resize::FilterType {
 pub fn img_pad(
     mut img: RgbImage,
     dimensions: (u32, u32),
+    format: ArchivedPixelFormat,
     color: &[u8; 3],
 ) -> Result<Vec<u8>, String> {
+    let mut color = color.to_owned();
+    if format.must_swap_r_and_b_channels() {
+        color.swap(0, 2);
+    }
     let (padded_w, padded_h) = dimensions;
     let (padded_w, padded_h) = (padded_w as usize, padded_h as usize);
     let mut padded = Vec::with_capacity(padded_h * padded_w * 3);
@@ -239,9 +245,7 @@ pub fn img_pad(
     let raw_img = img.into_vec();
 
     for _ in 0..(((padded_h - img_h) / 2) * padded_w) {
-        padded.push(color[2]);
-        padded.push(color[1]);
-        padded.push(color[0]);
+        padded.extend(color);
     }
 
     // Calculate left and right border widths. `u32::div` rounds toward 0, so, if `img_w` is odd,
@@ -251,27 +255,23 @@ pub fn img_pad(
 
     for row in 0..img_h {
         for _ in 0..left_border_w {
-            padded.push(color[2]);
-            padded.push(color[1]);
-            padded.push(color[0]);
+            padded.extend(color);
         }
 
         for pixel in raw_img[(row * img_w * 3)..((row + 1) * img_w * 3)].chunks_exact(3) {
-            padded.push(pixel[2]);
-            padded.push(pixel[1]);
-            padded.push(pixel[0]);
+            if format.must_swap_r_and_b_channels() {
+                padded.extend(pixel.iter().rev());
+            } else {
+                padded.extend(pixel);
+            }
         }
         for _ in 0..right_border_w {
-            padded.push(color[2]);
-            padded.push(color[1]);
-            padded.push(color[0]);
+            padded.extend(color);
         }
     }
 
     while padded.len() < (padded_h * padded_w * 3) {
-        padded.push(color[2]);
-        padded.push(color[1]);
-        padded.push(color[0]);
+        padded.extend(color);
     }
 
     Ok(padded)
@@ -290,6 +290,7 @@ fn rgb_to_brg(rgb: &mut [u8]) {
 pub fn img_resize_fit(
     img: RgbImage,
     dimensions: (u32, u32),
+    format: ArchivedPixelFormat,
     filter: FilterType,
     padding_color: &[u8; 3],
 ) -> Result<Vec<u8>, String> {
@@ -298,7 +299,7 @@ pub fn img_resize_fit(
     if (img_w, img_h) != (width, height) {
         // if our image is already scaled to fit, skip resizing it and just pad it directly
         if img_w == width || img_h == height {
-            return img_pad(img, dimensions, padding_color);
+            return img_pad(img, dimensions, format, padding_color);
         }
 
         let ratio = width as f32 / height as f32;
@@ -338,13 +339,14 @@ pub fn img_resize_fit(
         img_pad(
             image::RgbImage::from_raw(trg_w, trg_h, dst.into_vec()).unwrap(),
             dimensions,
+            format,
             padding_color,
         )
     } else {
         let mut res = img.into_vec();
-        // The ARGB is 'little endian', so here we must  put the order
-        // of bytes 'in reverse', so it needs to be BGRA.
-        rgb_to_brg(&mut res);
+        if format.must_swap_r_and_b_channels() {
+            rgb_to_brg(&mut res);
+        }
         Ok(res)
     }
 }
@@ -352,6 +354,7 @@ pub fn img_resize_fit(
 pub fn img_resize_crop(
     img: RgbImage,
     dimensions: (u32, u32),
+    format: ArchivedPixelFormat,
     filter: FilterType,
 ) -> Result<Vec<u8>, String> {
     let (width, height) = dimensions;
@@ -387,9 +390,9 @@ pub fn img_resize_crop(
         img.into_vec()
     };
 
-    // The ARGB is 'little endian', so here we must  put the order
-    // of bytes 'in reverse', so it needs to be BGRA.
-    rgb_to_brg(&mut resized_img);
+    if format.must_swap_r_and_b_channels() {
+        rgb_to_brg(&mut resized_img);
+    }
 
     Ok(resized_img)
 }

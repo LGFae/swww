@@ -29,7 +29,8 @@ use std::{
 
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState, Region},
-    delegate_compositor, delegate_layer, delegate_output, delegate_registry, delegate_shm,
+    delegate_compositor, delegate_layer, delegate_output, delegate_registry,
+    globals::GlobalData,
     output::{OutputHandler, OutputState},
     registry::{ProvidesRegistryState, RegistryState},
     registry_handlers,
@@ -42,11 +43,16 @@ use smithay_client_toolkit::{
 
 use wayland_client::{
     globals::{registry_queue_init, GlobalList},
-    protocol::{wl_buffer::WlBuffer, wl_output, wl_surface},
+    protocol::{
+        wl_buffer::WlBuffer,
+        wl_output,
+        wl_shm::{self, WlShm},
+        wl_surface,
+    },
     Connection, Dispatch, QueueHandle,
 };
 
-use utils::ipc::{get_socket_path, Answer, ArchivedRequest, BgInfo, Request};
+use utils::ipc::{get_socket_path, Answer, ArchivedRequest, BgInfo, PixelFormat, Request};
 
 use animations::Animator;
 
@@ -64,8 +70,28 @@ fn should_daemon_exit() -> bool {
 }
 
 static POLL_WAKER: OnceLock<RawFd> = OnceLock::new();
+static WL_SHM_FORMAT: OnceLock<wl_shm::Format> = OnceLock::new();
+static PIXEL_FORMAT: OnceLock<PixelFormat> = OnceLock::new();
 
+#[inline]
+pub fn wl_shm_format() -> wl_shm::Format {
+    debug_assert!(WL_SHM_FORMAT.get().is_some());
+    // SAFETY: this is safe because we initialize it in Daemon::new, before we ever call this in
+    // the wallpaper structs
+    *unsafe { WL_SHM_FORMAT.get().unwrap_unchecked() }
+}
+
+#[inline]
+pub fn pixel_format() -> PixelFormat {
+    debug_assert!(PIXEL_FORMAT.get().is_some());
+    // SAFETY: this is safe because we initialize it in Daemon::new, before we ever call this in
+    // the wallpaper structs
+    *unsafe { PIXEL_FORMAT.get().unwrap_unchecked() }
+}
+
+#[inline]
 pub fn wake_poll() {
+    debug_assert!(POLL_WAKER.get().is_some());
     if let Err(e) = nix::unistd::write(*unsafe { POLL_WAKER.get().unwrap_unchecked() }, &[0]) {
         error!("failed to write to pipe file descriptor: {e}");
     }
@@ -234,6 +260,8 @@ struct Daemon {
     registry_state: RegistryState,
     output_state: OutputState,
     shm: Shm,
+    pixel_format: PixelFormat,
+    shm_format: wl_shm::Format,
 
     // swww stuff
     wallpapers: Vec<Arc<Wallpaper>>,
@@ -252,14 +280,19 @@ impl Daemon {
 
         let shm = Shm::bind(globals, qh).expect("wl_shm is not available");
 
+        let pixel_format = PixelFormat::Xrgb;
+        let shm_format = wl_shm::Format::Xrgb8888;
+
         Self {
+            layer_shell,
             // Outputs may be hotplugged at runtime, therefore we need to setup a registry state to
             // listen for Outputs.
             registry_state: RegistryState::new(globals),
             output_state: OutputState::new(globals, qh),
             compositor_state,
             shm,
-            layer_shell,
+            pixel_format,
+            shm_format,
 
             wallpapers: Vec::new(),
             animator: Animator::new(),
@@ -350,6 +383,7 @@ impl Daemon {
                                 .unwrap_or((0, 0)),
                             scale_factor: info.scale_factor,
                             img: wallpaper.get_img_info(),
+                            pixel_format: pixel_format(),
                         });
                     }
                 }
@@ -435,6 +469,11 @@ impl OutputHandler for Daemon {
         qh: &QueueHandle<Self>,
         output: wl_output::WlOutput,
     ) {
+        if PIXEL_FORMAT.get().is_none() {
+            assert!(PIXEL_FORMAT.set(self.pixel_format).is_ok());
+            assert!(WL_SHM_FORMAT.set(self.shm_format).is_ok());
+            log::info!("Selected wl_shm format: {:?}", self.shm_format);
+        }
         if let Some(output_info) = self.output_state.info(&output) {
             let surface = self.compositor_state.create_surface(qh);
 
@@ -526,6 +565,44 @@ impl OutputHandler for Daemon {
     }
 }
 
+impl Dispatch<WlShm, GlobalData> for Daemon {
+    fn event(
+        state: &mut Self,
+        _proxy: &WlShm,
+        event: <WlShm as wayland_client::Proxy>::Event,
+        _data: &GlobalData,
+        _conn: &Connection,
+        _qhandle: &QueueHandle<Self>,
+    ) {
+        match event {
+            wl_shm::Event::Format { format: wenum } => {
+                match wenum {
+                    wayland_client::WEnum::Value(format) => {
+                        //if format == wl_shm::Format::Bgr888 {
+                        //    shm_format = wl_shm::Format::Bgr888;
+                        //    pixel_format = PixelFormat::Brg;
+                        //    break;
+                        //} else if format == wl_shm::Format::Rgb888 {
+                        //    shm_format = wl_shm::Format::Rgb888;
+                        //    pixel_format = PixelFormat::Rgb;
+                        /*} else*/
+                        if format == wl_shm::Format::Xbgr8888
+                            && state.pixel_format == PixelFormat::Xrgb
+                        {
+                            state.shm_format = wl_shm::Format::Xbgr8888;
+                            state.pixel_format = PixelFormat::Xbgr;
+                        }
+                    }
+                    wayland_client::WEnum::Unknown(v) => {
+                        error!("Received unknown shm format number {v} from server")
+                    }
+                }
+            }
+            e => warn!("Unhandled WlShm event: {e:?}"),
+        }
+    }
+}
+
 impl ShmHandler for Daemon {
     fn shm_state(&mut self) -> &mut Shm {
         &mut self.shm
@@ -578,10 +655,7 @@ impl Dispatch<WlBuffer, Arc<AtomicBool>> for Daemon {
 
 delegate_compositor!(Daemon);
 delegate_output!(Daemon);
-delegate_shm!(Daemon);
-
 delegate_layer!(Daemon);
-
 delegate_registry!(Daemon);
 
 impl ProvidesRegistryState for Daemon {

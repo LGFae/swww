@@ -4,10 +4,7 @@ use std::sync::{
 };
 
 use smithay_client_toolkit::shm::{raw::RawPool, Shm};
-use wayland_client::{
-    protocol::{wl_buffer::WlBuffer, wl_shm},
-    QueueHandle,
-};
+use wayland_client::{protocol::wl_buffer::WlBuffer, QueueHandle};
 
 use crate::Daemon;
 
@@ -53,7 +50,7 @@ impl BumpPool {
                 width,
                 height,
                 width * 4,
-                wl_shm::Format::Xrgb8888,
+                crate::wl_shm_format(),
                 released.clone(),
                 qh,
             ),
@@ -99,7 +96,7 @@ impl BumpPool {
                 self.width,
                 self.height,
                 self.width * 4,
-                wl_shm::Format::Xrgb8888,
+                crate::wl_shm_format(),
                 released.clone(),
                 qh,
             ),
@@ -165,7 +162,7 @@ impl BumpPool {
                 width,
                 height,
                 width * 4,
-                wl_shm::Format::Xrgb8888,
+                crate::wl_shm_format(),
                 released.clone(),
                 qh,
             ),
