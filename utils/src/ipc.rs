@@ -7,7 +7,7 @@ use std::{
     time::Duration,
 };
 
-use crate::{cache, comp_decomp::BitPack};
+use crate::{cache, compression::BitPack};
 
 #[derive(PartialEq, Archive, Serialize)]
 #[archive_attr(derive(Clone))]
