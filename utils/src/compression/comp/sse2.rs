@@ -1,9 +1,13 @@
+/// # Safety
+///
+/// s1.len() must be equal to s2.len()
 #[inline]
 #[target_feature(enable = "sse2")]
 unsafe fn count_equals(s1: &[u8], s2: &[u8], mut i: usize) -> usize {
     use std::arch::x86_64 as intr;
     let mut equals = 0;
     while i + 15 < s1.len() {
+        // SAFETY: we exit the while loop when there are less than 16 bytes left we read
         let a = intr::_mm_loadu_si128(s1.as_ptr().add(i).cast());
         let b = intr::_mm_loadu_si128(s2.as_ptr().add(i).cast());
         let cmp = intr::_mm_cmpeq_epi8(a, b);
@@ -17,6 +21,7 @@ unsafe fn count_equals(s1: &[u8], s2: &[u8], mut i: usize) -> usize {
     }
 
     while i + 2 < s1.len() {
+        // SAFETY: we exit the while loop when there are less than 3 bytes left we read
         let a = unsafe { s1.get_unchecked(i..i + 3) };
         let b = unsafe { s2.get_unchecked(i..i + 3) };
         if a != b {
@@ -28,12 +33,16 @@ unsafe fn count_equals(s1: &[u8], s2: &[u8], mut i: usize) -> usize {
     equals
 }
 
+/// # Safety
+///
+/// s1.len() must be equal to s2.len()
 #[inline]
 #[target_feature(enable = "sse2")]
 unsafe fn count_different(s1: &[u8], s2: &[u8], mut i: usize) -> usize {
     use std::arch::x86_64 as intr;
     let mut diff = 0;
     while i + 15 < s1.len() {
+        // SAFETY: we exit the while loop when there are less than 16 bytes left we read
         let a = intr::_mm_loadu_si128(s1.as_ptr().add(i).cast());
         let b = intr::_mm_loadu_si128(s2.as_ptr().add(i).cast());
         let cmp = intr::_mm_cmpeq_epi8(a, b);
@@ -50,6 +59,7 @@ unsafe fn count_different(s1: &[u8], s2: &[u8], mut i: usize) -> usize {
     }
 
     while i + 2 < s1.len() {
+        // SAFETY: we exit the while loop when there are less than 3 bytes left we read
         let a = unsafe { s1.get_unchecked(i..i + 3) };
         let b = unsafe { s2.get_unchecked(i..i + 3) };
         if a == b {
@@ -61,12 +71,16 @@ unsafe fn count_different(s1: &[u8], s2: &[u8], mut i: usize) -> usize {
     diff
 }
 
+/// # Safety
+///
+/// s1.len() must be equal to s2.len()
 #[inline]
 #[target_feature(enable = "sse2")]
 pub(super) unsafe fn pack_bytes(cur: &[u8], goal: &[u8], v: &mut Vec<u8>) {
     let mut i = 0;
     while i < cur.len() {
-        let equals = count_equals(cur, goal, i);
+        // SAFETY: count_equals demands the same invariants as the current function
+        let equals = unsafe { count_equals(cur, goal, i) };
         i += equals * 3;
 
         if i >= cur.len() {
@@ -74,7 +88,8 @@ pub(super) unsafe fn pack_bytes(cur: &[u8], goal: &[u8], v: &mut Vec<u8>) {
         }
 
         let start = i;
-        let diffs = count_different(cur, goal, i);
+        // SAFETY: count_equals demands the same invariants as the current function
+        let diffs = unsafe { count_different(cur, goal, i) };
         i += diffs * 3;
 
         let j = v.len() + equals / 255;

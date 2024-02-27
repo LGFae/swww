@@ -4,6 +4,8 @@
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 pub(super) mod ssse3;
 
+/// diff must be a slice produced by a BitPack
+/// buf must have the EXACT expected size by the BitPack
 #[inline(always)]
 pub(super) fn unpack_bytes(buf: &mut [u8], diff: &[u8]) {
     // use the most efficient implementation available:
@@ -40,6 +42,7 @@ pub(super) fn unpack_bytes(buf: &mut [u8], diff: &[u8]) {
         diff_idx += 1;
 
         for _ in 0..to_cpy {
+            // it is much faster to use this assertion for testing than miri
             debug_assert!(
                 diff_idx + 3 < diff.len(),
                 "diff_idx + 3: {}, diff.len(): {}",

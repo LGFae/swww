@@ -15,7 +15,9 @@ mod decomp;
 const LZ4_MAX_INPUT_SIZE: usize = 0x7E000000;
 
 extern "C" {
-    /// This is guaranteed to succeed if dst_cap >= LZ4_compressBound
+    /// # Safety
+    ///
+    /// This is guaranteed to succeed if `dst_cap >= LZ4_compressBound`.
     fn LZ4_compress_HC(
         src: *const c_char,
         dst: *mut c_char,
@@ -24,7 +26,9 @@ extern "C" {
         comp_level: c_int,
     ) -> c_int;
 
-    /// Only fails when src is malformed, or dst_cap is insufficient
+    /// # Safety
+    ///
+    /// Fails when src is malformed, or dst_cap is insufficient.
     fn LZ4_decompress_safe(
         src: *const c_char,
         dst: *mut c_char,
@@ -32,7 +36,9 @@ extern "C" {
         dst_cap: c_int,
     ) -> c_int;
 
-    /// Only works for input_size <= LZ4_MAX_INPUT_SIZE
+    /// # Safety
+    ///
+    /// Only works for input_size <= LZ4_MAX_INPUT_SIZE.
     fn LZ4_compressBound(input_size: c_int) -> c_int;
 }
 
@@ -81,7 +87,8 @@ impl Compressor {
         );
 
         self.buf.clear();
-        pack_bytes(prev, cur, &mut self.buf);
+        // SAFETY: the above assertion ensures prev.len() and cur.len() are equal, as needed
+        unsafe { pack_bytes(prev, cur, &mut self.buf) }
 
         if self.buf.is_empty() {
             return None;
@@ -93,8 +100,10 @@ impl Compressor {
             "frame is too large! cannot compress with LZ4!"
         );
 
+        // SAFETY: the above assertion ensures this will never fail
         let size = unsafe { LZ4_compressBound(self.buf.len() as c_int) } as usize;
         let mut v = vec![0; size];
+        // SAFETY: we've ensured above that size >= LZ4_compressBound, so this should always work
         let n = unsafe {
             LZ4_compress_HC(
                 self.buf.as_ptr().cast(),
@@ -181,7 +190,7 @@ impl Decompressor {
         }
         self.ensure_capacity(bitpack.compressed_size as usize);
 
-        // Note: errors will never happen because BitPacked is *always* only produced
+        // SAFETY: errors will never happen because BitPacked is *always* only produced
         // with correct lz4 compression
         unsafe {
             LZ4_decompress_safe(
@@ -192,6 +201,8 @@ impl Decompressor {
             );
         }
 
+        // SAFETY: the call to self.ensure_capacity guarantees the pointer has the necessary size
+        // to hold all the data
         let v = unsafe {
             std::slice::from_raw_parts_mut(self.ptr.as_ptr(), bitpack.compressed_size as usize)
         };
@@ -227,7 +238,7 @@ impl Decompressor {
             .unwrap();
         self.ensure_capacity(cap as usize);
 
-        // Note: errors will never happen because BitPacked is *always* only produced
+        // SAFETY: errors will never happen because BitPacked is *always* only produced
         // with correct lz4 compression
         unsafe {
             LZ4_decompress_safe(
@@ -238,6 +249,8 @@ impl Decompressor {
             );
         }
 
+        // SAFETY: the call to self.ensure_capacity guarantees the pointer has the necessary size
+        // to hold all the data
         let v = unsafe { std::slice::from_raw_parts_mut(self.ptr.as_ptr(), cap as usize) };
         unpack_bytes(buf, v);
 

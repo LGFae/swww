@@ -20,11 +20,14 @@
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 pub(super) mod sse2;
 
-/// SAFETY: s1.len() must be equal to s2.len()
+/// # Safety
+///
+/// s1.len() must be equal to s2.len()
 #[inline(always)]
-pub(super) unsafe fn count_equals(s1: &[u8], s2: &[u8], mut i: usize) -> usize {
+unsafe fn count_equals(s1: &[u8], s2: &[u8], mut i: usize) -> usize {
     let mut equals = 0;
     while i + 7 < s1.len() {
+        // SAFETY: we exit the while loop when there are less than 8 bytes left we read
         let a: u64 = unsafe { s1.as_ptr().add(i).cast::<u64>().read_unaligned() };
         let b: u64 = unsafe { s2.as_ptr().add(i).cast::<u64>().read_unaligned() };
         let cmp = a ^ b;
@@ -37,6 +40,7 @@ pub(super) unsafe fn count_equals(s1: &[u8], s2: &[u8], mut i: usize) -> usize {
     }
 
     while i + 2 < s1.len() {
+        // SAFETY: we exit the while loop when there are less than 3 bytes left we read
         let a = unsafe { s1.get_unchecked(i..i + 3) };
         let b = unsafe { s2.get_unchecked(i..i + 3) };
         if a != b {
@@ -48,11 +52,14 @@ pub(super) unsafe fn count_equals(s1: &[u8], s2: &[u8], mut i: usize) -> usize {
     equals
 }
 
-/// SAFETY: s1.len() must be equal to s2.len()
+/// # Safety
+///
+/// s1.len() must be equal to s2.len()
 #[inline(always)]
-pub(super) unsafe fn count_different(s1: &[u8], s2: &[u8], mut i: usize) -> usize {
+unsafe fn count_different(s1: &[u8], s2: &[u8], mut i: usize) -> usize {
     let mut different = 0;
     while i + 2 < s1.len() {
+        // SAFETY: we exit the while loop when there are less than 3 bytes left we read
         let a = unsafe { s1.get_unchecked(i..i + 3) };
         let b = unsafe { s2.get_unchecked(i..i + 3) };
         if a == b {
@@ -65,8 +72,12 @@ pub(super) unsafe fn count_different(s1: &[u8], s2: &[u8], mut i: usize) -> usiz
 }
 
 /// This calculates the difference between the current(cur) frame and the next(goal)
+///
+/// # Safety
+///
+/// cur.len() must be equal to goal.len()
 #[inline(always)]
-pub(super) fn pack_bytes(cur: &[u8], goal: &[u8], v: &mut Vec<u8>) {
+pub(super) unsafe fn pack_bytes(cur: &[u8], goal: &[u8], v: &mut Vec<u8>) {
     // use the most efficient implementation available:
     #[cfg(not(test))] // when testing, we want to use the specific implementation
     {
@@ -78,6 +89,7 @@ pub(super) fn pack_bytes(cur: &[u8], goal: &[u8], v: &mut Vec<u8>) {
 
     let mut i = 0;
     while i < cur.len() {
+        // SAFETY: count_equals demands the same invariants as the current function
         let equals = unsafe { count_equals(cur, goal, i) };
         i += equals * 3;
 
@@ -86,6 +98,7 @@ pub(super) fn pack_bytes(cur: &[u8], goal: &[u8], v: &mut Vec<u8>) {
         }
 
         let start = i;
+        // SAFETY: count_different demands the same invariants as the current function
         let diffs = unsafe { count_different(cur, goal, i) };
         i += diffs * 3;
 
