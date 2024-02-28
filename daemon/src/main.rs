@@ -76,22 +76,22 @@ static PIXEL_FORMAT: OnceLock<PixelFormat> = OnceLock::new();
 #[inline]
 pub fn wl_shm_format() -> wl_shm::Format {
     debug_assert!(WL_SHM_FORMAT.get().is_some());
-    // SAFETY: this is safe because we initialize it in Daemon::new, before we ever call this in
-    // the wallpaper structs
-    *unsafe { WL_SHM_FORMAT.get().unwrap_unchecked() }
+    *WL_SHM_FORMAT.get().unwrap_or(&wl_shm::Format::Xrgb8888)
 }
 
 #[inline]
 pub fn pixel_format() -> PixelFormat {
     debug_assert!(PIXEL_FORMAT.get().is_some());
-    // SAFETY: this is safe because we initialize it in Daemon::new, before we ever call this in
-    // the wallpaper structs
-    *unsafe { PIXEL_FORMAT.get().unwrap_unchecked() }
+    *PIXEL_FORMAT.get().unwrap_or(&PixelFormat::Xrgb)
 }
 
 #[inline]
 pub fn wake_poll() {
     debug_assert!(POLL_WAKER.get().is_some());
+
+    // SAFETY: POLL_WAKER is set up in setup_signals_and_pipe, which is called early in main
+    // and panics if it fails. By the time anyone calls this function, POLL_WAKER will certainly
+    // already have been initialized.
     if let Err(e) = nix::unistd::write(*unsafe { POLL_WAKER.get().unwrap_unchecked() }, &[0]) {
         error!("failed to write to pipe file descriptor: {e}");
     }
