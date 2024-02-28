@@ -207,17 +207,22 @@ impl Decompressor {
                 bitpack.expected_buf_size
             ));
         }
+
         self.ensure_capacity(bitpack.compressed_size as usize);
 
         // SAFETY: errors will never happen because BitPacked is *always* only produced
-        // with correct lz4 compression
-        unsafe {
+        // with correct lz4 compression, and ptr has the necessary capacity
+        let size = unsafe {
             LZ4_decompress_safe(
                 bitpack.inner.as_ptr() as _,
                 self.ptr.as_ptr() as _,
                 bitpack.inner.len() as c_int,
                 bitpack.compressed_size as c_int,
-            );
+            )
+        };
+
+        if size != bitpack.compressed_size {
+            return Err("BitPack is malformed!".to_string());
         }
 
         // SAFETY: the call to self.ensure_capacity guarantees the pointer has the necessary size
@@ -256,22 +261,26 @@ impl Decompressor {
                 expected_len
             ));
         }
-
         let cap: i32 = archived
             .compressed_size
             .deserialize(&mut rkyv::Infallible)
             .unwrap();
+
         self.ensure_capacity(cap as usize);
 
         // SAFETY: errors will never happen because BitPacked is *always* only produced
-        // with correct lz4 compression
-        unsafe {
+        // with correct lz4 compression, and ptr has the necessary capacity
+        let size = unsafe {
             LZ4_decompress_safe(
                 archived.inner.as_ptr() as _,
                 self.ptr.as_ptr() as _,
                 archived.inner.len() as c_int,
                 cap as c_int,
-            );
+            )
+        };
+
+        if size != cap {
+            return Err("BitPack is malformed!".to_string());
         }
 
         // SAFETY: the call to self.ensure_capacity guarantees the pointer has the necessary size
