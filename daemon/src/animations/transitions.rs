@@ -275,6 +275,7 @@ impl Transition {
             let x = pix_x - center.0 as f64;
             let y = pix_y - center.1 as f64;
             let res = x * a + y * b + offset;
+
             res >= radius.pow(2)
         };
 
