@@ -1,5 +1,5 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use utils::comp_decomp::BitPack;
+use utils::compression::{Compressor, Decompressor};
 
 fn generate_data() -> (Box<[u8]>, Box<[u8]>) {
     let v1 = vec![120; 1920 * 1080 * 3];
@@ -39,22 +39,20 @@ fn buf_from(slice: &[u8]) -> Vec<u8> {
 pub fn compression_and_decompression(c: &mut Criterion) {
     let (prev, cur) = generate_data();
 
+    let mut compressor = Compressor::new();
     let mut comp = c.benchmark_group("compression");
     comp.bench_function("Full", |b| {
-        b.iter(|| {
-            black_box(BitPack::pack(&prev, &cur).ok());
-        })
+        b.iter(|| black_box(compressor.compress(&prev, &cur).is_some()))
     });
     comp.finish();
 
     let mut decomp = c.benchmark_group("decompression");
-    let bitpack = BitPack::pack(&prev, &cur).unwrap();
+    let bitpack = compressor.compress(&prev, &cur).unwrap();
     let mut canvas = buf_from(&prev);
 
+    let mut decompressor = Decompressor::new();
     decomp.bench_function("Full", |b| {
-        b.iter(|| {
-            black_box(bitpack.unpack(&mut canvas));
-        })
+        b.iter(|| black_box(decompressor.decompress(&bitpack, &mut canvas)))
     });
 
     decomp.finish();

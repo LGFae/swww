@@ -1,13 +1,15 @@
 [package]
 name = "utils"
-version = "0.8.1-master"
+version = "0.8.2-master"
 authors = ["Leonardo Gibrowski Faé <leonardo.fae44@gmail.com>"]
 edition = "2021"
+license-file = "../LICENSE"
 
 [dependencies]
-lazy_static = "1.4"
-lzzzz = "=1.0.4"
 rkyv = "0.7"
+
+[build-dependencies]
+pkg-config = "0.3"
 
 [dev-dependencies]
 rand = "0.8"

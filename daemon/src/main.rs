@@ -3,6 +3,7 @@
 //! of `expects`, **on purpose**, because we **want** to unwind and exit when they happen
 
 mod animations;
+pub mod bump_pool;
 mod wallpaper;
 use log::{debug, error, info, warn, LevelFilter};
 use nix::{
@@ -22,7 +23,7 @@ use std::{
     },
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Mutex, OnceLock,
+        Arc, OnceLock,
     },
 };
 
@@ -36,13 +37,13 @@ use smithay_client_toolkit::{
         wlr_layer::{Layer, LayerShell, LayerShellHandler, LayerSurface, LayerSurfaceConfigure},
         WaylandSurface,
     },
-    shm::{slot::SlotPool, Shm, ShmHandler},
+    shm::{Shm, ShmHandler},
 };
 
 use wayland_client::{
     globals::{registry_queue_init, GlobalList},
-    protocol::{wl_output, wl_surface},
-    Connection, QueueHandle,
+    protocol::{wl_buffer::WlBuffer, wl_output, wl_surface},
+    Connection, Dispatch, QueueHandle,
 };
 
 use utils::ipc::{get_socket_path, Answer, ArchivedRequest, BgInfo, Request};
@@ -233,7 +234,6 @@ struct Daemon {
     registry_state: RegistryState,
     output_state: OutputState,
     shm: Shm,
-    pool: Arc<Mutex<SlotPool>>,
 
     // swww stuff
     wallpapers: Vec<Arc<Wallpaper>>,
@@ -251,7 +251,6 @@ impl Daemon {
         let layer_shell = LayerShell::bind(globals, qh).expect("layer shell is not available");
 
         let shm = Shm::bind(globals, qh).expect("wl_shm is not available");
-        let pool = SlotPool::new(256 * 256 * 4, &shm).expect("failed to create SlotPool");
 
         Self {
             // Outputs may be hotplugged at runtime, therefore we need to setup a registry state to
@@ -260,7 +259,6 @@ impl Daemon {
             output_state: OutputState::new(globals, qh),
             compositor_state,
             shm,
-            pool: Arc::new(Mutex::new(pool)),
             layer_shell,
 
             wallpapers: Vec::new(),
@@ -296,7 +294,7 @@ impl Daemon {
                     .name("clear".to_string())
                     .spawn(move || {
                         for wallpaper in &wallpapers {
-                            wallpaper.inc_animation_id();
+                            wallpaper.stop_animations();
                         }
                         for wallpaper in wallpapers {
                             wallpaper.set_img_info(utils::ipc::BgImg::Color(color));
@@ -309,7 +307,7 @@ impl Daemon {
                     Err(e) => Answer::Err(format!("failed to spawn `clear` thread: {e}")),
                 }
             }
-            ArchivedRequest::Init => Answer::Init(
+            ArchivedRequest::Ping => Answer::Ping(
                 self.wallpapers
                     .iter()
                     .all(|w| w.configured.load(std::sync::atomic::Ordering::Acquire)),
@@ -325,7 +323,7 @@ impl Daemon {
                 for img in imgs.iter() {
                     let mut wallpapers = self.find_wallpapers_by_names(&img.1);
                     for wallpaper in wallpapers.iter_mut() {
-                        wallpaper.inc_animation_id();
+                        wallpaper.stop_animations();
                     }
                     used_wallpapers.push(wallpapers);
                 }
@@ -405,11 +403,11 @@ impl CompositorHandler for Daemon {
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
         surface: &wl_surface::WlSurface,
-        _time: u32,
+        time: u32,
     ) {
         for wallpaper in self.wallpapers.iter_mut() {
             if wallpaper.has_surface(surface) {
-                wallpaper.draw();
+                wallpaper.frame_callback_completed(time);
                 return;
             }
         }
@@ -478,7 +476,8 @@ impl OutputHandler for Daemon {
             self.wallpapers.push(Arc::new(Wallpaper::new(
                 output_info,
                 layer_surface,
-                Arc::clone(&self.pool),
+                &self.shm,
+                qh,
             )));
             debug!("Output count: {}", self.wallpapers.len());
         }
@@ -555,6 +554,24 @@ impl LayerShellHandler for Daemon {
                     .store(true, std::sync::atomic::Ordering::Release);
                 break;
             }
+        }
+    }
+}
+
+impl Dispatch<WlBuffer, Arc<AtomicBool>> for Daemon {
+    fn event(
+        _state: &mut Self,
+        _proxy: &WlBuffer,
+        event: <WlBuffer as wayland_client::Proxy>::Event,
+        data: &Arc<AtomicBool>,
+        _conn: &Connection,
+        _qhandle: &QueueHandle<Self>,
+    ) {
+        match event {
+            wayland_client::protocol::wl_buffer::Event::Release => {
+                data.store(true, Ordering::Release);
+            }
+            _ => log::error!("There should be no buffer events other than Release"),
         }
     }
 }

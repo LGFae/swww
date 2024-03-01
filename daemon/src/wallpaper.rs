@@ -4,7 +4,7 @@ use std::{
     num::NonZeroI32,
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
-        Arc, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard,
+        Arc, Condvar, Mutex, RwLock,
     },
 };
 
@@ -14,10 +14,12 @@ use smithay_client_toolkit::{
         wlr_layer::{Anchor, KeyboardInteractivity, LayerSurface},
         WaylandSurface,
     },
-    shm::slot::{Slot, SlotPool},
+    shm::Shm,
 };
 
-use wayland_client::protocol::{wl_shm, wl_surface::WlSurface};
+use wayland_client::{protocol::wl_surface::WlSurface, QueueHandle};
+
+use crate::{bump_pool::BumpPool, Daemon};
 
 #[derive(Debug)]
 struct AnimationState {
@@ -26,48 +28,58 @@ struct AnimationState {
 }
 
 #[derive(Debug)]
-pub struct AnimationToken {
+pub(super) struct AnimationToken {
     id: usize,
-    transition_finished: Arc<AtomicBool>,
+    transition_done: Arc<AtomicBool>,
 }
 
 impl AnimationToken {
-    pub fn transition_finished(&self) -> bool {
-        self.transition_finished.load(Ordering::Acquire)
+    pub(super) fn is_transition_done(&self) -> bool {
+        self.transition_done.load(Ordering::Acquire)
+    }
+
+    pub(super) fn set_transition_done(&self, wallpaper: &Wallpaper) {
+        if wallpaper.has_animation_id(self) {
+            self.transition_done.store(true, Ordering::Release);
+        }
     }
 }
 
-impl Drop for AnimationToken {
-    fn drop(&mut self) {
-        self.transition_finished.store(true, Ordering::Release);
-    }
+struct FrameCallbackHandler {
+    cvar: Condvar,
+    /// This time doesn't really mean anything. We don't really use it for frame timing, but we
+    /// store it for the sake of signaling when the compositor emitted the last frame callback
+    time: Mutex<Option<u32>>,
 }
 
 /// Owns all the necessary information for drawing.
+#[derive(Debug)]
 struct WallpaperInner {
     width: NonZeroI32,
     height: NonZeroI32,
     scale_factor: NonZeroI32,
 
-    slot: Slot,
+    pool: BumpPool,
     img: BgImg,
 }
 
-pub struct Wallpaper {
+pub(super) struct Wallpaper {
     output_id: u32,
     inner: RwLock<WallpaperInner>,
     layer_surface: LayerSurface,
 
     animation_state: AnimationState,
-    pool: Arc<Mutex<SlotPool>>,
     pub configured: AtomicBool,
+    qh: QueueHandle<Daemon>,
+    frame_callback_handler: FrameCallbackHandler,
 }
 
 impl Wallpaper {
-    pub fn new(
+    pub(crate) fn new(
         output_info: OutputInfo,
         layer_surface: LayerSurface,
-        pool: Arc<Mutex<SlotPool>>,
+        shm: &Shm,
+        qh: &QueueHandle<Daemon>,
     ) -> Self {
         let (width, height): (NonZeroI32, NonZeroI32) = if let Some(size) = output_info.logical_size
         {
@@ -81,17 +93,11 @@ impl Wallpaper {
         };
 
         let scale_factor = NonZeroI32::new(output_info.scale_factor).unwrap();
-        let slot = pool
-            .lock()
-            .unwrap()
-            .new_slot(
-                width.get() as usize
-                    * height.get() as usize
-                    * scale_factor.get() as usize
-                    * scale_factor.get() as usize
-                    * 4,
-            )
-            .expect("failed to create slot in pool");
+
+        let frame_callback_handler = FrameCallbackHandler {
+            cvar: Condvar::new(),
+            time: Mutex::new(Some(0)), // we do not have to wait for the first frame
+        };
 
         // Configure the layer surface
         layer_surface.set_anchor(Anchor::all());
@@ -104,33 +110,41 @@ impl Wallpaper {
             .unwrap();
         // commit so that the compositor send the initial configuration
         layer_surface.commit();
+        layer_surface
+            .wl_surface()
+            .frame(qh, layer_surface.wl_surface().clone());
+
+        let w = width.get() * scale_factor.get();
+        let h = height.get() * scale_factor.get();
+        let pool = BumpPool::new(w, h, shm, qh);
 
         Self {
             output_id: output_info.id,
             layer_surface,
-            pool,
             inner: RwLock::new(WallpaperInner {
                 width,
                 height,
                 scale_factor,
-                slot,
                 img: BgImg::Color([0, 0, 0]),
+                pool,
             }),
             animation_state: AnimationState {
                 id: AtomicUsize::new(0),
                 transition_finished: Arc::new(AtomicBool::new(false)),
             },
             configured: AtomicBool::new(false),
+            qh: qh.clone(),
+            frame_callback_handler,
         }
     }
 
     #[inline]
-    pub fn has_id(&self, id: u32) -> bool {
+    pub(super) fn has_id(&self, id: u32) -> bool {
         self.output_id == id
     }
 
     #[inline]
-    pub fn has_animation_id(&self, token: &AnimationToken) -> bool {
+    pub(super) fn has_animation_id(&self, token: &AnimationToken) -> bool {
         self.animation_state
             .id
             .load(std::sync::atomic::Ordering::Acquire)
@@ -138,104 +152,99 @@ impl Wallpaper {
     }
 
     #[inline]
-    pub fn has_surface(&self, surface: &WlSurface) -> bool {
+    pub(super) fn has_surface(&self, surface: &WlSurface) -> bool {
         self.layer_surface.wl_surface() == surface
     }
 
-    pub fn get_dimensions(&self) -> (u32, u32) {
-        let (inner, _) = self.lock();
+    pub(super) fn get_dimensions(&self) -> (u32, u32) {
+        let inner = self.inner.read().unwrap();
         let width = inner.width.get() as u32;
         let height = inner.height.get() as u32;
         let scale_factor = inner.scale_factor.get() as u32;
         (width * scale_factor, height * scale_factor)
     }
 
-    #[inline]
-    fn lock(&self) -> (RwLockReadGuard<WallpaperInner>, MutexGuard<SlotPool>) {
-        (self.inner.read().unwrap(), self.pool.lock().unwrap())
-    }
-
-    #[inline]
-    fn lock_inner_mut(&self) -> (RwLockWriteGuard<WallpaperInner>, MutexGuard<SlotPool>) {
-        (self.inner.write().unwrap(), self.pool.lock().unwrap())
-    }
-
-    pub fn canvas_change<F, T>(&self, f: F) -> T
+    pub(super) fn canvas_change<F, T>(&self, f: F) -> T
     where
         F: FnOnce(&mut [u8]) -> T,
     {
-        let mut nano_sleep = 2000000; // start at 2 ms, half it every loop
-        loop {
-            {
-                let (inner, mut pool) = self.lock();
-                if let Some(canvas) = inner.slot.canvas(&mut pool) {
-                    log::debug!("got canvas! - output {}", self.output_id);
-                    return f(canvas);
-                }
-            }
-            log::debug!("failed to get canvas - output {}", self.output_id);
-            // sleep to mitigate busy waiting
-            std::thread::sleep(std::time::Duration::from_nanos(nano_sleep));
-            nano_sleep /= 2;
-        }
+        let mut inner = self.inner.write().unwrap();
+        f(inner.pool.get_drawable(&self.qh))
     }
 
     #[inline]
-    pub fn get_img_info(&self) -> BgImg {
-        self.lock().0.img.clone()
+    pub(super) fn get_img_info(&self) -> BgImg {
+        self.inner.read().unwrap().img.clone()
     }
 
     #[inline]
-    pub fn create_animation_token(&self) -> AnimationToken {
+    pub(super) fn create_animation_token(&self) -> AnimationToken {
         let id = self.animation_state.id.load(Ordering::Acquire);
         AnimationToken {
             id,
-            transition_finished: Arc::clone(&self.animation_state.transition_finished),
+            transition_done: Arc::clone(&self.animation_state.transition_finished),
         }
     }
 
-    /// This will stop all animations with the current id
     #[inline]
-    pub fn inc_animation_id(&self) {
+    pub(super) fn frame_callback_completed(&self, time: u32) {
+        *self.frame_callback_handler.time.lock().unwrap() = Some(time);
+        self.frame_callback_handler.cvar.notify_all();
+    }
+
+    /// Stops all animations with the current id, by increasing that id
+    #[inline]
+    pub(super) fn stop_animations(&self) {
         self.animation_state.id.fetch_add(1, Ordering::AcqRel);
         self.animation_state
             .transition_finished
             .store(false, Ordering::Release);
     }
 
-    pub fn clear(&self, color: [u8; 3]) {
+    pub(super) fn clear(&self, color: [u8; 3]) {
         self.canvas_change(|canvas| {
             for pixel in canvas.chunks_exact_mut(4) {
                 pixel[2] = color[0];
                 pixel[1] = color[1];
                 pixel[0] = color[2];
             }
-        });
+        })
     }
 
-    pub fn set_img_info(&self, img_info: BgImg) {
+    pub(super) fn set_img_info(&self, img_info: BgImg) {
         log::debug!("output {} - drawing: {}", self.output_id, img_info);
-        self.lock_inner_mut().0.img = img_info;
+        self.inner.write().unwrap().img = img_info;
     }
 
-    pub fn draw(&self) {
-        let (inner, mut pool) = self.lock();
-
-        let width = inner.width.get() * inner.scale_factor.get();
-        let height = inner.height.get() * inner.scale_factor.get();
-        let stride = width * 4;
-
-        let buf = pool
-            .create_buffer_in(&inner.slot, width, height, stride, wl_shm::Format::Xrgb8888)
-            .unwrap();
-        drop(inner);
-        let surface = self.layer_surface.wl_surface();
-        buf.attach_to(surface).unwrap();
-        surface.damage_buffer(0, 0, width, height);
-        surface.commit();
+    pub(super) fn draw(&self) {
+        {
+            let mut time = self.frame_callback_handler.time.lock().unwrap();
+            while time.is_none() {
+                log::debug!("waiting for condvar");
+                time = self.frame_callback_handler.cvar.wait(time).unwrap();
+            }
+            *time = None;
+        }
+        let inner = self.inner.read().unwrap();
+        if let Some(buf) = inner.pool.get_commitable_buffer() {
+            let width = inner.width.get() * inner.scale_factor.get();
+            let height = inner.height.get() * inner.scale_factor.get();
+            let surface = self.layer_surface.wl_surface();
+            surface.attach(Some(buf), 0, 0);
+            drop(inner);
+            surface.damage_buffer(0, 0, width, height);
+            surface.commit();
+            surface.frame(&self.qh, surface.clone());
+        } else {
+            drop(inner);
+            // commit and send another frame request, since we consumed the previous one
+            let surface = self.layer_surface.wl_surface();
+            surface.commit();
+            surface.frame(&self.qh, surface.clone());
+        }
     }
 
-    pub fn resize(
+    pub(super) fn resize(
         &self,
         width: Option<NonZeroI32>,
         height: Option<NonZeroI32>,
@@ -244,30 +253,32 @@ impl Wallpaper {
         if let Some(s) = scale_factor {
             self.layer_surface.set_buffer_scale(s.get() as u32).unwrap();
         }
-        let (mut inner, mut pool) = self.lock_inner_mut();
+        let mut inner = self.inner.write().unwrap();
         let width = width.unwrap_or(inner.width);
         let height = height.unwrap_or(inner.height);
         let scale_factor = scale_factor.unwrap_or(inner.scale_factor);
         if (width, height, scale_factor) == (inner.width, inner.height, inner.scale_factor) {
             return;
         }
-        self.inc_animation_id();
+        self.stop_animations();
+
         inner.width = width;
         inner.height = height;
         inner.scale_factor = scale_factor;
-        inner.slot = pool
-            .new_slot(
-                inner.width.get() as usize
-                    * inner.height.get() as usize
-                    * inner.scale_factor.get() as usize
-                    * inner.scale_factor.get() as usize
-                    * 4,
-            )
-            .expect("failed to create slot");
-        self.layer_surface
-            .set_size(inner.width.get() as u32, inner.height.get() as u32);
         inner.img = BgImg::Color([0, 0, 0]);
+
+        let w = width.get() * scale_factor.get();
+        let h = height.get() * scale_factor.get();
+        inner.pool.resize(w, h, &self.qh);
+        drop(inner);
+
+        *self.frame_callback_handler.time.lock().unwrap() = Some(0);
+        self.layer_surface
+            .set_size(width.get() as u32, height.get() as u32);
         self.layer_surface.commit();
+        self.layer_surface
+            .wl_surface()
+            .frame(&self.qh, self.layer_surface.wl_surface().clone());
         self.configured.store(false, Ordering::Release);
     }
 }

@@ -7,7 +7,7 @@ use std::{
     time::Duration,
 };
 
-use crate::{cache, comp_decomp::BitPack};
+use crate::{cache, compression::BitPack};
 
 #[derive(PartialEq, Archive, Serialize)]
 #[archive_attr(derive(Clone))]
@@ -101,7 +101,7 @@ impl ArchivedPosition {
     }
 }
 
-#[derive(PartialEq, Clone, Archive, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Clone, Archive, Serialize, Deserialize)]
 #[archive_attr(derive(PartialEq))]
 pub enum BgImg {
     Color([u8; 3]),
@@ -183,7 +183,7 @@ pub struct Transition {
     pub transition_type: TransitionType,
     pub duration: f32,
     pub step: u8,
-    pub fps: u8,
+    pub fps: u16,
     pub angle: f64,
     pub pos: Position,
     pub bezier: (f32, f32, f32, f32),
@@ -217,7 +217,7 @@ pub type ImageRequest = (Transition, Box<[(Img, Box<[String]>)]>);
 pub enum Request {
     Animation(AnimationRequest),
     Clear(Clear),
-    Init,
+    Ping,
     Kill,
     Query,
     Img(ImageRequest),
@@ -272,7 +272,7 @@ pub enum Answer {
     Ok,
     Err(String),
     Info(Box<[BgInfo]>),
-    Init(bool),
+    Ping(bool),
 }
 
 impl Answer {

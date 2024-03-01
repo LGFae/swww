@@ -147,6 +147,9 @@ pub enum Swww {
     ///Defaults to filling all outputs with black.
     Clear(Clear),
 
+    ///Restores the last displayed image on the specified outputs.
+    Restore(Restore),
+
     ///Clears the swww cache.
     ///
     ///We currently store the address of the last file set as wallpaper for each monitor, as well
@@ -216,6 +219,15 @@ pub enum ResizeStrategy {
     Crop,
     /// Resize the image to fit inside the screen, preserving the original aspect ratio
     Fit,
+}
+
+#[derive(Parser)]
+pub struct Restore {
+    /// Comma separated list of outputs to restore.
+    ///
+    /// If it isn't set, all outputs will be restored.
+    #[arg(short, long, default_value = "")]
+    pub outputs: String,
 }
 
 #[derive(Parser)]
@@ -329,7 +341,7 @@ pub struct Img {
     ///Also note this is **different** from the transition-step. That one controls by how much we
     ///approach the new image every frame.
     #[arg(long, env = "SWWW_TRANSITION_FPS", default_value = "30")]
-    pub transition_fps: u8,
+    pub transition_fps: u16,
 
     ///This is used for the 'wipe' and 'wave' transitions. It controls the angle of the wipe
     ///

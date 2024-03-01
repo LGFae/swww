@@ -7,8 +7,11 @@ use std::{
     time::Duration,
 };
 
-use utils::ipc::{
-    Answer, ArchivedAnimation, ArchivedImg, ArchivedRequest, ArchivedTransition, BgImg, Request,
+use utils::{
+    compression::Decompressor,
+    ipc::{
+        Answer, ArchivedAnimation, ArchivedImg, ArchivedRequest, ArchivedTransition, BgImg, Request,
+    },
 };
 
 use crate::wallpaper::{AnimationToken, Wallpaper};
@@ -22,12 +25,12 @@ use self::anim_barrier::ArcAnimBarrier;
 ///The default thread stack size of 2MiB is way too overkill for our purposes
 const STACK_SIZE: usize = 1 << 17; //128KiB
 
-pub struct Animator {
+pub(super) struct Animator {
     anim_barrier: ArcAnimBarrier,
 }
 
 impl Animator {
-    pub fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
             anim_barrier: ArcAnimBarrier::new(),
         }
@@ -69,7 +72,11 @@ impl Animator {
         }
     }
 
-    pub fn transition(&mut self, bytes: Vec<u8>, wallpapers: Vec<Vec<Arc<Wallpaper>>>) -> Answer {
+    pub(super) fn transition(
+        &mut self,
+        bytes: Vec<u8>,
+        wallpapers: Vec<Vec<Arc<Wallpaper>>>,
+    ) -> Answer {
         match thread::Builder::new()
             .stack_size(1 << 15)
             .name("transition spawner".to_string())
@@ -102,7 +109,7 @@ impl Animator {
             .stack_size(STACK_SIZE) //the default of 2MB is way too overkill for this
             .spawn_scoped(scope, move || {
                 /* We only need to animate if we have > 1 frame */
-                if animation.animation.len() == 1 {
+                if animation.animation.len() <= 1 {
                     return;
                 }
                 log::debug!("Starting animation");
@@ -114,7 +121,7 @@ impl Animator {
 
                 for (wallpaper, token) in wallpapers.iter().zip(&tokens) {
                     loop {
-                        if !wallpaper.has_animation_id(token) || token.transition_finished() {
+                        if !wallpaper.has_animation_id(token) || token.is_transition_done() {
                             break;
                         }
                         let duration: Duration = animation.animation[0]
@@ -127,6 +134,7 @@ impl Animator {
 
                 let mut now = std::time::Instant::now();
 
+                let mut decompressor = Decompressor::new();
                 for (frame, duration) in animation.animation.iter().cycle() {
                     let duration: Duration = duration.deserialize(&mut rkyv::Infallible).unwrap();
                     barrier.wait(duration.div_f32(2.0));
@@ -140,8 +148,12 @@ impl Animator {
                             continue;
                         }
 
-                        if !wallpapers[i].canvas_change(|canvas| frame.unpack(canvas)) {
-                            error!("failed to unpack frame, canvas has the wrong size");
+                        let result = wallpapers[i].canvas_change(|canvas| {
+                            decompressor.decompress_archived(frame, canvas)
+                        });
+
+                        if let Err(e) = result {
+                            error!("failed to unpack frame: {e}");
                             wallpapers.swap_remove(i);
                             tokens.swap_remove(i);
                             continue;
@@ -166,7 +178,11 @@ impl Animator {
         }
     }
 
-    pub fn animate(&mut self, bytes: Vec<u8>, wallpapers: Vec<Vec<Arc<Wallpaper>>>) -> Answer {
+    pub(super) fn animate(
+        &mut self,
+        bytes: Vec<u8>,
+        wallpapers: Vec<Vec<Arc<Wallpaper>>>,
+    ) -> Answer {
         let barrier = self.anim_barrier.clone();
         match thread::Builder::new()
             .stack_size(1 << 15)

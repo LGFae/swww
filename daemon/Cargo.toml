@@ -1,6 +1,6 @@
 [package]
 name = "swww-daemon"
-version = "0.8.1-master"
+version = "0.8.2-master"
 authors = ["Leonardo Gibrowski Faé <leonardo.fae44@gmail.com>"]
 edition = "2021"
 
@@ -21,6 +21,6 @@ spin_sleep = "1.1"
 
 sd-notify = { version = "0.4.1" }
 
-utils = { path = "../utils" }
+utils = { version = "0.8.2-master", path = "../utils" }
 [dev-dependencies]
 rand = "0.8"

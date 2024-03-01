@@ -49,6 +49,24 @@ fn main() -> Result<(), String> {
         }
     }
 
+    if let Swww::ClearCache = &swww {
+        return cache::clean();
+    }
+
+    let mut configured = false;
+    while !configured {
+        let socket = connect_to_socket(5, 100)?;
+        Request::Ping.send(&socket)?;
+        let bytes = read_socket(&socket)?;
+        let answer = Answer::receive(&bytes);
+        if let ArchivedAnswer::Ping(c) = answer {
+            configured = *c;
+        } else {
+            return Err("Daemon did not return Answer::Ping, as expected".to_string());
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
+
     process_swww_args(&swww)?;
 
     Ok(())
@@ -84,52 +102,8 @@ fn process_swww_args(args: &Swww) -> Result<(), String> {
                 ));
             }
         }
-        ArchivedAnswer::Init(configured) => {
-            let mut configured = *configured;
-            while !configured {
-                std::thread::sleep(Duration::from_millis(1));
-                let socket = connect_to_socket(5, 100)?;
-                Request::Init.send(&socket)?;
-                let bytes = read_socket(&socket)?;
-                let answer = Answer::receive(&bytes);
-                if let ArchivedAnswer::Init(c) = answer {
-                    configured = *c;
-                } else {
-                    return Err("Daemon did not return Answer::Init, as expected".to_string());
-                }
-            }
-            if let Swww::Init { no_cache, .. } = args {
-                if *no_cache {
-                    return Ok(());
-                }
-                let (_, outputs) = get_dimensions_and_outputs(&[])?;
-                for output in outputs.iter().flatten() {
-                    let img_path = utils::cache::get_previous_image_path(output)?;
-                    #[allow(deprecated)]
-                    if let Err(e) = process_swww_args(&Swww::Img(cli::Img {
-                        image: cli::parse_image(&img_path)?,
-                        outputs: output.to_string(),
-                        no_resize: false,
-                        resize: ResizeStrategy::Crop,
-                        fill_color: [0, 0, 0],
-                        filter: cli::Filter::Lanczos3,
-                        transition_type: cli::TransitionType::None,
-                        transition_step: u8::MAX,
-                        transition_duration: 0.0,
-                        transition_fps: u8::MAX,
-                        transition_angle: 0.0,
-                        transition_pos: cli::CliPosition {
-                            x: cli::CliCoord::Pixel(0.0),
-                            y: cli::CliCoord::Pixel(0.0),
-                        },
-                        invert_y: false,
-                        transition_bezier: (0.0, 0.0, 0.0, 0.0),
-                        transition_wave: (0.0, 0.0),
-                    })) {
-                        eprintln!("WARNING: failed to load cache for output {output}: {e}");
-                    }
-                }
-            }
+        ArchivedAnswer::Ping(_) => {
+            return Ok(());
         }
     }
     Ok(())
@@ -141,10 +115,12 @@ fn make_request(args: &Swww) -> Result<Option<Request>, String> {
             color: c.color,
             outputs: split_cmdline_outputs(&c.outputs),
         }))),
-        Swww::ClearCache => {
-            cache::clean()?;
+        Swww::Restore(restore) => {
+            let requested_outputs = split_cmdline_outputs(&restore.outputs);
+            restore_from_cache(&requested_outputs)?;
             Ok(None)
         }
+        Swww::ClearCache => unreachable!("there is no request for clear-cache"),
         Swww::Img(img) => {
             let requested_outputs = split_cmdline_outputs(&img.outputs);
             let (dims, outputs) = get_dimensions_and_outputs(&requested_outputs)?;
@@ -197,7 +173,12 @@ fn make_request(args: &Swww) -> Result<Option<Request>, String> {
                 )?))),
             }
         }
-        Swww::Init { .. } => Ok(Some(Request::Init)),
+        Swww::Init { no_cache, .. } => {
+            if !*no_cache {
+                restore_from_cache(&[])?;
+            }
+            Ok(None)
+        }
         Swww::Kill => Ok(Some(Request::Kill)),
         Swww::Query => Ok(Some(Request::Query)),
     }
@@ -440,4 +421,37 @@ fn is_daemon_running() -> Result<bool, String> {
     }
 
     Ok(false)
+}
+
+fn restore_from_cache(requested_outputs: &[String]) -> Result<(), String> {
+    let (_, outputs) = get_dimensions_and_outputs(requested_outputs)?;
+
+    for output in outputs.iter().flatten() {
+        let img_path = utils::cache::get_previous_image_path(output)?;
+        #[allow(deprecated)]
+        if let Err(e) = process_swww_args(&Swww::Img(cli::Img {
+            path: PathBuf::from(img_path),
+            outputs: output.to_string(),
+            no_resize: false,
+            resize: ResizeStrategy::Crop,
+            fill_color: [0, 0, 0],
+            filter: cli::Filter::Lanczos3,
+            transition_type: cli::TransitionType::None,
+            transition_step: u8::MAX,
+            transition_duration: 0.0,
+            transition_fps: 30,
+            transition_angle: 0.0,
+            transition_pos: cli::CliPosition {
+                x: cli::CliCoord::Pixel(0.0),
+                y: cli::CliCoord::Pixel(0.0),
+            },
+            invert_y: false,
+            transition_bezier: (0.0, 0.0, 0.0, 0.0),
+            transition_wave: (0.0, 0.0),
+        })) {
+            eprintln!("WARNING: failed to load cache for output {output}: {e}");
+        }
+    }
+
+    Ok(())
 }

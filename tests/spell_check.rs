@@ -11,7 +11,7 @@ fn spell_check_code_and_man_pages() {
         .args([
             "--enable-colors",
             "--ignore-words-list",
-            "crate",
+            "crate,statics",
             "--skip",
             "doc/generated",   // skip the generated documentation
             "src",             // client

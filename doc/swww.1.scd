@@ -11,6 +11,9 @@ swww - A Solution to your Wayland Wallpaper Woes
 *clear*
 	Fills the specified outputs with the given color
 
+*restore*
+	Restores the last displayed image on the specified outputs
+
 *clear-cache*
 	Fills the specified outputs with the given color
 
