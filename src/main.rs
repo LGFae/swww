@@ -161,8 +161,12 @@ fn make_request(args: &Swww) -> Result<Option<Request>, String> {
                                 .ok_or("missing first frame".to_owned())?
                                 .map_err(|e| format!("unable to decode first frame: {e}"))?;
 
-                            let img_request =
-                                make_img_request(img, Some(frame_to_rgb(first_frame)), &dims, &outputs)?;
+                            let img_request = make_img_request(
+                                img,
+                                Some(frame_to_rgb(first_frame)),
+                                &dims,
+                                &outputs,
+                            )?;
                             let animations =
                                 animations.join().unwrap_or_else(|e| Err(format!("{e:?}")));
 
@@ -181,15 +185,16 @@ fn make_request(args: &Swww) -> Result<Option<Request>, String> {
                     } else {
                         let img_raw = imgbuf.decode()?;
                         Ok(Some(Request::Img(make_img_request(
-                            img, Some(img_raw), &dims, &outputs,
+                            img,
+                            Some(img_raw),
+                            &dims,
+                            &outputs,
                         )?)))
                     }
                 }
-                cli::CliImage::Color(_) => {
-                    Ok(Some(Request::Img(make_img_request(
-                        img, None, &dims, &outputs,
-                    )?)))
-                }
+                cli::CliImage::Color(_) => Ok(Some(Request::Img(make_img_request(
+                    img, None, &dims, &outputs,
+                )?))),
             }
         }
         Swww::Init { .. } => Ok(Some(Request::Init)),
@@ -222,10 +227,9 @@ fn make_img_request(
                                 make_filter(&img.filter),
                                 &img.fill_color,
                             )?,
-                        }
+                        },
                         None => Err("missing img_raw".to_owned())?,
                     }
-                    
                     .into_boxed_slice(),
                     path: match path.canonicalize() {
                         Ok(p) => p.to_string_lossy().to_string(),
@@ -239,7 +243,9 @@ fn make_img_request(
                     },
                 },
                 cli::CliImage::Color(color) => ipc::Img {
-                    img: image::RgbImage::from_pixel(dim.0,dim.1,image::Rgb(*color)).to_vec().into_boxed_slice(),
+                    img: image::RgbImage::from_pixel(dim.0, dim.1, image::Rgb(*color))
+                        .to_vec()
+                        .into_boxed_slice(),
                     path: format!("0x{:02x}{:02x}{:02x}", color[0], color[1], color[2]),
                 },
             },
