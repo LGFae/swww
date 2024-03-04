@@ -322,7 +322,7 @@ fn spawn_daemon(no_daemon: bool) -> Result<(), String> {
 
 /// We make sure the Stream is always set to blocking mode
 ///
-/// * `tries` -  how make times to attempt the connection
+/// * `tries` -  how many times to attempt the connection
 /// * `interval` - how long to wait between attempts, in milliseconds
 fn connect_to_socket(tries: u8, interval: u64) -> Result<UnixStream, String> {
     //Make sure we try at least once
