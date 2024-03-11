@@ -160,13 +160,6 @@ pub enum Swww {
     /// Exits if there is already a daemon running. We check that by seeing if
     /// $XDG_RUNTIME_DIR/swww.socket exists.
     Init {
-        ///Don't fork the daemon. This will keep it running in the current terminal.
-        ///
-        ///The only advantage of this would be seeing the logging real time. Note that for release
-        ///builds we only log info, warnings and errors, so you won't be seeing much (ideally).
-        #[clap(long)]
-        no_daemon: bool,
-
         ///Don't load the cache *during initialization* (it still loads on monitor (re)connection)
         ///
         ///If want to always pass an image for `swww` to load, this option can help make the
