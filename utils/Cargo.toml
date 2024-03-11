@@ -1,6 +1,6 @@
 [package]
 name = "utils"
-version = "0.8.2-master"
+version = "0.8.2-masterV2"
 authors = ["Leonardo Gibrowski Faé <leonardo.fae44@gmail.com>"]
 edition = "2021"
 license-file = "../LICENSE"
