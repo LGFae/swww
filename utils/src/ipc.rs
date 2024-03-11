@@ -138,15 +138,95 @@ impl fmt::Display for ArchivedBgImg {
     }
 }
 
+#[derive(Clone, Copy, Debug, Archive, Serialize, Deserialize, PartialEq)]
+#[archive_attr(derive(Clone, Copy, Debug))]
+pub enum PixelFormat {
+    /// No swap, can copy directly onto WlBuffer
+    Brg,
+    /// Swap R and B channels at client, can copy directly onto WlBuffer
+    Rgb,
+    /// No swap, must extend pixel with an extra byte when copying
+    Xbgr,
+    /// Swap R and B channels at client, must extend pixel with an extra byte when copying
+    Xrgb,
+}
+
+impl PixelFormat {
+    #[inline]
+    #[must_use]
+    pub const fn channels(&self) -> u8 {
+        match self {
+            Self::Rgb => 3,
+            Self::Brg => 3,
+            Self::Xbgr => 4,
+            Self::Xrgb => 4,
+        }
+    }
+
+    #[inline]
+    #[must_use]
+    pub const fn must_swap_r_and_b_channels(&self) -> bool {
+        match self {
+            Self::Brg => false,
+            Self::Rgb => true,
+            Self::Xbgr => false,
+            Self::Xrgb => true,
+        }
+    }
+
+    #[inline]
+    #[must_use]
+    pub const fn can_copy_directly_onto_wl_buffer(&self) -> bool {
+        match self {
+            Self::Brg => true,
+            Self::Rgb => true,
+            Self::Xbgr => false,
+            Self::Xrgb => false,
+        }
+    }
+}
+
+impl ArchivedPixelFormat {
+    #[inline]
+    #[must_use]
+    pub const fn channels(&self) -> u8 {
+        match self {
+            Self::Rgb => 3,
+            Self::Brg => 3,
+            Self::Xbgr => 4,
+            Self::Xrgb => 4,
+        }
+    }
+
+    #[inline]
+    #[must_use]
+    pub const fn must_swap_r_and_b_channels(&self) -> bool {
+        match self {
+            Self::Brg => false,
+            Self::Rgb => true,
+            Self::Xbgr => false,
+            Self::Xrgb => true,
+        }
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn de(&self) -> PixelFormat {
+        self.deserialize(&mut rkyv::Infallible).unwrap()
+    }
+}
+
 #[derive(Clone, Archive, Serialize)]
 pub struct BgInfo {
     pub name: String,
     pub dim: (u32, u32),
     pub scale_factor: i32,
     pub img: BgImg,
+    pub pixel_format: PixelFormat,
 }
 
 impl BgInfo {
+    #[inline]
     #[must_use]
     pub fn real_dim(&self) -> (u32, u32) {
         (
@@ -208,6 +288,7 @@ pub struct Animation {
     pub animation: Box<[(BitPack, Duration)]>,
     pub path: String,
     pub dimensions: (u32, u32),
+    pub pixel_format: PixelFormat,
 }
 
 pub type AnimationRequest = Box<[(Animation, Box<[String]>)]>;

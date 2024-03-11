@@ -112,8 +112,9 @@ pub(super) unsafe fn pack_bytes(cur: &[u8], goal: &[u8], v: &mut Vec<u8>) {
     }
 
     if !v.is_empty() {
-        // add one extra zero to prevent access out of bounds later during decompression
-        v.push(0)
+        // add two extra bytes to prevent access out of bounds later during decompression
+        v.push(0);
+        v.push(0);
     }
 }
 
