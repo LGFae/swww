@@ -102,6 +102,39 @@ extern "C" fn signal_handler(_s: i32) {
 }
 
 fn main() -> Result<(), String> {
+    let mut args = std::env::args();
+    let _ = args.next();
+    if let Some(arg) = args.next() {
+        if arg != "--format" {
+            return Err(format!("Unrecognized command line argument: {arg}"));
+        }
+
+        match args.next().as_deref() {
+            Some("xrgb") => {
+                PIXEL_FORMAT.set(PixelFormat::Xrgb).unwrap();
+                WL_SHM_FORMAT.set(wl_shm::Format::Xrgb8888).unwrap();
+            }
+            Some("xbgr") => {
+                PIXEL_FORMAT.set(PixelFormat::Xbgr).unwrap();
+                WL_SHM_FORMAT.set(wl_shm::Format::Xbgr8888).unwrap();
+            }
+            Some("rgb") => {
+                PIXEL_FORMAT.set(PixelFormat::Rgb).unwrap();
+                WL_SHM_FORMAT.set(wl_shm::Format::Rgb888).unwrap();
+            }
+            Some("bgr") => {
+                PIXEL_FORMAT.set(PixelFormat::Bgr).unwrap();
+                WL_SHM_FORMAT.set(wl_shm::Format::Bgr888).unwrap();
+            }
+            _ => {
+                return Err(
+                    "`--format` command line option must be one of: 'xrgb', 'xbgr', 'rgb' or 'bgr'"
+                        .to_string(),
+                )
+            }
+        }
+    }
+
     rayon::ThreadPoolBuilder::default()
         .thread_name(|i| format!("rayon thread {i}"))
         .stack_size(1 << 18) // 256KiB; we do not need a large stack
@@ -580,9 +613,9 @@ impl Dispatch<WlShm, GlobalData> for Daemon {
                 wayland_client::WEnum::Value(format) => {
                     if format == wl_shm::Format::Bgr888 {
                         state.shm_format = wl_shm::Format::Bgr888;
-                        state.pixel_format = PixelFormat::Brg;
+                        state.pixel_format = PixelFormat::Bgr;
                     } else if format == wl_shm::Format::Rgb888
-                        && state.pixel_format != PixelFormat::Brg
+                        && state.pixel_format != PixelFormat::Bgr
                     {
                         state.shm_format = wl_shm::Format::Rgb888;
                         state.pixel_format = PixelFormat::Rgb;

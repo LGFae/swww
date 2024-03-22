@@ -142,7 +142,7 @@ impl fmt::Display for ArchivedBgImg {
 #[archive_attr(derive(Clone, Copy, Debug))]
 pub enum PixelFormat {
     /// No swap, can copy directly onto WlBuffer
-    Brg,
+    Bgr,
     /// Swap R and B channels at client, can copy directly onto WlBuffer
     Rgb,
     /// No swap, must extend pixel with an extra byte when copying
@@ -157,7 +157,7 @@ impl PixelFormat {
     pub const fn channels(&self) -> u8 {
         match self {
             Self::Rgb => 3,
-            Self::Brg => 3,
+            Self::Bgr => 3,
             Self::Xbgr => 4,
             Self::Xrgb => 4,
         }
@@ -167,7 +167,7 @@ impl PixelFormat {
     #[must_use]
     pub const fn must_swap_r_and_b_channels(&self) -> bool {
         match self {
-            Self::Brg => false,
+            Self::Bgr => false,
             Self::Rgb => true,
             Self::Xbgr => false,
             Self::Xrgb => true,
@@ -178,7 +178,7 @@ impl PixelFormat {
     #[must_use]
     pub const fn can_copy_directly_onto_wl_buffer(&self) -> bool {
         match self {
-            Self::Brg => true,
+            Self::Bgr => true,
             Self::Rgb => true,
             Self::Xbgr => false,
             Self::Xrgb => false,
@@ -192,7 +192,7 @@ impl ArchivedPixelFormat {
     pub const fn channels(&self) -> u8 {
         match self {
             Self::Rgb => 3,
-            Self::Brg => 3,
+            Self::Bgr => 3,
             Self::Xbgr => 4,
             Self::Xrgb => 4,
         }
@@ -202,7 +202,7 @@ impl ArchivedPixelFormat {
     #[must_use]
     pub const fn must_swap_r_and_b_channels(&self) -> bool {
         match self {
-            Self::Brg => false,
+            Self::Bgr => false,
             Self::Rgb => true,
             Self::Xbgr => false,
             Self::Xrgb => true,

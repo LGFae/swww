@@ -10,6 +10,14 @@ edition = "2021"
 # we use `std::cell::OnceLock` which was stabilized in 1.70
 rust-version = "1.70"
 
+# Enable some optimizations in debug mode. Otherwise, it is a pain to test it
+[profile.dev]
+opt-level = 1
+
+# Enable high optimizations for dependencies, but not for our code:
+[profile.dev.package."*"]
+opt-level = 3
+
 [profile.release]
 debug = 0
 lto = true
