@@ -4,8 +4,7 @@ use image::{
     AnimationDecoder, DynamicImage, Frames, ImageFormat, RgbImage,
 };
 use std::{
-    fs::File,
-    io::{stdin, BufRead, BufReader, Cursor, Read, Seek, Stdin},
+    io::{stdin, Cursor, Read},
     num::NonZeroU32,
     path::Path,
     time::Duration,
@@ -20,72 +19,54 @@ use crate::cli::ResizeStrategy;
 
 use super::cli;
 
-enum ImgBufInner {
-    Stdin(BufReader<Stdin>),
-    File(image::io::Reader<BufReader<File>>),
-}
-
-impl ImgBufInner {
-    /// Guess the format of the ImgBufInner
-    #[inline]
-    fn format(&self) -> Option<ImageFormat> {
-        match &self {
-            ImgBufInner::Stdin(_) => None, // not seekable
-            ImgBufInner::File(reader) => reader.format(),
-        }
-    }
-}
-
+#[derive(Clone)]
 pub struct ImgBuf {
-    inner: ImgBufInner,
+    bytes: Box<[u8]>,
+    format: ImageFormat,
     is_animated: bool,
 }
 
 impl ImgBuf {
     /// Create a new ImgBuf from a given path. Use - for Stdin
     pub fn new(path: &Path) -> Result<Self, String> {
-        Ok(if let Some("-") = path.to_str() {
-            let reader = BufReader::new(stdin());
-            Self {
-                inner: ImgBufInner::Stdin(reader),
-                is_animated: false,
-            }
+        let bytes = if let Some("-") = path.to_str() {
+            let mut bytes = Vec::new();
+            stdin()
+                .read_to_end(&mut bytes)
+                .map_err(|e| format!("failed to read standard input: {e}"))?;
+            bytes.into_boxed_slice()
         } else {
-            let reader = image::io::Reader::open(path)
-                .map_err(|e| format!("failed to open image: {e}"))?
-                .with_guessed_format()
-                .map_err(|e| format!("failed to detect the image's format: {e}"))?;
+            std::fs::read(path)
+                .map_err(|e| format!("failed to read file: {e}"))?
+                .into_boxed_slice()
+        };
 
-            let is_animated = {
-                match reader.format() {
-                    Some(ImageFormat::Gif) => true,
-                    Some(ImageFormat::WebP) => {
-                        // Note: unwrapping is safe because we already opened the file once before this
-                        WebPDecoder::new(BufReader::new(File::open(path).unwrap()))
-                            .map_err(|e| format!("failed to decode Webp Image: {e}"))?
-                            .has_animation()
-                    }
-                    Some(ImageFormat::Png) => {
-                        PngDecoder::new(BufReader::new(File::open(path).unwrap()))
-                            .map_err(|e| format!("failed to decode Png Image: {e}"))?
-                            .is_apng()
-                            .map_err(|e| format!("failed to detect if Png is animated: {e}"))?
-                    }
+        let reader = image::io::Reader::new(Cursor::new(&bytes))
+            .with_guessed_format()
+            .map_err(|e| format!("failed to detect the image's format: {e}"))?;
 
-                    _ => false,
-                }
-            };
-
-            Self {
-                inner: ImgBufInner::File(reader),
-                is_animated,
+        let format = reader.format();
+        let is_animated = match format {
+            Some(ImageFormat::Gif) => true,
+            Some(ImageFormat::WebP) => {
+                // Note: unwrapping is safe because we already opened the file once before this
+                WebPDecoder::new(Cursor::new(&bytes))
+                    .map_err(|e| format!("failed to decode Webp Image: {e}"))?
+                    .has_animation()
             }
-        })
-    }
+            Some(ImageFormat::Png) => PngDecoder::new(Cursor::new(&bytes))
+                .map_err(|e| format!("failed to decode Png Image: {e}"))?
+                .is_apng()
+                .map_err(|e| format!("failed to detect if Png is animated: {e}"))?,
+            None => return Err("Unknown image format".to_string()),
+            _ => false,
+        };
 
-    /// Guess the format of the ImgBuf
-    fn format(&self) -> Option<ImageFormat> {
-        self.inner.format()
+        Ok(Self {
+            format: format.unwrap(), // this is ok because we return err earlier if it is None
+            bytes,
+            is_animated,
+        })
     }
 
     #[inline]
@@ -94,54 +75,33 @@ impl ImgBuf {
     }
 
     /// Decode the ImgBuf into am RgbImage
-    pub fn decode(self) -> Result<RgbImage, String> {
-        Ok(match self.inner {
-            ImgBufInner::Stdin(mut reader) => {
-                let mut buffer = Vec::new();
-                reader
-                    .read_to_end(&mut buffer)
-                    .map_err(|e| format!("failed to read stdin: {e}"))?;
-
-                image::load_from_memory(&buffer)
-            }
-            ImgBufInner::File(reader) => reader.decode(),
-        }
-        .map_err(|e| format!("failed to decode image: {e}"))?
-        .into_rgb8())
+    pub fn decode(&self) -> Result<RgbImage, String> {
+        let mut reader = image::io::Reader::new(Cursor::new(&self.bytes));
+        reader.set_format(self.format);
+        Ok(reader
+            .decode()
+            .map_err(|e| format!("failed to decode image: {e}"))?
+            .into_rgb8())
     }
 
     /// Convert this ImgBuf into Frames
-    pub fn into_frames<'a>(self) -> Result<Frames<'a>, String> {
-        fn create_decoder<'a>(
-            img_format: Option<ImageFormat>,
-            reader: impl BufRead + Seek + 'a,
-        ) -> Result<Frames<'a>, String> {
-            match img_format {
-                Some(ImageFormat::Gif) => Ok(GifDecoder::new(reader)
-                    .map_err(|e| format!("failed to decode gif during animation: {e}"))?
-                    .into_frames()),
-                Some(ImageFormat::WebP) => Ok(WebPDecoder::new(reader)
-                    .map_err(|e| format!("failed to decode webp during animation: {e}"))?
-                    .into_frames()),
-                Some(ImageFormat::Png) => Ok(PngDecoder::new(reader)
-                    .map_err(|e| format!("failed to decode png during animation: {e}"))?
-                    .apng()
-                    .unwrap() // we detected this earlier
-                    .into_frames()),
-                _ => Err(format!("requested format has no decoder: {img_format:#?}")),
-            }
-        }
-
-        let img_format = self.format();
-        match self.inner {
-            ImgBufInner::Stdin(mut reader) => {
-                let mut bytes = Vec::new();
-                reader
-                    .read_to_end(&mut bytes)
-                    .map_err(|e| format!("failed to read stdin: {e}"))?;
-                create_decoder(img_format, Cursor::new(bytes))
-            }
-            ImgBufInner::File(reader) => create_decoder(img_format, reader.into_inner()),
+    pub fn as_frames(&self) -> Result<Frames, String> {
+        match self.format {
+            ImageFormat::Gif => Ok(GifDecoder::new(Cursor::new(&self.bytes))
+                .map_err(|e| format!("failed to decode gif during animation: {e}"))?
+                .into_frames()),
+            ImageFormat::WebP => Ok(WebPDecoder::new(Cursor::new(&self.bytes))
+                .map_err(|e| format!("failed to decode webp during animation: {e}"))?
+                .into_frames()),
+            ImageFormat::Png => Ok(PngDecoder::new(Cursor::new(&self.bytes))
+                .map_err(|e| format!("failed to decode png during animation: {e}"))?
+                .apng()
+                .unwrap() // we detected this earlier
+                .into_frames()),
+            _ => Err(format!(
+                "requested format has no decoder: {:#?}",
+                self.format
+            )),
         }
     }
 }

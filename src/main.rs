@@ -132,18 +132,13 @@ fn make_request(args: &Swww) -> Result<Option<Request>, String> {
             let (format, dims, outputs) = get_format_dims_and_outputs(&requested_outputs)?;
             let imgbuf = ImgBuf::new(&img.path)?;
             if imgbuf.is_animated() {
-                let animations = std::thread::scope::<_, Result<_, String>>(|s1| {
-                    let animations =
-                        s1.spawn(|| make_animation_request(img, &dims, format, &outputs));
+                let animations = {
                     let first_frame = imgbuf
-                        .into_frames()?
-                        .next()
-                        .ok_or("missing first frame".to_owned())?
+                        .decode()
                         .map_err(|e| format!("unable to decode first frame: {e}"))?;
 
-                    let img_request =
-                        make_img_request(img, frame_to_rgb(first_frame), format, &dims, &outputs)?;
-                    let animations = animations.join().unwrap_or_else(|e| Err(format!("{e:?}")));
+                    let img_request = make_img_request(img, first_frame, format, &dims, &outputs)?;
+                    let animations = make_animation_request(img, &imgbuf, &dims, format, &outputs);
 
                     let socket = connect_to_socket(5, 100)?;
                     Request::Img(img_request).send(&socket)?;
@@ -153,7 +148,7 @@ fn make_request(args: &Swww) -> Result<Option<Request>, String> {
                         return Err(format!("daemon error when sending image: {e}"));
                     }
                     animations
-                })
+                }
                 .map_err(|e| format!("failed to create animated request: {e}"))?;
 
                 Ok(Some(Request::Animation(animations)))
@@ -276,6 +271,7 @@ fn get_format_dims_and_outputs(
 
 fn make_animation_request(
     img: &cli::Img,
+    imgbuf: &ImgBuf,
     dims: &[(u32, u32)],
     pixel_format: ArchivedPixelFormat,
     outputs: &[Vec<String>],
@@ -283,24 +279,26 @@ fn make_animation_request(
     let filter = make_filter(&img.filter);
     let mut animations = Vec::with_capacity(dims.len());
     for (dim, outputs) in dims.iter().zip(outputs) {
-        //TODO: make cache work for all resize strategies
-        if img.resize == ResizeStrategy::Crop {
-            match cache::load_animation_frames(&img.path, *dim, pixel_format.de()) {
-                Ok(Some(animation)) => {
-                    animations.push((animation, outputs.to_owned().into_boxed_slice()));
-                    continue;
+        // do not load cache if we are reading from stdin
+        if let Some("-") = img.path.to_str() {
+            //TODO: make cache work for all resize strategies
+            if img.resize == ResizeStrategy::Crop {
+                match cache::load_animation_frames(&img.path, *dim, pixel_format.de()) {
+                    Ok(Some(animation)) => {
+                        animations.push((animation, outputs.to_owned().into_boxed_slice()));
+                        continue;
+                    }
+                    Ok(None) => (),
+                    Err(e) => eprintln!("Error loading cache for {:?}: {e}", img.path),
                 }
-                Ok(None) => (),
-                Err(e) => eprintln!("Error loading cache for {:?}: {e}", img.path),
             }
         }
 
-        let imgbuf = ImgBuf::new(&img.path)?;
         let animation = ipc::Animation {
             path: img.path.to_string_lossy().to_string(),
             dimensions: *dim,
             animation: compress_frames(
-                imgbuf.into_frames()?,
+                imgbuf.as_frames()?,
                 *dim,
                 pixel_format,
                 filter,
