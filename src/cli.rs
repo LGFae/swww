@@ -192,7 +192,7 @@ pub enum Swww {
         /// automatically select the best format for itself during initialization; this is only
         /// here for fallback, debug, and workaround purposes
         #[clap(long)]
-        format: PixelFormat,
+        format: Option<PixelFormat>,
     },
 
     ///Kills the daemon
