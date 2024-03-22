@@ -315,8 +315,11 @@ impl Request {
             if let Self::Animation(animations) = self {
                 s.spawn(|| {
                     for (animation, _) in animations.iter() {
-                        if let Err(e) = cache::store_animation_frames(animation) {
-                            eprintln!("Error storing cache for {}: {e}", animation.path);
+                        // only store the cache if we aren't reading from stdin
+                        if animation.path != "-" {
+                            if let Err(e) = cache::store_animation_frames(animation) {
+                                eprintln!("Error storing cache for {}: {e}", animation.path);
+                            }
                         }
                     }
                 });
