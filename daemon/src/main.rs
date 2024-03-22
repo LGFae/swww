@@ -7,7 +7,7 @@ pub mod bump_pool;
 mod wallpaper;
 use log::{debug, error, info, warn, LevelFilter};
 use nix::{
-    poll::{poll, PollFd, PollFlags},
+    poll::{poll, PollFd, PollFlags, PollTimeout},
     sys::signal::{self, SigHandler, Signal},
 };
 use rkyv::{boxed::ArchivedBox, string::ArchivedString};
@@ -18,7 +18,7 @@ use std::{
     fs,
     num::NonZeroI32,
     os::{
-        fd::{BorrowedFd, RawFd},
+        fd::{AsFd, AsRawFd, OwnedFd},
         unix::net::{UnixListener, UnixStream},
     },
     sync::{
@@ -69,7 +69,7 @@ fn should_daemon_exit() -> bool {
     EXIT.load(Ordering::Acquire)
 }
 
-static POLL_WAKER: OnceLock<RawFd> = OnceLock::new();
+static POLL_WAKER: OnceLock<OwnedFd> = OnceLock::new();
 static WL_SHM_FORMAT: OnceLock<wl_shm::Format> = OnceLock::new();
 static PIXEL_FORMAT: OnceLock<PixelFormat> = OnceLock::new();
 
@@ -92,7 +92,8 @@ pub fn wake_poll() {
     // SAFETY: POLL_WAKER is set up in setup_signals_and_pipe, which is called early in main
     // and panics if it fails. By the time anyone calls this function, POLL_WAKER will certainly
     // already have been initialized.
-    if let Err(e) = nix::unistd::write(*unsafe { POLL_WAKER.get().unwrap_unchecked() }, &[0]) {
+    if let Err(e) = nix::unistd::write(unsafe { POLL_WAKER.get().unwrap_unchecked() }.as_fd(), &[0])
+    {
         error!("failed to write to pipe file descriptor: {e}");
     }
 }
@@ -170,14 +171,14 @@ fn main() -> Result<(), String> {
 
         let events = {
             let connection_fd = read_guard.connection_fd();
-            let waker = unsafe { BorrowedFd::borrow_raw(wake) };
+            let waker = wake.as_fd();
             let mut fds = [
-                PollFd::new(&listener.0, PollFlags::POLLIN),
-                PollFd::new(&connection_fd, PollFlags::POLLIN | PollFlags::POLLRDBAND),
-                PollFd::new(&waker, PollFlags::POLLIN),
+                PollFd::new(listener.0.as_fd(), PollFlags::POLLIN),
+                PollFd::new(connection_fd, PollFlags::POLLIN | PollFlags::POLLRDBAND),
+                PollFd::new(waker, PollFlags::POLLIN),
             ];
 
-            match poll(&mut fds, -1) {
+            match poll(&mut fds, PollTimeout::NONE) {
                 Ok(_) => (),
                 Err(e) => match e {
                     nix::errno::Errno::EINTR => (),
@@ -211,18 +212,11 @@ fn main() -> Result<(), String> {
 
         if let Some(flags) = events[2] {
             if !flags.is_empty() {
-                if let Err(e) = nix::unistd::read(wake, &mut buf) {
+                if let Err(e) = nix::unistd::read(wake.as_raw_fd(), &mut buf) {
                     error!("error reading pipe file descriptor: {e}");
                 }
             }
         }
-    }
-
-    if let Err(e) = nix::unistd::close(*POLL_WAKER.get().unwrap()) {
-        error!("error closing write pipe file descriptor: {e}");
-    }
-    if let Err(e) = nix::unistd::close(wake) {
-        error!("error closing read pipe file descriptor: {e}");
     }
 
     info!("Goodbye!");
@@ -230,7 +224,7 @@ fn main() -> Result<(), String> {
 }
 
 /// Returns the file descriptor we should install in the poll handler
-fn setup_signals_and_pipe() -> RawFd {
+fn setup_signals_and_pipe() -> OwnedFd {
     let handler = SigHandler::Handler(signal_handler);
     for signal in [Signal::SIGINT, Signal::SIGQUIT, Signal::SIGTERM] {
         unsafe { signal::signal(signal, handler).expect("failed to install signal handler") };

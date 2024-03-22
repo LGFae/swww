@@ -132,7 +132,7 @@ fn make_request(args: &Swww) -> Result<Option<Request>, String> {
             let (format, dims, outputs) = get_format_dims_and_outputs(&requested_outputs)?;
             let imgbuf = ImgBuf::new(&img.path)?;
             if imgbuf.is_animated() {
-                match std::thread::scope::<_, Result<_, String>>(|s1| {
+                let animations = std::thread::scope::<_, Result<_, String>>(|s1| {
                     let animations =
                         s1.spawn(|| make_animation_request(img, &dims, format, &outputs));
                     let first_frame = imgbuf
@@ -153,10 +153,10 @@ fn make_request(args: &Swww) -> Result<Option<Request>, String> {
                         return Err(format!("daemon error when sending image: {e}"));
                     }
                     animations
-                }) {
-                    Ok(animations) => Ok(Some(Request::Animation(animations))),
-                    Err(e) => Err(format!("failed to create animated request: {e}")),
-                }
+                })
+                .map_err(|e| format!("failed to create animated request: {e}"))?;
+
+                Ok(Some(Request::Animation(animations)))
             } else {
                 let img_raw = imgbuf.decode()?;
                 Ok(Some(Request::Img(make_img_request(

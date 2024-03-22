@@ -5,8 +5,7 @@ use image::{
 };
 use std::{
     fs::File,
-    io::Stdin,
-    io::{stdin, BufReader, Read},
+    io::{stdin, BufRead, BufReader, Cursor, Read, Seek, Stdin},
     num::NonZeroU32,
     path::Path,
     time::Duration,
@@ -70,6 +69,7 @@ impl ImgBuf {
                         PngDecoder::new(BufReader::new(File::open(path).unwrap()))
                             .map_err(|e| format!("failed to decode Png Image: {e}"))?
                             .is_apng()
+                            .map_err(|e| format!("failed to detect if Png is animated: {e}"))?
                     }
 
                     _ => false,
@@ -114,7 +114,7 @@ impl ImgBuf {
     pub fn into_frames<'a>(self) -> Result<Frames<'a>, String> {
         fn create_decoder<'a>(
             img_format: Option<ImageFormat>,
-            reader: impl Read + 'a,
+            reader: impl BufRead + Seek + 'a,
         ) -> Result<Frames<'a>, String> {
             match img_format {
                 Some(ImageFormat::Gif) => Ok(GifDecoder::new(reader)
@@ -126,6 +126,7 @@ impl ImgBuf {
                 Some(ImageFormat::Png) => Ok(PngDecoder::new(reader)
                     .map_err(|e| format!("failed to decode png during animation: {e}"))?
                     .apng()
+                    .unwrap() // we detected this earlier
                     .into_frames()),
                 _ => Err(format!("requested format has no decoder: {img_format:#?}")),
             }
@@ -133,7 +134,13 @@ impl ImgBuf {
 
         let img_format = self.format();
         match self.inner {
-            ImgBufInner::Stdin(reader) => create_decoder(img_format, reader),
+            ImgBufInner::Stdin(mut reader) => {
+                let mut bytes = Vec::new();
+                reader
+                    .read_to_end(&mut bytes)
+                    .map_err(|e| format!("failed to read stdin: {e}"))?;
+                create_decoder(img_format, Cursor::new(bytes))
+            }
             ImgBufInner::File(reader) => create_decoder(img_format, reader.into_inner()),
         }
     }

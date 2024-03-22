@@ -13,11 +13,11 @@ simplelog = "0.12"
 wayland-client = { version = "0.31", default-features = false, features = [ "log" ]}
 smithay-client-toolkit = { version = "0.18", default-features = false }
 
-nix = { version = "0.27", default-features = false, features = [ "signal", "poll" ] }
+nix = { version = "0.28", default-features = false, features = [ "signal", "poll" ] }
 keyframe = "1.1"
 rkyv = "0.7"
-rayon = "1.7"
-spin_sleep = "1.1"
+rayon = "1.9"
+spin_sleep = "1.2"
 
 sd-notify = { version = "0.4.1" }
 
