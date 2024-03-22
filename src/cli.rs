@@ -36,6 +36,18 @@ fn from_hex(hex: &str) -> Result<[u8; 3], String> {
     Ok(color)
 }
 
+#[derive(Clone, ValueEnum)]
+pub enum PixelFormat {
+    /// No swap, can copy directly onto WlBuffer
+    Bgr,
+    /// Swap R and B channels at client, can copy directly onto WlBuffer
+    Rgb,
+    /// No swap, must extend pixel with an extra byte when copying
+    Xbgr,
+    /// Swap R and B channels at client, must extend pixel with an extra byte when copying
+    Xrgb,
+}
+
 #[derive(Clone)]
 pub enum Filter {
     Nearest,
@@ -173,6 +185,14 @@ pub enum Swww {
         ///results some reliable: `swww init --no-cache && swww img <some img>`
         #[clap(long)]
         no_cache: bool,
+
+        /// Force the daemon to use a specific wl_shm format
+        ///
+        /// IMPORTANT: make sure this is a value your compositor actually supports! `swww` will
+        /// automatically select the best format for itself during initialization; this is only
+        /// here for fallback, debug, and workaround purposes
+        #[clap(long)]
+        format: Option<PixelFormat>,
     },
 
     ///Kills the daemon

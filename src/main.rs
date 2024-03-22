@@ -17,7 +17,10 @@ use cli::{ResizeStrategy, Swww};
 
 fn main() -> Result<(), String> {
     let swww = Swww::parse();
-    if let Swww::Init { no_daemon, .. } = &swww {
+    if let Swww::Init {
+        no_daemon, format, ..
+    } = &swww
+    {
         match is_daemon_running() {
             Ok(false) => {
                 let socket_path = get_socket_path();
@@ -46,7 +49,7 @@ fn main() -> Result<(), String> {
                 }
             }
         }
-        spawn_daemon(*no_daemon)?;
+        spawn_daemon(*no_daemon, format)?;
         if *no_daemon {
             return Ok(());
         }
@@ -320,8 +323,19 @@ fn split_cmdline_outputs(outputs: &str) -> Box<[String]> {
         .collect()
 }
 
-fn spawn_daemon(no_daemon: bool) -> Result<(), String> {
+fn spawn_daemon(no_daemon: bool, format: &Option<cli::PixelFormat>) -> Result<(), String> {
     let mut cmd = std::process::Command::new("swww-daemon");
+
+    if let Some(format) = format {
+        cmd.arg("--format");
+        cmd.arg(match format {
+            cli::PixelFormat::Xrgb => "xrgb",
+            cli::PixelFormat::Xbgr => "xbgr",
+            cli::PixelFormat::Rgb => "rgb",
+            cli::PixelFormat::Bgr => "bgr",
+        });
+    }
+
     if no_daemon {
         match cmd.status() {
             Ok(_) => Ok(()),
