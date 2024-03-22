@@ -3,8 +3,56 @@
 
 ### 0.8.2-master
 
+#### BREAKING CHANGES
+
+MSRV is now 1.74.0.
+
+#### Fixes
+
+  * fix the `let_underscore_lock` error. Note that all 0.8.* will probably no
+  longer build with newer Rust versions due to that error. By @akida32
+  * fixed webp and gifs that are only a static image
+  * fixed busy waiting for WlBuffers to be released. This was a big one, and it
+  involved rewriting a ton of stuff. We've implemented our own memory pool and
+  are using frame callbacks to know when to draw now. A big thanks to @YaLTeR,
+  @jeLee6gi for their patience and help with debugging and testing this thing.
+  * properly removing all cache contents on `clean-cache`
+  * always center images that are larger than the monitor
+  * animations no longer overlap when sending two animated images in succession
+  * fix randomize script trying to use directories as images. Fix was suggested
+  by @MRSS02
+  * waiting for child swww process when loading the cache, preventing zombie
+  processes
+  * waiting for daemon initialization before certain requests. By @musjj
+
+#### Improvements
+
+  * New, better compression function implementations. We are now using some
+  SIMD code to accelerate the frame compression functions, leading to some nice
+  speedups in some cases. Thanks to @Akida31 for their help in verying my unsafe
+  code.
+  * We are using 3 channel color formats for some nice perf and memory
+  improvements. Unfortunately, it seems to not work for some people on some
+  notebooks (see [Known Issues](#known-issues)).
+  * Implemented a way to force the use of a specific wayland_shm format, as a
+  workaround for [Known Issues](#known-issues).
+  * Support for animated pngs
+  * Support for animations when piping images from standard input
+  * Fps is now a `u16`, so we can support newest monitors framerates
+  * Created a `restore` command to manually restore the cache. By @musjj
+  * GitHub actions! Big thanks to @MichaelOultram!
+
+#### Known Issues
+
+Some people are having some problems with the 3 channel color formats (see issue
+#233). Currently, initializing the daemon with `swww-daemon --format xrgb` is a
+workaround to that.
 
 ### 0.8.2
+
+NOTE ALL 0.8.* VERSIONS WILL PROBABLY NO LONGER BUILD WITH NEWER RUST VERSIONS.
+This is because Rust promoted `let_underscore_lock` to a hard error, which
+wasn't the case at the time we've published these versions.
 
 #### **ATTENTION PACKAGE MAINTAINERS** 
 
