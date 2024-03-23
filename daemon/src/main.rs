@@ -119,7 +119,7 @@ fn main() -> Result<(), String> {
 
     rayon::ThreadPoolBuilder::default()
         .thread_name(|i| format!("rayon thread {i}"))
-        .stack_size(1 << 18) // 256KiB; we do not need a large stack
+        .stack_size(1 << 19) // 512KiB; we do not need a large stack
         .build_global()
         .expect("failed to configure rayon global thread pool");
     make_logger(cli.quiet);
