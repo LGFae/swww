@@ -7,6 +7,11 @@
 
 MSRV is now 1.74.0.
 
+#### Deprecated
+
+`swww init` is now considered deprecated. Use `swww-daemon` instead. To run it
+in the background, simply do `swww-daemon &`.
+
 #### Fixes
 
   * fix the `let_underscore_lock` error. Note that all 0.8.* will probably no
@@ -35,7 +40,8 @@ MSRV is now 1.74.0.
   improvements. Unfortunately, it seems to not work for some people on some
   notebooks (see [Known Issues](#known-issues)).
   * Implemented a way to force the use of a specific wayland_shm format, as a
-  workaround for [Known Issues](#known-issues).
+  workaround for [Known Issues](#known-issues). Also went ahead and implemented
+  some cli options for the daemon.
   * Support for animated pngs
   * Support for animations when piping images from standard input
   * Fps is now a `u16`, so we can support newest monitors framerates

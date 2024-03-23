@@ -11,7 +11,7 @@ swww-kill
 *-h*, *--help*
 	Print help (see a summary with '-h')
 
-# DESCRIPTION 
+# DESCRIPTION
 
 Kills the daemon. This is the recommended way of doing it, since we wait to make
 sure the socket file was deleted, thus confirming the daemon exited.

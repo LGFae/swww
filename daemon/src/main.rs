@@ -4,6 +4,7 @@
 
 mod animations;
 pub mod bump_pool;
+mod cli;
 mod wallpaper;
 use log::{debug, error, info, warn, LevelFilter};
 use nix::{
@@ -103,37 +104,17 @@ extern "C" fn signal_handler(_s: i32) {
 }
 
 fn main() -> Result<(), String> {
-    let mut args = std::env::args();
-    let _ = args.next();
-    if let Some(arg) = args.next() {
-        if arg != "--format" {
-            return Err(format!("Unrecognized command line argument: {arg}"));
-        }
+    let cli = cli::Cli::new();
 
-        match args.next().as_deref() {
-            Some("xrgb") => {
-                PIXEL_FORMAT.set(PixelFormat::Xrgb).unwrap();
-                WL_SHM_FORMAT.set(wl_shm::Format::Xrgb8888).unwrap();
-            }
-            Some("xbgr") => {
-                PIXEL_FORMAT.set(PixelFormat::Xbgr).unwrap();
-                WL_SHM_FORMAT.set(wl_shm::Format::Xbgr8888).unwrap();
-            }
-            Some("rgb") => {
-                PIXEL_FORMAT.set(PixelFormat::Rgb).unwrap();
-                WL_SHM_FORMAT.set(wl_shm::Format::Rgb888).unwrap();
-            }
-            Some("bgr") => {
-                PIXEL_FORMAT.set(PixelFormat::Bgr).unwrap();
-                WL_SHM_FORMAT.set(wl_shm::Format::Bgr888).unwrap();
-            }
-            _ => {
-                return Err(
-                    "`--format` command line option must be one of: 'xrgb', 'xbgr', 'rgb' or 'bgr'"
-                        .to_string(),
-                )
-            }
+    if let Some(format) = cli.format {
+        PIXEL_FORMAT.set(format).unwrap();
+        match format {
+            PixelFormat::Xrgb => WL_SHM_FORMAT.set(wl_shm::Format::Xrgb8888),
+            PixelFormat::Xbgr => WL_SHM_FORMAT.set(wl_shm::Format::Xbgr8888),
+            PixelFormat::Rgb => WL_SHM_FORMAT.set(wl_shm::Format::Rgb888),
+            PixelFormat::Bgr => WL_SHM_FORMAT.set(wl_shm::Format::Bgr888),
         }
+        .unwrap()
     }
 
     rayon::ThreadPoolBuilder::default()
@@ -141,7 +122,7 @@ fn main() -> Result<(), String> {
         .stack_size(1 << 18) // 256KiB; we do not need a large stack
         .build_global()
         .expect("failed to configure rayon global thread pool");
-    make_logger();
+    make_logger(cli.quiet);
     let listener = SocketWrapper::new()?;
     let wake = setup_signals_and_pipe();
 
@@ -691,14 +672,18 @@ impl ProvidesRegistryState for Daemon {
     registry_handlers![OutputState];
 }
 
-fn make_logger() {
+fn make_logger(quiet: bool) {
     let config = simplelog::ConfigBuilder::new()
         .set_thread_level(LevelFilter::Error) // let me see where the processing is happening
         .set_thread_mode(ThreadLogMode::Both)
         .build();
 
     TermLogger::init(
-        LevelFilter::Debug,
+        if quiet {
+            LevelFilter::Error
+        } else {
+            LevelFilter::Debug
+        },
         config,
         TerminalMode::Stderr,
         ColorChoice::AlwaysAnsi,

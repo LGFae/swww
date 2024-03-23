@@ -21,6 +21,9 @@ fn main() -> Result<(), String> {
         no_daemon, format, ..
     } = &swww
     {
+        eprintln!(
+            "DEPRECATION WARNING: `swww init` IS DEPRECATED. Call `swww-daemon` directly instead"
+        );
         match is_daemon_running() {
             Ok(false) => {
                 let socket_path = get_socket_path();
