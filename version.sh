@@ -18,13 +18,19 @@ cargo test --workspace -- --include-ignored
 ./doc/gen.sh # make sure the docs "compile"
 
 # Cargo.toml:
-sed "s/^version = .*/version = \"$1\"/" Cargo.toml > TMP
+sed \
+	-e "s/^version = .*/version = \"$1\"/" \
+	-e "s/^utils.*/utils = { version = \"$1\", path = \"utils\" }/" \
+	Cargo.toml > TMP
 mv -v TMP Cargo.toml
 
 sed "s/^version = .*/version = \"$1\"/" utils/Cargo.toml > TMP
 mv -v TMP utils/Cargo.toml
 
-sed "s/^version = .*/version = \"$1\"/" daemon/Cargo.toml > TMP
+sed \
+	-e "s/^version = .*/version = \"$1\"/" \
+	-e "s/^utils.*/utils = { version = \"$1\", path = \"..\/utils\" }/" \
+	daemon/Cargo.toml > TMP
 mv -v TMP daemon/Cargo.toml
 
 # CHANGELOG:
