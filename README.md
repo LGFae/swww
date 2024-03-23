@@ -82,9 +82,9 @@ makes switching from one image to the next to happen very abruptly.
 
 Start by initializing the daemon:
 ```
-swww init
+swww-daemon
 ```
-Then, simply pass the image you want to display:
+Then, in a different terminal, simply pass the image you want to display:
 ```
 swww img <path/to/img>
 

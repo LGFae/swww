@@ -11,7 +11,7 @@ swww-query
 *-h*, *--help*
 	Print help (see a summary with '-h')
 
-# DESCRIPTION 
+# DESCRIPTION
 
 Asks the daemon to print output information (names and dimensions).
 

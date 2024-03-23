@@ -24,7 +24,7 @@ mv -v TMP Cargo.toml
 sed "s/^version = .*/version = \"$1\"/" utils/Cargo.toml > TMP
 mv -v TMP utils/Cargo.toml
 
-sed "s/^version = .*/version = \"$1\"/" daemon/Cargo.toml > TM
+sed "s/^version = .*/version = \"$1\"/" daemon/Cargo.toml > TMP
 mv -v TMP daemon/Cargo.toml
 
 # CHANGELOG:

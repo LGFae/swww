@@ -38,7 +38,7 @@ swww-img
 
 *--resize* <RESIZE>
 	Whether to resize the image and the method by which to resize it.
-	
+
 	Possible values:
 		- _no_:   Do not resize the image
 		- _crop_: Resize the image to fill the whole screen, cropping out parts that don't fit
@@ -83,7 +83,7 @@ swww-img
 	_none_ is an alias to _simple_, that also sets the _transition-step_ to
 	255. This has the effect of the transition completing instantly.
 
-	_fade_ is like _simple_ but uses bezier curves while fading the image, its a 
+	_fade_ is like _simple_ but uses bezier curves while fading the image, its a
 	more polished looking version of _simple_ with less artifacts
 
 	The _left_, _right_, _top_ and _bottom_ options make the transition	happen
@@ -222,7 +222,7 @@ Importantly, **cache will only be loaded during initialization if you use swww
 init**. That is, calling `swww-daemon` directly will **NOT** load the cache, but
 calling `swww-init` will.
 
-The `swww-daemon` will actually wait until the first image has been set before 
+The `swww-daemon` will actually wait until the first image has been set before
 trying to load the cache.
 
 Finally, the cache will keep preprocessed versions of `gif`s. So, if you load a
