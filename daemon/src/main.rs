@@ -71,13 +71,16 @@ fn should_daemon_exit() -> bool {
 }
 
 static POLL_WAKER: OnceLock<OwnedFd> = OnceLock::new();
-static WL_SHM_FORMAT: OnceLock<wl_shm::Format> = OnceLock::new();
 static PIXEL_FORMAT: OnceLock<PixelFormat> = OnceLock::new();
 
 #[inline]
 pub fn wl_shm_format() -> wl_shm::Format {
-    debug_assert!(WL_SHM_FORMAT.get().is_some());
-    *WL_SHM_FORMAT.get().unwrap_or(&wl_shm::Format::Xrgb8888)
+    match pixel_format() {
+        PixelFormat::Xrgb => wl_shm::Format::Xrgb8888,
+        PixelFormat::Xbgr => wl_shm::Format::Xbgr8888,
+        PixelFormat::Rgb => wl_shm::Format::Rgb888,
+        PixelFormat::Bgr => wl_shm::Format::Bgr888,
+    }
 }
 
 #[inline]
@@ -109,13 +112,6 @@ fn main() -> Result<(), String> {
 
     if let Some(format) = cli.format {
         PIXEL_FORMAT.set(format).unwrap();
-        match format {
-            PixelFormat::Xrgb => WL_SHM_FORMAT.set(wl_shm::Format::Xrgb8888),
-            PixelFormat::Xbgr => WL_SHM_FORMAT.set(wl_shm::Format::Xbgr8888),
-            PixelFormat::Rgb => WL_SHM_FORMAT.set(wl_shm::Format::Rgb888),
-            PixelFormat::Bgr => WL_SHM_FORMAT.set(wl_shm::Format::Bgr888),
-        }
-        .unwrap();
         info!("Forced usage of wl_shm format: {:?}", wl_shm_format());
     }
 
@@ -478,7 +474,6 @@ impl OutputHandler for Daemon {
     ) {
         if PIXEL_FORMAT.get().is_none() {
             assert!(PIXEL_FORMAT.set(self.pixel_format).is_ok());
-            assert!(WL_SHM_FORMAT.set(self.shm_format).is_ok());
             log::info!("Selected wl_shm format: {:?}", self.shm_format);
         }
         if let Some(output_info) = self.output_state.info(&output) {

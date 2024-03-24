@@ -120,10 +120,17 @@ fn process_swww_args(args: &Swww) -> Result<(), String> {
 
 fn make_request(args: &Swww) -> Result<Option<Request>, String> {
     match args {
-        Swww::Clear(c) => Ok(Some(Request::Clear(ipc::Clear {
-            color: c.color,
-            outputs: split_cmdline_outputs(&c.outputs),
-        }))),
+        Swww::Clear(c) => {
+            let (format, _, _) = get_format_dims_and_outputs(&[])?;
+            let mut color = c.color;
+            if format.must_swap_r_and_b_channels() {
+                color.swap(0, 2);
+            }
+            Ok(Some(Request::Clear(ipc::Clear {
+                color,
+                outputs: split_cmdline_outputs(&c.outputs),
+            })))
+        }
         Swww::Restore(restore) => {
             let requested_outputs = split_cmdline_outputs(&restore.outputs);
             restore_from_cache(&requested_outputs)?;

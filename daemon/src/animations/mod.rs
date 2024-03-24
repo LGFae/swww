@@ -56,20 +56,16 @@ impl Animator {
                     w.set_img_info(BgImg::Img(path.to_string()));
                 }
                 let dimensions = wallpapers[0].get_dimensions();
+                let expected_len = dimensions.0 as usize
+                    * dimensions.1 as usize
+                    * crate::pixel_format().channels() as usize;
 
-                if img.len()
-                    == dimensions.0 as usize
-                        * dimensions.1 as usize
-                        * crate::pixel_format().channels() as usize
-                {
-                    Transition::new(wallpapers, dimensions, transition.clone()).execute(img);
+                if img.len() == expected_len {
+                    Transition::new(wallpapers, dimensions, transition).execute(img);
                 } else {
                     error!(
-                        "image is of wrong size! Image len: {}, expected size: {}",
+                        "image is of wrong size! Image len: {}, expected len: {expected_len}",
                         img.len(),
-                        dimensions.0 as usize
-                            * dimensions.1 as usize
-                            * crate::pixel_format().channels() as usize
                     );
                 }
             })
