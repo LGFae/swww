@@ -136,11 +136,8 @@ fn make_request(args: &Swww) -> Result<Option<Request>, String> {
             let imgbuf = ImgBuf::new(&img.path)?;
             if imgbuf.is_animated() {
                 let animations = {
-                    let first_frame = imgbuf
-                        .decode()
-                        .map_err(|e| format!("unable to decode first frame: {e}"))?;
-
-                    let img_request = make_img_request(img, first_frame, format, &dims, &outputs)?;
+                    let first_frame = imgbuf.decode(format)?;
+                    let img_request = make_img_request(img, first_frame, &dims, &outputs)?;
                     let animations = make_animation_request(img, &imgbuf, &dims, format, &outputs);
 
                     let socket = connect_to_socket(5, 100)?;
@@ -156,9 +153,9 @@ fn make_request(args: &Swww) -> Result<Option<Request>, String> {
 
                 Ok(Some(Request::Animation(animations)))
             } else {
-                let img_raw = imgbuf.decode()?;
+                let img_raw = imgbuf.decode(format)?;
                 Ok(Some(Request::Img(make_img_request(
-                    img, img_raw, format, &dims, &outputs,
+                    img, img_raw, &dims, &outputs,
                 )?)))
             }
         }
@@ -175,8 +172,7 @@ fn make_request(args: &Swww) -> Result<Option<Request>, String> {
 
 fn make_img_request(
     img: &cli::Img,
-    img_raw: image::RgbImage,
-    pixel_format: ArchivedPixelFormat,
+    img_raw: Image,
     dims: &[(u32, u32)],
     outputs: &[Vec<String>],
 ) -> Result<ipc::ImageRequest, String> {
@@ -195,22 +191,12 @@ fn make_img_request(
         };
 
         let img = match img.resize {
-            ResizeStrategy::No => img_pad(img_raw.clone(), *dim, pixel_format, &img.fill_color)?,
-            ResizeStrategy::Crop => img_resize_crop(
-                img_raw.clone(),
-                *dim,
-                pixel_format,
-                make_filter(&img.filter),
-            )?,
-            ResizeStrategy::Fit => img_resize_fit(
-                img_raw.clone(),
-                *dim,
-                pixel_format,
-                make_filter(&img.filter),
-                &img.fill_color,
-            )?,
-        }
-        .into_boxed_slice();
+            ResizeStrategy::No => img_pad(&img_raw, *dim, &img.fill_color)?,
+            ResizeStrategy::Crop => img_resize_crop(&img_raw, *dim, make_filter(&img.filter))?,
+            ResizeStrategy::Fit => {
+                img_resize_fit(&img_raw, *dim, make_filter(&img.filter), &img.fill_color)?
+            }
+        };
 
         unique_requests.push((
             ipc::Img { img, path },

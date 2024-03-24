@@ -105,6 +105,7 @@ extern "C" fn signal_handler(_s: i32) {
 
 fn main() -> Result<(), String> {
     let cli = cli::Cli::new();
+    make_logger(cli.quiet);
 
     if let Some(format) = cli.format {
         PIXEL_FORMAT.set(format).unwrap();
@@ -114,7 +115,8 @@ fn main() -> Result<(), String> {
             PixelFormat::Rgb => WL_SHM_FORMAT.set(wl_shm::Format::Rgb888),
             PixelFormat::Bgr => WL_SHM_FORMAT.set(wl_shm::Format::Bgr888),
         }
-        .unwrap()
+        .unwrap();
+        info!("Forced usage of wl_shm format: {:?}", wl_shm_format());
     }
 
     rayon::ThreadPoolBuilder::default()
@@ -122,7 +124,7 @@ fn main() -> Result<(), String> {
         .stack_size(1 << 19) // 512KiB; we do not need a large stack
         .build_global()
         .expect("failed to configure rayon global thread pool");
-    make_logger(cli.quiet);
+
     let listener = SocketWrapper::new()?;
     let wake = setup_signals_and_pipe();
 
