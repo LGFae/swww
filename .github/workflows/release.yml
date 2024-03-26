@@ -1,0 +1,49 @@
+name: Build binaries
+
+on: [push]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v1
+
+      - name: Install latest rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          default: true
+          override: true
+
+      - name: Install dependencies
+        run: sudo apt-get install -y libxkbcommon-dev libxkbcommon0 scdoc
+
+      - name: Build swww
+        run: cargo build --all --release
+
+      - name: Generate manpages
+        run: ./doc/gen.sh
+
+      - name: Package into a zip file
+        if: startswith(github.ref, 'refs/tags/')
+        run: |
+          zip swww-${{github.ref_name}}-amd64.zip \
+          CHANGELOG.md \
+          LICENSE \
+          README.md \
+          completions/* \
+          doc/generated/* \
+          target/release/swww \
+          target/release/swww-daemon
+
+      - name: Generate release
+        uses: softprops/action-gh-release@v1
+        if: startswith(github.ref, 'refs/tags/')
+        with:
+          files: swww-${{github.ref_name}}-amd64.zip
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
