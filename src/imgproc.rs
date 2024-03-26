@@ -133,6 +133,7 @@ pub struct Image {
 }
 
 impl Image {
+    #[must_use]
     fn crop(&self, x: u32, y: u32, width: u32, height: u32) -> Self {
         // make sure we don't crop a region larger than the image
         let x = x.min(self.width) as usize;
@@ -279,15 +280,18 @@ pub fn img_pad(img: &Image, dimensions: (u32, u32), color: &[u8; 3]) -> Result<B
     let (padded_w, padded_h) = (padded_w as usize, padded_h as usize);
     let mut padded = Vec::with_capacity(padded_h * padded_w * channels);
 
-    if img.width > dimensions.0 || img.height > dimensions.1 {
+    let img = if img.width > dimensions.0 || img.height > dimensions.1 {
         let left = (img.width - dimensions.0) / 2;
         let top = (img.height - dimensions.1) / 2;
-        img.crop(left, top, dimensions.0, dimensions.1);
+        img.crop(left, top, dimensions.0, dimensions.1)
     } else {
-        img.crop(0, 0, dimensions.0, dimensions.1);
-    }
+        img.crop(0, 0, dimensions.0, dimensions.1)
+    };
 
-    let (img_w, img_h) = (img.width as usize, img.height as usize);
+    let (img_w, img_h) = (
+        (img.width as usize).min(padded_w),
+        (img.height as usize).min(padded_h),
+    );
 
     for _ in 0..(((padded_h - img_h) / 2) * padded_w) {
         padded.extend_from_slice(color);
