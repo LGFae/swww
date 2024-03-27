@@ -201,15 +201,9 @@ impl Wallpaper {
             .store(false, Ordering::Release);
     }
 
-    pub(super) fn clear(&self, mut color: [u8; 3]) {
-        let pixel_format = super::pixel_format();
-
-        if pixel_format.must_swap_r_and_b_channels() {
-            color.swap(0, 2);
-        }
-
+    pub(super) fn clear(&self, color: [u8; 3]) {
         self.canvas_change(|canvas| {
-            for pixel in canvas.chunks_exact_mut(pixel_format.channels().into()) {
+            for pixel in canvas.chunks_exact_mut(crate::pixel_format().channels().into()) {
                 pixel[0..3].copy_from_slice(&color);
             }
         })

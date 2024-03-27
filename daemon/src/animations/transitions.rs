@@ -27,7 +27,6 @@ pub(super) struct Transition {
     bezier: BezierCurve,
     wave: (f32, f32),
     invert_y: bool,
-    color_channels: usize,
 }
 
 /// All transitions return whether or not they completed
@@ -35,7 +34,7 @@ impl Transition {
     pub(super) fn new(
         wallpapers: Vec<Arc<Wallpaper>>,
         dimensions: (u32, u32),
-        transition: utils::ipc::ArchivedTransition,
+        transition: &utils::ipc::ArchivedTransition,
     ) -> Self {
         Transition {
             animation_tokens: wallpapers
@@ -44,12 +43,12 @@ impl Transition {
                 .collect(),
             wallpapers,
             dimensions,
-            transition_type: transition.transition_type,
+            transition_type: transition.transition_type.clone(),
             duration: transition.duration,
             step: transition.step,
             fps: Duration::from_nanos(1_000_000_000 / transition.fps as u64),
             angle: transition.angle,
-            pos: transition.pos,
+            pos: transition.pos.clone(),
             bezier: BezierCurve::from(
                 Vector2 {
                     x: transition.bezier.0,
@@ -62,7 +61,6 @@ impl Transition {
             ),
             wave: transition.wave,
             invert_y: transition.invert_y,
-            color_channels: crate::pixel_format().channels() as usize,
         }
     }
 
@@ -110,51 +108,21 @@ impl Transition {
     fn simple(&mut self, new_img: &[u8]) {
         let step = self.step;
         let mut now = Instant::now();
-        let mut done = false;
-        if self.color_channels == 4 {
-            while !done {
-                done = true;
-                for wallpaper in self.wallpapers.iter_mut() {
-                    wallpaper.canvas_change(|canvas| {
-                        for (old, new) in canvas.chunks_exact_mut(4).zip(new_img.chunks_exact(3)) {
-                            for (old, new) in old.iter_mut().zip(new) {
-                                if old.abs_diff(*new) < step {
-                                    *old = *new;
-                                } else if *old > *new {
-                                    *old -= step;
-                                    done = false;
-                                } else {
-                                    *old += step;
-                                    done = false;
-                                }
-                            }
-                        }
-                    });
-                    wallpaper.draw();
+        let done = std::sync::atomic::AtomicBool::new(false);
+        while !done.load(std::sync::atomic::Ordering::Relaxed) {
+            done.store(true, std::sync::atomic::Ordering::Relaxed);
+            self.draw_all(new_img, |_, old, new| {
+                if old.abs_diff(*new) < step {
+                    *old = *new;
+                } else if *old > *new {
+                    *old -= step;
+                    done.store(false, std::sync::atomic::Ordering::Relaxed);
+                } else {
+                    *old += step;
+                    done.store(false, std::sync::atomic::Ordering::Relaxed);
                 }
-                self.send_frame(&mut now);
-            }
-        } else {
-            while !done {
-                done = true;
-                for wallpaper in self.wallpapers.iter_mut() {
-                    wallpaper.canvas_change(|canvas| {
-                        for (old, new) in canvas.iter_mut().zip(new_img) {
-                            if old.abs_diff(*new) < step {
-                                *old = *new;
-                            } else if *old > *new {
-                                *old -= step;
-                                done = false;
-                            } else {
-                                *old += step;
-                                done = false;
-                            }
-                        }
-                    });
-                    wallpaper.draw();
-                }
-                self.send_frame(&mut now);
-            }
+            });
+            self.send_frame(&mut now);
         }
     }
 
@@ -376,38 +344,22 @@ impl Transition {
 
     /// Runs pixels_change_fn for every byte in the old img
     #[inline(always)]
-    fn draw_all<F>(&mut self, new_img: &[u8], pixels_change_fn: F)
+    fn draw_all<F>(&self, new_img: &[u8], pixels_change_fn: F)
     where
         F: FnOnce(usize, &mut u8, &u8) + Copy + Send + Sync,
     {
-        if self.color_channels == 4 {
-            for wallpaper in self.wallpapers.iter_mut() {
-                wallpaper.canvas_change(|canvas| {
-                    canvas
-                        .par_chunks_exact_mut(4)
-                        .zip(new_img.par_chunks_exact(3))
-                        .enumerate()
-                        .for_each(|(i, (old, new))| {
-                            for (old, new) in old.iter_mut().zip(new) {
-                                pixels_change_fn(i, old, new);
-                            }
-                        });
-                });
-                wallpaper.draw();
-            }
-        } else {
-            for wallpaper in self.wallpapers.iter_mut() {
-                wallpaper.canvas_change(|canvas| {
-                    canvas
-                        .par_iter_mut()
-                        .zip(new_img.par_iter())
-                        .enumerate()
-                        .for_each(|(i, (old, new))| {
-                            pixels_change_fn(i / 3, old, new);
-                        });
-                });
-                wallpaper.draw();
-            }
+        let channels = crate::pixel_format().channels() as usize;
+        for wallpaper in self.wallpapers.iter() {
+            wallpaper.canvas_change(|canvas| {
+                canvas
+                    .par_iter_mut()
+                    .zip(new_img.par_iter())
+                    .enumerate()
+                    .for_each(|(i, (old, new))| {
+                        pixels_change_fn(i / channels, old, new);
+                    });
+            });
+            wallpaper.draw();
         }
     }
 }

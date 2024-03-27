@@ -1,7 +1,7 @@
 use fast_image_resize::{FilterType, PixelType, Resizer};
 use image::{
     codecs::{gif::GifDecoder, png::PngDecoder, webp::WebPDecoder},
-    AnimationDecoder, DynamicImage, Frames, ImageFormat, RgbImage,
+    AnimationDecoder, DynamicImage, Frames, GenericImageView, ImageFormat,
 };
 use std::{
     io::{stdin, Cursor, Read},
@@ -19,7 +19,6 @@ use crate::cli::ResizeStrategy;
 
 use super::cli;
 
-#[derive(Clone)]
 pub struct ImgBuf {
     bytes: Box<[u8]>,
     format: ImageFormat,
@@ -34,11 +33,9 @@ impl ImgBuf {
             stdin()
                 .read_to_end(&mut bytes)
                 .map_err(|e| format!("failed to read standard input: {e}"))?;
-            bytes.into_boxed_slice()
+            bytes
         } else {
-            std::fs::read(path)
-                .map_err(|e| format!("failed to read file: {e}"))?
-                .into_boxed_slice()
+            std::fs::read(path).map_err(|e| format!("failed to read file: {e}"))?
         };
 
         let reader = image::io::Reader::new(Cursor::new(&bytes))
@@ -48,12 +45,9 @@ impl ImgBuf {
         let format = reader.format();
         let is_animated = match format {
             Some(ImageFormat::Gif) => true,
-            Some(ImageFormat::WebP) => {
-                // Note: unwrapping is safe because we already opened the file once before this
-                WebPDecoder::new(Cursor::new(&bytes))
-                    .map_err(|e| format!("failed to decode Webp Image: {e}"))?
-                    .has_animation()
-            }
+            Some(ImageFormat::WebP) => WebPDecoder::new(Cursor::new(&bytes))
+                .map_err(|e| format!("failed to decode Webp Image: {e}"))?
+                .has_animation(),
             Some(ImageFormat::Png) => PngDecoder::new(Cursor::new(&bytes))
                 .map_err(|e| format!("failed to decode Png Image: {e}"))?
                 .is_apng()
@@ -64,7 +58,7 @@ impl ImgBuf {
 
         Ok(Self {
             format: format.unwrap(), // this is ok because we return err earlier if it is None
-            bytes,
+            bytes: bytes.into_boxed_slice(),
             is_animated,
         })
     }
@@ -75,13 +69,37 @@ impl ImgBuf {
     }
 
     /// Decode the ImgBuf into am RgbImage
-    pub fn decode(&self) -> Result<RgbImage, String> {
+    pub fn decode(&self, format: ArchivedPixelFormat) -> Result<Image, String> {
         let mut reader = image::io::Reader::new(Cursor::new(&self.bytes));
         reader.set_format(self.format);
-        Ok(reader
+        let dynimage = reader
             .decode()
-            .map_err(|e| format!("failed to decode image: {e}"))?
-            .into_rgb8())
+            .map_err(|e| format!("failed to decode image: {e}"))?;
+
+        let width = dynimage.width();
+        let height = dynimage.height();
+
+        let bytes = {
+            let mut img = if format.channels() == 3 {
+                dynimage.into_rgb8().into_raw().into_boxed_slice()
+            } else {
+                dynimage.into_rgba8().into_raw().into_boxed_slice()
+            };
+
+            if format.must_swap_r_and_b_channels() {
+                for pixel in img.chunks_exact_mut(format.channels() as usize) {
+                    pixel.swap(0, 2);
+                }
+            }
+            img
+        };
+
+        Ok(Image {
+            width,
+            height,
+            bytes,
+            format,
+        })
     }
 
     /// Convert this ImgBuf into Frames
@@ -106,9 +124,67 @@ impl ImgBuf {
     }
 }
 
-#[inline]
-pub fn frame_to_rgb(frame: image::Frame) -> RgbImage {
-    DynamicImage::ImageRgba8(frame.into_buffer()).into_rgb8()
+/// Created by decoding an ImgBuf
+pub struct Image {
+    width: u32,
+    height: u32,
+    format: ArchivedPixelFormat,
+    bytes: Box<[u8]>,
+}
+
+impl Image {
+    #[must_use]
+    fn crop(&self, x: u32, y: u32, width: u32, height: u32) -> Self {
+        // make sure we don't crop a region larger than the image
+        let x = x.min(self.width) as usize;
+        let y = y.min(self.height) as usize;
+        let width = (width as usize).min(self.width as usize - x);
+        let height = (height as usize).min(self.height as usize - y);
+
+        let mut bytes = Vec::with_capacity(width * height * self.format.channels() as usize);
+
+        let begin = ((y * self.width as usize) + x) * self.format.channels() as usize;
+        let stride = self.width as usize * self.format.channels() as usize;
+        let row_size = width * self.format.channels() as usize;
+
+        for row_index in 0..height {
+            let row = begin + row_index * stride;
+            bytes.extend_from_slice(&self.bytes[row..row + row_size]);
+        }
+
+        Self {
+            width: width as u32,
+            height: height as u32,
+            bytes: bytes.into_boxed_slice(),
+            format: self.format,
+        }
+    }
+
+    fn from_frame(frame: image::Frame, format: ArchivedPixelFormat) -> Self {
+        let dynimage = DynamicImage::ImageRgba8(frame.into_buffer());
+        let (width, height) = dynimage.dimensions();
+
+        // NOTE: when animating frames, we ALWAYS use 3 channels
+
+        let format = match format {
+            ArchivedPixelFormat::Bgr | ArchivedPixelFormat::Xbgr => ArchivedPixelFormat::Bgr,
+            ArchivedPixelFormat::Rgb | ArchivedPixelFormat::Xrgb => ArchivedPixelFormat::Rgb,
+        };
+
+        let mut bytes = dynimage.into_rgb8().into_raw().into_boxed_slice();
+        if format.must_swap_r_and_b_channels() {
+            for pixel in bytes.chunks_exact_mut(3) {
+                pixel.swap(0, 2);
+            }
+        }
+
+        Self {
+            width,
+            height,
+            format,
+            bytes,
+        }
+    }
 }
 
 pub fn compress_frames(
@@ -126,21 +202,23 @@ pub fn compress_frames(
     let first = frames.next().unwrap().unwrap();
     let first_duration = first.delay().numer_denom_ms();
     let mut first_duration = Duration::from_millis((first_duration.0 / first_duration.1).into());
+    let first_img = Image::from_frame(first, format);
     let first_img = match resize {
-        ResizeStrategy::No => img_pad(frame_to_rgb(first), dim, format, color)?,
-        ResizeStrategy::Crop => img_resize_crop(frame_to_rgb(first), dim, format, filter)?,
-        ResizeStrategy::Fit => img_resize_fit(frame_to_rgb(first), dim, format, filter, color)?,
+        ResizeStrategy::No => img_pad(&first_img, dim, color)?,
+        ResizeStrategy::Crop => img_resize_crop(&first_img, dim, filter)?,
+        ResizeStrategy::Fit => img_resize_fit(&first_img, dim, filter, color)?,
     };
 
-    let mut canvas: Option<Vec<u8>> = None;
+    let mut canvas: Option<Box<[u8]>> = None;
     while let Some(Ok(frame)) = frames.next() {
         let (dur_num, dur_div) = frame.delay().numer_denom_ms();
         let duration = Duration::from_millis((dur_num / dur_div).into());
 
+        let img = Image::from_frame(frame, format);
         let img = match resize {
-            ResizeStrategy::No => img_pad(frame_to_rgb(frame), dim, format, color)?,
-            ResizeStrategy::Crop => img_resize_crop(frame_to_rgb(frame), dim, format, filter)?,
-            ResizeStrategy::Fit => img_resize_fit(frame_to_rgb(frame), dim, format, filter, color)?,
+            ResizeStrategy::No => img_pad(&img, dim, color)?,
+            ResizeStrategy::Crop => img_resize_crop(&img, dim, filter)?,
+            ResizeStrategy::Fit => img_resize_fit(&img, dim, filter, color)?,
         };
 
         if let Some(canvas) = canvas.as_ref() {
@@ -184,35 +262,39 @@ pub fn make_filter(filter: &cli::Filter) -> fast_image_resize::FilterType {
     }
 }
 
-pub fn img_pad(
-    mut img: RgbImage,
-    dimensions: (u32, u32),
-    format: ArchivedPixelFormat,
-    color: &[u8; 3],
-) -> Result<Vec<u8>, String> {
-    let mut color = color.to_owned();
-    if format.must_swap_r_and_b_channels() {
+pub fn img_pad(img: &Image, dimensions: (u32, u32), color: &[u8; 3]) -> Result<Box<[u8]>, String> {
+    let channels = img.format.channels() as usize;
+
+    let mut color3 = color.to_owned();
+    let mut color4 = [color[0], color[1], color[2], 255];
+    let color: &mut [u8] = if channels == 3 {
+        &mut color3
+    } else {
+        &mut color4
+    };
+
+    if img.format.must_swap_r_and_b_channels() {
         color.swap(0, 2);
     }
     let (padded_w, padded_h) = dimensions;
     let (padded_w, padded_h) = (padded_w as usize, padded_h as usize);
-    let mut padded = Vec::with_capacity(padded_h * padded_w * 3);
+    let mut padded = Vec::with_capacity(padded_h * padded_w * channels);
 
-    let img = {
-        if img.width() > dimensions.0 || img.height() > dimensions.1 {
-            let left = (img.width() - dimensions.0) / 2;
-            let top = (img.height() - dimensions.1) / 2;
-            image::imageops::crop(&mut img, left, top, dimensions.0, dimensions.1).to_image()
-        } else {
-            image::imageops::crop(&mut img, 0, 0, dimensions.0, dimensions.1).to_image()
-        }
+    let img = if img.width > dimensions.0 || img.height > dimensions.1 {
+        let left = (img.width - dimensions.0) / 2;
+        let top = (img.height - dimensions.1) / 2;
+        img.crop(left, top, dimensions.0, dimensions.1)
+    } else {
+        img.crop(0, 0, dimensions.0, dimensions.1)
     };
-    let (img_w, img_h) = img.dimensions();
-    let (img_w, img_h) = (img_w as usize, img_h as usize);
-    let raw_img = img.into_vec();
+
+    let (img_w, img_h) = (
+        (img.width as usize).min(padded_w),
+        (img.height as usize).min(padded_h),
+    );
 
     for _ in 0..(((padded_h - img_h) / 2) * padded_w) {
-        padded.extend(color);
+        padded.extend_from_slice(color);
     }
 
     // Calculate left and right border widths. `u32::div` rounds toward 0, so, if `img_w` is odd,
@@ -222,70 +304,62 @@ pub fn img_pad(
 
     for row in 0..img_h {
         for _ in 0..left_border_w {
-            padded.extend(color);
+            padded.extend_from_slice(color);
         }
 
-        for pixel in raw_img[(row * img_w * 3)..((row + 1) * img_w * 3)].chunks_exact(3) {
-            if format.must_swap_r_and_b_channels() {
-                padded.extend(pixel.iter().rev());
-            } else {
-                padded.extend(pixel);
-            }
-        }
+        padded.extend_from_slice(
+            &img.bytes[(row * img_w * channels)..((row + 1) * img_w * channels)],
+        );
+
         for _ in 0..right_border_w {
-            padded.extend(color);
+            padded.extend_from_slice(color);
         }
     }
 
-    while padded.len() < (padded_h * padded_w * 3) {
-        padded.extend(color);
+    while padded.len() < (padded_h * padded_w * channels) {
+        padded.extend_from_slice(color);
     }
 
-    Ok(padded)
-}
-
-/// Convert an RGB &[u8] to BRG in-place by swapping bytes
-#[inline]
-fn rgb_to_brg(rgb: &mut [u8]) {
-    for pixel in rgb.chunks_exact_mut(3) {
-        pixel.swap(0, 2);
-    }
+    Ok(padded.into_boxed_slice())
 }
 
 /// Resize an image to fit within the given dimensions, covering as much space as possible without
 /// cropping.
 pub fn img_resize_fit(
-    img: RgbImage,
+    img: &Image,
     dimensions: (u32, u32),
-    format: ArchivedPixelFormat,
     filter: FilterType,
     padding_color: &[u8; 3],
-) -> Result<Vec<u8>, String> {
+) -> Result<Box<[u8]>, String> {
     let (width, height) = dimensions;
-    let (img_w, img_h) = img.dimensions();
-    if (img_w, img_h) != (width, height) {
+    if (img.width, img.height) != (width, height) {
         // if our image is already scaled to fit, skip resizing it and just pad it directly
-        if img_w == width || img_h == height {
-            return img_pad(img, dimensions, format, padding_color);
+        if img.width == width || img.height == height {
+            return img_pad(img, dimensions, padding_color);
         }
 
         let ratio = width as f32 / height as f32;
-        let img_r = img_w as f32 / img_h as f32;
+        let img_r = img.width as f32 / img.height as f32;
 
         let (trg_w, trg_h) = if ratio > img_r {
-            let scale = height as f32 / img_h as f32;
-            ((img_w as f32 * scale) as u32, height)
+            let scale = height as f32 / img.height as f32;
+            ((img.width as f32 * scale) as u32, height)
         } else {
-            let scale = width as f32 / img_w as f32;
-            (width, (img_h as f32 * scale) as u32)
+            let scale = width as f32 / img.width as f32;
+            (width, (img.height as f32 * scale) as u32)
         };
 
+        let pixel_type = if img.format.channels() == 3 {
+            PixelType::U8x3
+        } else {
+            PixelType::U8x4
+        };
         let src = match fast_image_resize::Image::from_vec_u8(
             // We unwrap below because we know the images's dimensions should never be 0
-            NonZeroU32::new(img_w).unwrap(),
-            NonZeroU32::new(img_h).unwrap(),
-            img.into_raw(),
-            PixelType::U8x3,
+            NonZeroU32::new(img.width).unwrap(),
+            NonZeroU32::new(img.height).unwrap(),
+            img.bytes.to_vec(),
+            pixel_type,
         ) {
             Ok(i) => i,
             Err(e) => return Err(e.to_string()),
@@ -295,7 +369,7 @@ pub fn img_resize_fit(
         let new_w = NonZeroU32::new(trg_w).unwrap();
         let new_h = NonZeroU32::new(trg_h).unwrap();
 
-        let mut dst = fast_image_resize::Image::new(new_w, new_h, PixelType::U8x3);
+        let mut dst = fast_image_resize::Image::new(new_w, new_h, pixel_type);
         let mut dst_view = dst.view_mut();
 
         let mut resizer = Resizer::new(fast_image_resize::ResizeAlg::Convolution(filter));
@@ -303,36 +377,36 @@ pub fn img_resize_fit(
             return Err(e.to_string());
         }
 
-        img_pad(
-            image::RgbImage::from_raw(trg_w, trg_h, dst.into_vec()).unwrap(),
-            dimensions,
-            format,
-            padding_color,
-        )
+        let img = Image {
+            width: trg_w,
+            height: trg_h,
+            format: img.format,
+            bytes: dst.into_vec().into_boxed_slice(),
+        };
+        img_pad(&img, dimensions, padding_color)
     } else {
-        let mut res = img.into_vec();
-        if format.must_swap_r_and_b_channels() {
-            rgb_to_brg(&mut res);
-        }
-        Ok(res)
+        Ok(img.bytes.clone())
     }
 }
 
 pub fn img_resize_crop(
-    img: RgbImage,
+    img: &Image,
     dimensions: (u32, u32),
-    format: ArchivedPixelFormat,
     filter: FilterType,
-) -> Result<Vec<u8>, String> {
+) -> Result<Box<[u8]>, String> {
     let (width, height) = dimensions;
-    let (img_w, img_h) = img.dimensions();
-    let mut resized_img = if (img_w, img_h) != (width, height) {
+    let resized_img = if (img.width, img.height) != (width, height) {
+        let pixel_type = if img.format.channels() == 3 {
+            PixelType::U8x3
+        } else {
+            PixelType::U8x4
+        };
         let src = match fast_image_resize::Image::from_vec_u8(
             // We unwrap below because we know the images's dimensions should never be 0
-            NonZeroU32::new(img_w).unwrap(),
-            NonZeroU32::new(img_h).unwrap(),
-            img.into_raw(),
-            PixelType::U8x3,
+            NonZeroU32::new(img.width).unwrap(),
+            NonZeroU32::new(img.height).unwrap(),
+            img.bytes.to_vec(),
+            pixel_type,
         ) {
             Ok(i) => i,
             Err(e) => return Err(e.to_string()),
@@ -344,7 +418,7 @@ pub fn img_resize_crop(
         let mut src_view = src.view();
         src_view.set_crop_box_to_fit_dst_size(new_w, new_h, Some((0.5, 0.5)));
 
-        let mut dst = fast_image_resize::Image::new(new_w, new_h, PixelType::U8x3);
+        let mut dst = fast_image_resize::Image::new(new_w, new_h, pixel_type);
         let mut dst_view = dst.view_mut();
 
         let mut resizer = Resizer::new(fast_image_resize::ResizeAlg::Convolution(filter));
@@ -352,14 +426,10 @@ pub fn img_resize_crop(
             return Err(e.to_string());
         }
 
-        dst.into_vec()
+        dst.into_vec().into_boxed_slice()
     } else {
-        img.into_vec()
+        img.bytes.clone()
     };
-
-    if format.must_swap_r_and_b_channels() {
-        rgb_to_brg(&mut resized_img);
-    }
 
     Ok(resized_img)
 }
