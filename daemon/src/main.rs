@@ -220,7 +220,20 @@ fn setup_signals_and_pipe() -> OwnedFd {
 struct SocketWrapper(UnixListener);
 impl SocketWrapper {
     fn new() -> Result<Self, String> {
+        if is_daemon_running()? {
+            return Err("There is an swww-daemon instance already running!".to_string());
+        }
+
         let socket_addr = get_socket_path();
+        if socket_addr.exists() {
+            warn!(
+                "socket file {} was not deleted when the previous daemon exited",
+                socket_addr.to_string_lossy()
+            );
+            if let Err(e) = std::fs::remove_file(&socket_addr) {
+                return Err(format!("failed to delete previous socket: {e}"));
+            }
+        }
         let runtime_dir = match socket_addr.parent() {
             Some(path) => path,
             None => return Err("couldn't find a valid runtime directory".to_owned()),
@@ -683,4 +696,34 @@ fn make_logger(quiet: bool) {
         ColorChoice::AlwaysAnsi,
     )
     .expect("Failed to initialize logger. Cancelling...");
+}
+
+fn is_daemon_running() -> Result<bool, String> {
+    let proc = std::path::PathBuf::from("/proc");
+
+    let entries = match proc.read_dir() {
+        Ok(e) => e,
+        Err(e) => return Err(e.to_string()),
+    };
+
+    for entry in entries.flatten() {
+        let dirname = entry.file_name();
+        if let Ok(pid) = dirname.to_string_lossy().parse::<u32>() {
+            if std::process::id() == pid {
+                continue;
+            }
+            let mut entry_path = entry.path();
+            entry_path.push("cmdline");
+            if let Ok(cmd) = std::fs::read_to_string(entry_path) {
+                let mut args = cmd.split(&[' ', '\0']);
+                if let Some(arg0) = args.next() {
+                    if arg0.ends_with("swww-daemon") {
+                        return Ok(true);
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(false)
 }
