@@ -1,6 +1,9 @@
 #[inline]
 #[target_feature(enable = "ssse3")]
 pub(super) unsafe fn unpack_bytes_4channels(buf: &mut [u8], diff: &[u8]) {
+    #[cfg(target_arch = "x86")]
+    use std::arch::x86 as intr;
+    #[cfg(target_arch = "x86_64")]
     use std::arch::x86_64 as intr;
 
     // The final bytes are just padding to prevent us from going out of bounds

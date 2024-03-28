@@ -30,7 +30,7 @@ pub(super) fn init() {
     ONCE_INIT.call_once(|| unsafe { features::init() });
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 pub mod features {
     decl_feature!(SSE2, sse2);
     decl_feature!(SSSE3, ssse3);
@@ -49,7 +49,7 @@ pub mod features {
     }
 }
 
-#[cfg(not(target_arch = "x86_64"))]
+#[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
 pub mod features {
 
     /// UNIMPLEMENTED!!! This function must exist so that the init function in super compiles on

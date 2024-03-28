@@ -4,6 +4,9 @@
 #[inline]
 #[target_feature(enable = "sse2")]
 unsafe fn count_equals(s1: &[u8], s2: &[u8], mut i: usize) -> usize {
+    #[cfg(target_arch = "x86")]
+    use std::arch::x86 as intr;
+    #[cfg(target_arch = "x86_64")]
     use std::arch::x86_64 as intr;
     let mut equals = 0;
     while i + 15 < s1.len() {
@@ -39,6 +42,9 @@ unsafe fn count_equals(s1: &[u8], s2: &[u8], mut i: usize) -> usize {
 #[inline]
 #[target_feature(enable = "sse2")]
 unsafe fn count_different(s1: &[u8], s2: &[u8], mut i: usize) -> usize {
+    #[cfg(target_arch = "x86")]
+    use std::arch::x86 as intr;
+    #[cfg(target_arch = "x86_64")]
     use std::arch::x86_64 as intr;
     let mut diff = 0;
     while i + 15 < s1.len() {
