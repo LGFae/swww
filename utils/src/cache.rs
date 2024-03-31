@@ -10,8 +10,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use rkyv::{Deserialize, Infallible};
-
 use crate::ipc::{Animation, PixelFormat};
 
 pub fn store(output_name: &str, img_path: &str) -> Result<(), String> {
@@ -34,10 +32,7 @@ pub fn store_animation_frames(animation: &Animation) -> Result<(), String> {
     let mut filepath = cache_dir()?;
     filepath.push(&filename);
 
-    let bytes = match rkyv::to_bytes::<_, 1024>(animation) {
-        Ok(bytes) => bytes,
-        Err(e) => return Err(format!("Failed to serialize request: {e}")),
-    };
+    let bytes = bitcode::encode(animation);
 
     if !filepath.is_file() {
         let file = File::create(filepath).map_err(|e| e.to_string())?;
@@ -74,9 +69,8 @@ pub fn load_animation_frames(
                 .read_to_end(&mut buf)
                 .map_err(|e| format!("failed to read file `{filepath:?}`: {e}"))?;
 
-            let frames = unsafe { rkyv::archived_root::<Animation>(&buf) };
-            let frames: Animation = frames.deserialize(&mut Infallible).unwrap();
-
+            let frames: Animation =
+                bitcode::decode(&buf).expect("failed to decode cached animations");
             return Ok(Some(frames));
         }
     }

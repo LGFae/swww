@@ -45,7 +45,7 @@ pub fn compression_and_decompression(c: &mut Criterion) {
         b.iter(|| {
             black_box(
                 compressor
-                    .compress(&prev, &cur, utils::ipc::ArchivedPixelFormat::Xrgb)
+                    .compress(&prev, &cur, utils::ipc::PixelFormat::Xrgb)
                     .is_some(),
             )
         })
@@ -54,7 +54,7 @@ pub fn compression_and_decompression(c: &mut Criterion) {
 
     let mut decomp = c.benchmark_group("decompression 4 channels");
     let bitpack = compressor
-        .compress(&prev, &cur, utils::ipc::ArchivedPixelFormat::Xrgb)
+        .compress(&prev, &cur, utils::ipc::PixelFormat::Xrgb)
         .unwrap();
     let mut canvas = buf_from(&prev);
 

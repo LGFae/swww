@@ -6,9 +6,9 @@ use comp::pack_bytes;
 use decomp::{unpack_bytes_3channels, unpack_bytes_4channels};
 use std::ffi::{c_char, c_int};
 
-use rkyv::{Archive, Deserialize, Serialize};
+use bitcode::{Decode, Encode};
 
-use crate::ipc::{ArchivedPixelFormat, PixelFormat};
+use crate::ipc::PixelFormat;
 mod comp;
 mod cpu;
 mod decomp;
@@ -45,7 +45,7 @@ extern "C" {
 }
 
 /// This struct represents the cached difference between the previous frame and the next
-#[derive(Archive, Serialize, Deserialize)]
+#[derive(Encode, Decode)]
 pub struct BitPack {
     inner: Box<[u8]>,
     /// This field will ensure we won't ever try to unpack the images on a buffer of the wrong size,
@@ -85,7 +85,7 @@ impl Compressor {
         &mut self,
         prev: &[u8],
         cur: &[u8],
-        pixel_format: ArchivedPixelFormat,
+        pixel_format: PixelFormat,
     ) -> Option<BitPack> {
         assert_eq!(
             prev.len(),
@@ -239,62 +239,6 @@ impl Decompressor {
 
         Ok(())
     }
-
-    ///returns whether unpacking was successful. Note it can only fail if `buf.len() !=
-    ///expected_buf_size`
-    ///This function is identical to its non-archived counterpart
-    #[inline]
-    pub fn decompress_archived(
-        &mut self,
-        archived: &ArchivedBitPack,
-        buf: &mut [u8],
-        pixel_format: PixelFormat,
-    ) -> Result<(), String> {
-        let expected_len: usize = archived
-            .expected_buf_size
-            .deserialize(&mut rkyv::Infallible)
-            .unwrap();
-        if buf.len() != expected_len {
-            return Err(format!(
-                "buf has len {}, but expected len is {}",
-                buf.len(),
-                expected_len
-            ));
-        }
-        let cap: i32 = archived
-            .compressed_size
-            .deserialize(&mut rkyv::Infallible)
-            .unwrap();
-
-        self.ensure_capacity(cap as usize);
-
-        // SAFETY: errors will never happen because BitPacked is *always* only produced
-        // with correct lz4 compression, and ptr has the necessary capacity
-        let size = unsafe {
-            LZ4_decompress_safe(
-                archived.inner.as_ptr() as _,
-                self.ptr.as_ptr() as _,
-                archived.inner.len() as c_int,
-                cap as c_int,
-            )
-        };
-
-        if size != cap {
-            return Err("BitPack is malformed!".to_string());
-        }
-
-        // SAFETY: the call to self.ensure_capacity guarantees the pointer has the necessary size
-        // to hold all the data
-        let v = unsafe { std::slice::from_raw_parts_mut(self.ptr.as_ptr(), cap as usize) };
-
-        if pixel_format.can_copy_directly_onto_wl_buffer() {
-            unpack_bytes_3channels(buf, v);
-        } else {
-            unpack_bytes_4channels(buf, v);
-        }
-
-        Ok(())
-    }
 }
 
 #[cfg(test)]
@@ -302,8 +246,7 @@ mod tests {
     use super::*;
     use rand::prelude::random;
 
-    const C_FORMS: [ArchivedPixelFormat; 2] = [ArchivedPixelFormat::Xrgb, ArchivedPixelFormat::Rgb];
-    const D_FORMS: [PixelFormat; 2] = [PixelFormat::Xrgb, PixelFormat::Rgb];
+    const FORMATS: [PixelFormat; 2] = [PixelFormat::Xrgb, PixelFormat::Rgb];
 
     fn buf_from(slice: &[u8], original_channels: usize) -> Vec<u8> {
         if original_channels == 3 {
@@ -320,22 +263,22 @@ mod tests {
     #[test]
     //Use this when annoying problems show up
     fn small() {
-        for (c_form, d_form) in C_FORMS.into_iter().zip(D_FORMS) {
+        for format in FORMATS {
             let frame1 = [1, 2, 3, 4, 5, 6];
             let frame2 = [1, 2, 3, 6, 5, 4];
             let compressed = Compressor::new()
-                .compress(&frame1, &frame2, c_form)
+                .compress(&frame1, &frame2, format)
                 .unwrap();
 
-            let mut buf = buf_from(&frame1, c_form.channels().into());
+            let mut buf = buf_from(&frame1, format.channels().into());
             Decompressor::new()
-                .decompress(&compressed, &mut buf, d_form)
+                .decompress(&compressed, &mut buf, format)
                 .unwrap();
             for i in 0..2 {
                 for j in 0..3 {
                     assert_eq!(
                         frame2[i * 3 + j],
-                        buf[i * c_form.channels() as usize + j],
+                        buf[i * format.channels() as usize + j],
                         "\nframe2: {frame2:?}, buf: {buf:?}\n"
                     );
                 }
@@ -345,7 +288,7 @@ mod tests {
 
     #[test]
     fn total_random() {
-        for (c_form, d_form) in C_FORMS.into_iter().zip(D_FORMS) {
+        for format in FORMATS.into_iter() {
             for _ in 0..10 {
                 let mut original = Vec::with_capacity(20);
                 for _ in 0..20 {
@@ -361,21 +304,21 @@ mod tests {
                 let mut decompressor = Decompressor::new();
                 compressed.push(
                     compressor
-                        .compress(original.last().unwrap(), &original[0], c_form)
+                        .compress(original.last().unwrap(), &original[0], format)
                         .unwrap(),
                 );
                 for i in 1..20 {
                     compressed.push(
                         compressor
-                            .compress(&original[i - 1], &original[i], c_form)
+                            .compress(&original[i - 1], &original[i], format)
                             .unwrap(),
                     );
                 }
 
-                let mut buf = buf_from(original.last().unwrap(), c_form.channels().into());
+                let mut buf = buf_from(original.last().unwrap(), format.channels().into());
                 for i in 0..20 {
                     decompressor
-                        .decompress(&compressed[i], &mut buf, d_form)
+                        .decompress(&compressed[i], &mut buf, format)
                         .unwrap();
                     let mut j = 0;
                     let mut l = 0;
@@ -389,7 +332,7 @@ mod tests {
                             );
                         }
                         j += 3;
-                        l += !d_form.can_copy_directly_onto_wl_buffer() as usize;
+                        l += !format.can_copy_directly_onto_wl_buffer() as usize;
                     }
                 }
             }
@@ -398,7 +341,7 @@ mod tests {
 
     #[test]
     fn full() {
-        for (c_form, d_form) in C_FORMS.into_iter().zip(D_FORMS) {
+        for format in FORMATS {
             for _ in 0..10 {
                 let mut original = Vec::with_capacity(20);
                 for _ in 0..20 {
@@ -423,21 +366,21 @@ mod tests {
                 let mut compressed = Vec::with_capacity(20);
                 compressed.push(
                     compressor
-                        .compress(original.last().unwrap(), &original[0], c_form)
+                        .compress(original.last().unwrap(), &original[0], format)
                         .unwrap(),
                 );
                 for i in 1..20 {
                     compressed.push(
                         compressor
-                            .compress(&original[i - 1], &original[i], c_form)
+                            .compress(&original[i - 1], &original[i], format)
                             .unwrap(),
                     );
                 }
 
-                let mut buf = buf_from(original.last().unwrap(), c_form.channels().into());
+                let mut buf = buf_from(original.last().unwrap(), format.channels().into());
                 for i in 0..20 {
                     decompressor
-                        .decompress(&compressed[i], &mut buf, d_form)
+                        .decompress(&compressed[i], &mut buf, format)
                         .unwrap();
                     let mut j = 0;
                     let mut l = 0;
@@ -451,7 +394,7 @@ mod tests {
                             );
                         }
                         j += 3;
-                        l += !d_form.can_copy_directly_onto_wl_buffer() as usize;
+                        l += !format.can_copy_directly_onto_wl_buffer() as usize;
                     }
                 }
             }

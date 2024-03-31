@@ -11,7 +11,6 @@ use nix::{
     poll::{poll, PollFd, PollFlags, PollTimeout},
     sys::signal::{self, SigHandler, Signal},
 };
-use rkyv::{boxed::ArchivedBox, string::ArchivedString};
 use simplelog::{ColorChoice, TermLogger, TerminalMode, ThreadLogMode};
 use wallpaper::Wallpaper;
 
@@ -53,7 +52,7 @@ use wayland_client::{
     Connection, Dispatch, QueueHandle,
 };
 
-use utils::ipc::{get_socket_path, Answer, ArchivedRequest, BgInfo, PixelFormat, Request};
+use utils::ipc::{get_socket_path, Answer, BgInfo, PixelFormat, Request};
 
 use animations::Animator;
 
@@ -322,14 +321,14 @@ impl Daemon {
         };
         let request = Request::receive(&bytes);
         let answer = match request {
-            ArchivedRequest::Animation(animations) => {
+            Request::Animation(animations) => {
                 let mut wallpapers = Vec::new();
                 for (_, names) in animations.iter() {
                     wallpapers.push(self.find_wallpapers_by_names(names));
                 }
-                self.animator.animate(bytes, wallpapers)
+                self.animator.animate(animations, wallpapers)
             }
-            ArchivedRequest::Clear(clear) => {
+            Request::Clear(clear) => {
                 let wallpapers = self.find_wallpapers_by_names(&clear.outputs);
                 let color = clear.color;
                 match std::thread::Builder::new()
@@ -350,17 +349,17 @@ impl Daemon {
                     Err(e) => Answer::Err(format!("failed to spawn `clear` thread: {e}")),
                 }
             }
-            ArchivedRequest::Ping => Answer::Ping(
+            Request::Ping => Answer::Ping(
                 self.wallpapers
                     .iter()
                     .all(|w| w.configured.load(std::sync::atomic::Ordering::Acquire)),
             ),
-            ArchivedRequest::Kill => {
+            Request::Kill => {
                 exit_daemon();
                 Answer::Ok
             }
-            ArchivedRequest::Query => Answer::Info(self.wallpapers_info()),
-            ArchivedRequest::Img((_, imgs)) => {
+            Request::Query => Answer::Info(self.wallpapers_info()),
+            Request::Img((transitions, imgs)) => {
                 let mut used_wallpapers = Vec::new();
                 for img in imgs.iter() {
                     let mut wallpapers = self.find_wallpapers_by_names(&img.1);
@@ -369,8 +368,7 @@ impl Daemon {
                     }
                     used_wallpapers.push(wallpapers);
                 }
-                self.animator.transition(bytes, used_wallpapers);
-                Answer::Ok
+                self.animator.transition(transitions, imgs, used_wallpapers)
             }
         };
         if let Err(e) = answer.send(&stream) {
@@ -401,10 +399,7 @@ impl Daemon {
             .collect()
     }
 
-    fn find_wallpapers_by_names(
-        &self,
-        names: &ArchivedBox<[ArchivedString]>,
-    ) -> Vec<Arc<Wallpaper>> {
+    fn find_wallpapers_by_names(&self, names: &[String]) -> Vec<Arc<Wallpaper>> {
         self.output_state
             .outputs()
             .filter_map(|output| {

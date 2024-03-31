@@ -1,5 +1,4 @@
 use log::error;
-use rkyv::{boxed::ArchivedBox, string::ArchivedString, Deserialize};
 
 use std::{
     sync::Arc,
@@ -9,9 +8,7 @@ use std::{
 
 use utils::{
     compression::Decompressor,
-    ipc::{
-        Answer, ArchivedAnimation, ArchivedImg, ArchivedRequest, ArchivedTransition, BgImg, Request,
-    },
+    ipc::{self, Animation, Answer, BgImg, Img},
 };
 
 use crate::wallpaper::{AnimationToken, Wallpaper};
@@ -38,9 +35,9 @@ impl Animator {
 
     fn spawn_transition_thread<'a, 'b>(
         scope: &'a Scope<'b, '_>,
-        transition: &'b ArchivedTransition,
-        img: &'b ArchivedBox<[u8]>,
-        path: &'b ArchivedString,
+        transition: &'b ipc::Transition,
+        img: &'b [u8],
+        path: &'b String,
         mut wallpapers: Vec<Arc<Wallpaper>>,
     ) where
         'a: 'b,
@@ -76,22 +73,19 @@ impl Animator {
 
     pub(super) fn transition(
         &mut self,
-        bytes: Vec<u8>,
+        transition: ipc::Transition,
+        imgs: Box<[(Img, Box<[String]>)]>,
         wallpapers: Vec<Vec<Arc<Wallpaper>>>,
     ) -> Answer {
         match thread::Builder::new()
             .stack_size(1 << 15)
             .name("transition spawner".to_string())
             .spawn(move || {
-                if let ArchivedRequest::Img((transition, imgs)) = Request::receive(&bytes) {
-                    thread::scope(|s| {
-                        for ((ArchivedImg { img, path }, _), wallpapers) in
-                            imgs.iter().zip(wallpapers)
-                        {
-                            Self::spawn_transition_thread(s, transition, img, path, wallpapers);
-                        }
-                    });
-                }
+                thread::scope(|s| {
+                    for ((Img { img, path }, _), wallpapers) in imgs.iter().zip(wallpapers) {
+                        Self::spawn_transition_thread(s, &transition, img, path, wallpapers);
+                    }
+                });
             }) {
             Ok(_) => Answer::Ok,
             Err(e) => Answer::Err(e.to_string()),
@@ -100,7 +94,7 @@ impl Animator {
 
     fn spawn_animation_thread<'a, 'b>(
         scope: &'a Scope<'b, '_>,
-        animation: &'b ArchivedAnimation,
+        animation: &'b Animation,
         mut wallpapers: Vec<Arc<Wallpaper>>,
         barrier: ArcAnimBarrier,
     ) where
@@ -126,10 +120,7 @@ impl Animator {
                         if !wallpaper.has_animation_id(token) || token.is_transition_done() {
                             break;
                         }
-                        let duration: Duration = animation.animation[0]
-                            .1
-                            .deserialize(&mut rkyv::Infallible)
-                            .unwrap();
+                        let duration: Duration = animation.animation[0].1;
                         std::thread::sleep(duration / 2);
                     }
                 }
@@ -138,7 +129,6 @@ impl Animator {
 
                 let mut decompressor = Decompressor::new();
                 for (frame, duration) in animation.animation.iter().cycle() {
-                    let duration: Duration = duration.deserialize(&mut rkyv::Infallible).unwrap();
                     barrier.wait(duration.div_f32(2.0));
 
                     let mut i = 0;
@@ -151,7 +141,7 @@ impl Animator {
                         }
 
                         let result = wallpapers[i].canvas_change(|canvas| {
-                            decompressor.decompress_archived(frame, canvas, crate::pixel_format())
+                            decompressor.decompress(frame, canvas, crate::pixel_format())
                         });
 
                         if let Err(e) = result {
@@ -182,7 +172,7 @@ impl Animator {
 
     pub(super) fn animate(
         &mut self,
-        bytes: Vec<u8>,
+        animations: Box<[(Animation, Box<[String]>)]>,
         wallpapers: Vec<Vec<Arc<Wallpaper>>>,
     ) -> Answer {
         let barrier = self.anim_barrier.clone();
@@ -191,11 +181,9 @@ impl Animator {
             .name("animation spawner".to_string())
             .spawn(move || {
                 thread::scope(|s| {
-                    if let ArchivedRequest::Animation(animations) = Request::receive(&bytes) {
-                        for ((animation, _), wallpapers) in animations.iter().zip(wallpapers) {
-                            let barrier = barrier.clone();
-                            Self::spawn_animation_thread(s, animation, wallpapers, barrier);
-                        }
+                    for ((animation, _), wallpapers) in animations.iter().zip(wallpapers) {
+                        let barrier = barrier.clone();
+                        Self::spawn_animation_thread(s, animation, wallpapers, barrier);
                     }
                 });
             }) {
