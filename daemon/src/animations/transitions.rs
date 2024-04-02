@@ -6,7 +6,7 @@ use std::{
 use rayon::prelude::*;
 
 use log::debug;
-use utils::ipc::{ArchivedPosition, ArchivedTransitionType};
+use utils::ipc::{Position, TransitionType};
 
 use crate::wallpaper::{AnimationToken, Wallpaper};
 
@@ -18,12 +18,12 @@ pub(super) struct Transition {
     animation_tokens: Vec<AnimationToken>,
     wallpapers: Vec<Arc<Wallpaper>>,
     dimensions: (u32, u32),
-    transition_type: ArchivedTransitionType,
+    transition_type: TransitionType,
     duration: f32,
     step: u8,
     fps: Duration,
     angle: f64,
-    pos: ArchivedPosition,
+    pos: Position,
     bezier: BezierCurve,
     wave: (f32, f32),
     invert_y: bool,
@@ -34,7 +34,7 @@ impl Transition {
     pub(super) fn new(
         wallpapers: Vec<Arc<Wallpaper>>,
         dimensions: (u32, u32),
-        transition: &utils::ipc::ArchivedTransition,
+        transition: &utils::ipc::Transition,
     ) -> Self {
         Transition {
             animation_tokens: wallpapers
@@ -43,7 +43,7 @@ impl Transition {
                 .collect(),
             wallpapers,
             dimensions,
-            transition_type: transition.transition_type.clone(),
+            transition_type: transition.transition_type,
             duration: transition.duration,
             step: transition.step,
             fps: Duration::from_nanos(1_000_000_000 / transition.fps as u64),
@@ -67,12 +67,12 @@ impl Transition {
     pub(super) fn execute(mut self, new_img: &[u8]) {
         debug!("Starting transitions");
         match self.transition_type {
-            ArchivedTransitionType::Simple => self.simple(new_img),
-            ArchivedTransitionType::Wipe => self.wipe(new_img),
-            ArchivedTransitionType::Grow => self.grow(new_img),
-            ArchivedTransitionType::Outer => self.outer(new_img),
-            ArchivedTransitionType::Wave => self.wave(new_img),
-            ArchivedTransitionType::Fade => self.fade(new_img),
+            TransitionType::Simple => self.simple(new_img),
+            TransitionType::Wipe => self.wipe(new_img),
+            TransitionType::Grow => self.grow(new_img),
+            TransitionType::Outer => self.outer(new_img),
+            TransitionType::Wave => self.wave(new_img),
+            TransitionType::Fade => self.fade(new_img),
         };
         debug!("Transitions finished");
         for (wallpaper, token) in self.wallpapers.iter().zip(self.animation_tokens) {

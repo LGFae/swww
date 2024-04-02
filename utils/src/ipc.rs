@@ -1,4 +1,4 @@
-use rkyv::{Archive, Deserialize, Serialize};
+use bitcode::{Decode, Encode};
 use std::{
     fmt,
     io::{BufReader, BufWriter, Read, Write},
@@ -9,15 +9,13 @@ use std::{
 
 use crate::{cache, compression::BitPack};
 
-#[derive(PartialEq, Archive, Serialize)]
-#[archive_attr(derive(Clone))]
+#[derive(Clone, PartialEq, Decode, Encode)]
 pub enum Coord {
     Pixel(f32),
     Percent(f32),
 }
 
-#[derive(PartialEq, Archive, Serialize)]
-#[archive_attr(derive(Clone))]
+#[derive(Clone, PartialEq, Decode, Encode)]
 pub struct Position {
     pub x: Coord,
     pub y: Coord,
@@ -72,37 +70,7 @@ impl Position {
     }
 }
 
-impl ArchivedPosition {
-    #[must_use]
-    pub fn to_pixel(&self, dim: (u32, u32), invert_y: bool) -> (f32, f32) {
-        let x = match self.x {
-            ArchivedCoord::Pixel(x) => x,
-            ArchivedCoord::Percent(x) => x * dim.0 as f32,
-        };
-
-        let y = match self.y {
-            ArchivedCoord::Pixel(y) => {
-                if invert_y {
-                    dim.1 as f32 - y
-                } else {
-                    y
-                }
-            }
-            ArchivedCoord::Percent(y) => {
-                if invert_y {
-                    (1.0 - y) * dim.1 as f32
-                } else {
-                    y * dim.1 as f32
-                }
-            }
-        };
-
-        (x, y)
-    }
-}
-
-#[derive(Debug, PartialEq, Clone, Archive, Serialize, Deserialize)]
-#[archive_attr(derive(PartialEq))]
+#[derive(Debug, PartialEq, Clone, Encode, Decode)]
 pub enum BgImg {
     Color([u8; 3]),
     Img(String),
@@ -119,27 +87,7 @@ impl fmt::Display for BgImg {
     }
 }
 
-impl ArchivedBgImg {
-    /// Deserialized the archived bg img
-    #[must_use]
-    pub fn de(&self) -> BgImg {
-        self.deserialize(&mut rkyv::Infallible).unwrap()
-    }
-}
-
-impl fmt::Display for ArchivedBgImg {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ArchivedBgImg::Color(color) => {
-                write!(f, "color: {:02X}{:02X}{:02X}", color[0], color[1], color[2])
-            }
-            ArchivedBgImg::Img(p) => write!(f, "image: {p}",),
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Archive, Serialize, Deserialize, PartialEq)]
-#[archive_attr(derive(Clone, Copy, Debug))]
+#[derive(Clone, Copy, Debug, Encode, Decode, PartialEq)]
 pub enum PixelFormat {
     /// No swap, can copy directly onto WlBuffer
     Bgr,
@@ -186,37 +134,7 @@ impl PixelFormat {
     }
 }
 
-impl ArchivedPixelFormat {
-    #[inline]
-    #[must_use]
-    pub const fn channels(&self) -> u8 {
-        match self {
-            Self::Rgb => 3,
-            Self::Bgr => 3,
-            Self::Xbgr => 4,
-            Self::Xrgb => 4,
-        }
-    }
-
-    #[inline]
-    #[must_use]
-    pub const fn must_swap_r_and_b_channels(&self) -> bool {
-        match self {
-            Self::Bgr => false,
-            Self::Rgb => true,
-            Self::Xbgr => false,
-            Self::Xrgb => true,
-        }
-    }
-
-    #[inline]
-    #[must_use]
-    pub fn de(&self) -> PixelFormat {
-        self.deserialize(&mut rkyv::Infallible).unwrap()
-    }
-}
-
-#[derive(Clone, Archive, Serialize)]
+#[derive(Clone, Decode, Encode)]
 pub struct BgInfo {
     pub name: String,
     pub dim: (u32, u32),
@@ -236,7 +154,7 @@ impl BgInfo {
     }
 }
 
-impl fmt::Display for ArchivedBgInfo {
+impl fmt::Display for BgInfo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
@@ -246,8 +164,7 @@ impl fmt::Display for ArchivedBgInfo {
     }
 }
 
-#[derive(Archive, Serialize)]
-#[archive_attr(derive(Clone))]
+#[derive(Clone, Copy, Decode, Encode)]
 pub enum TransitionType {
     Simple,
     Fade,
@@ -257,8 +174,7 @@ pub enum TransitionType {
     Wave,
 }
 
-#[derive(Archive, Serialize)]
-#[archive_attr(derive(Clone))]
+#[derive(Decode, Encode)]
 pub struct Transition {
     pub transition_type: TransitionType,
     pub duration: f32,
@@ -271,19 +187,19 @@ pub struct Transition {
     pub invert_y: bool,
 }
 
-#[derive(Archive, Serialize)]
+#[derive(Decode, Encode)]
 pub struct Clear {
     pub color: [u8; 3],
     pub outputs: Box<[String]>,
 }
 
-#[derive(Archive, Serialize)]
+#[derive(Decode, Encode)]
 pub struct Img {
     pub path: String,
     pub img: Box<[u8]>,
 }
 
-#[derive(Archive, Serialize, Deserialize)]
+#[derive(Encode, Decode)]
 pub struct Animation {
     pub animation: Box<[(BitPack, Duration)]>,
     pub path: String,
@@ -294,7 +210,7 @@ pub struct Animation {
 pub type AnimationRequest = Box<[(Animation, Box<[String]>)]>;
 pub type ImageRequest = (Transition, Box<[(Img, Box<[String]>)]>);
 
-#[derive(Archive, Serialize)]
+#[derive(Decode, Encode)]
 pub enum Request {
     Animation(AnimationRequest),
     Clear(Clear),
@@ -306,11 +222,7 @@ pub enum Request {
 
 impl Request {
     pub fn send(&self, stream: &UnixStream) -> Result<(), String> {
-        let bytes = match rkyv::to_bytes::<_, 1024>(self) {
-            Ok(bytes) => bytes,
-            Err(e) => return Err(format!("Failed to serialize request: {e}")),
-        };
-
+        let bytes = bitcode::encode(self);
         std::thread::scope(|s| {
             if let Self::Animation(animations) = self {
                 s.spawn(|| {
@@ -346,12 +258,13 @@ impl Request {
     }
 
     #[must_use]
-    pub fn receive(bytes: &[u8]) -> &ArchivedRequest {
-        unsafe { rkyv::archived_root::<Self>(bytes) }
+    #[inline]
+    pub fn receive(bytes: &[u8]) -> Self {
+        bitcode::decode(bytes).expect("failed to decode request")
     }
 }
 
-#[derive(Archive, Serialize)]
+#[derive(Decode, Encode)]
 pub enum Answer {
     Ok,
     Err(String),
@@ -361,10 +274,7 @@ pub enum Answer {
 
 impl Answer {
     pub fn send(&self, stream: &UnixStream) -> Result<(), String> {
-        let bytes = match rkyv::to_bytes::<_, 256>(self) {
-            Ok(bytes) => bytes,
-            Err(e) => return Err(format!("Failed to serialize answer: {e}")),
-        };
+        let bytes = bitcode::encode(self);
         let mut writer = BufWriter::new(stream);
         if let Err(e) = writer.write_all(&bytes.len().to_ne_bytes()) {
             return Err(format!("failed to write serialized answer's length: {e}"));
@@ -377,8 +287,9 @@ impl Answer {
     }
 
     #[must_use]
-    pub fn receive(bytes: &[u8]) -> &ArchivedAnswer {
-        unsafe { rkyv::archived_root::<Self>(bytes) }
+    #[inline]
+    pub fn receive(bytes: &[u8]) -> Self {
+        bitcode::decode(bytes).expect("failed to decode answer")
     }
 }
 

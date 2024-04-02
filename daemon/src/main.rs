@@ -11,7 +11,6 @@ use nix::{
     poll::{poll, PollFd, PollFlags, PollTimeout},
     sys::signal::{self, SigHandler, Signal},
 };
-use rkyv::{boxed::ArchivedBox, string::ArchivedString};
 use simplelog::{ColorChoice, TermLogger, TerminalMode, ThreadLogMode};
 use wallpaper::Wallpaper;
 
@@ -53,7 +52,7 @@ use wayland_client::{
     Connection, Dispatch, QueueHandle,
 };
 
-use utils::ipc::{get_socket_path, Answer, ArchivedRequest, BgInfo, PixelFormat, Request};
+use utils::ipc::{get_socket_path, Answer, BgInfo, PixelFormat, Request};
 
 use animations::Animator;
 
@@ -96,9 +95,11 @@ pub fn wake_poll() {
     // SAFETY: POLL_WAKER is set up in setup_signals_and_pipe, which is called early in main
     // and panics if it fails. By the time anyone calls this function, POLL_WAKER will certainly
     // already have been initialized.
-    if let Err(e) = nix::unistd::write(unsafe { POLL_WAKER.get().unwrap_unchecked() }.as_fd(), &[0])
-    {
-        error!("failed to write to pipe file descriptor: {e}");
+    if let Err(e) = nix::unistd::write(
+        unsafe { POLL_WAKER.get().unwrap_unchecked() }.as_fd(),
+        &1u64.to_ne_bytes(), // eventfd demands we write 8 bytes at once
+    ) {
+        error!("failed to write to eventfd file descriptor: {e}");
     }
 }
 
@@ -122,7 +123,7 @@ fn main() -> Result<(), String> {
         .expect("failed to configure rayon global thread pool");
 
     let listener = SocketWrapper::new()?;
-    let wake = setup_signals_and_pipe();
+    let wake = setup_signals_and_eventfd();
 
     let conn = Connection::connect_to_env().expect("failed to connect to the wayland server");
     // Enumerate the list of globals to get the protocols the server implements.
@@ -138,7 +139,7 @@ fn main() -> Result<(), String> {
         }
     }
     info!("Initialization succeeded! Starting main loop...");
-    let mut buf = [0; 16];
+    let mut buf = [0; 8];
     while !should_daemon_exit() {
         // Process wayland events
         event_queue
@@ -203,14 +204,18 @@ fn main() -> Result<(), String> {
 }
 
 /// Returns the file descriptor we should install in the poll handler
-fn setup_signals_and_pipe() -> OwnedFd {
+fn setup_signals_and_eventfd() -> OwnedFd {
     let handler = SigHandler::Handler(signal_handler);
     for signal in [Signal::SIGINT, Signal::SIGQUIT, Signal::SIGTERM] {
         unsafe { signal::signal(signal, handler).expect("failed to install signal handler") };
     }
-    let (r, w) = nix::unistd::pipe().expect("failed to create pipe");
-    let _ = POLL_WAKER.get_or_init(|| w);
-    r
+    let fd: OwnedFd = nix::sys::eventfd::EventFd::new()
+        .expect("failed to create event fd")
+        .into();
+    POLL_WAKER
+        .set(fd.try_clone().expect("failed to clone event fd"))
+        .expect("failed to set POLL_WAKER");
+    fd
 }
 
 /// This is a wrapper that makes sure to delete the socket when it is dropped
@@ -329,14 +334,14 @@ impl Daemon {
         };
         let request = Request::receive(&bytes);
         let answer = match request {
-            ArchivedRequest::Animation(animations) => {
+            Request::Animation(animations) => {
                 let mut wallpapers = Vec::new();
                 for (_, names) in animations.iter() {
                     wallpapers.push(self.find_wallpapers_by_names(names));
                 }
-                self.animator.animate(bytes, wallpapers)
+                self.animator.animate(animations, wallpapers)
             }
-            ArchivedRequest::Clear(clear) => {
+            Request::Clear(clear) => {
                 let wallpapers = self.find_wallpapers_by_names(&clear.outputs);
                 let color = clear.color;
                 match std::thread::Builder::new()
@@ -357,17 +362,17 @@ impl Daemon {
                     Err(e) => Answer::Err(format!("failed to spawn `clear` thread: {e}")),
                 }
             }
-            ArchivedRequest::Ping => Answer::Ping(
+            Request::Ping => Answer::Ping(
                 self.wallpapers
                     .iter()
                     .all(|w| w.configured.load(std::sync::atomic::Ordering::Acquire)),
             ),
-            ArchivedRequest::Kill => {
+            Request::Kill => {
                 exit_daemon();
                 Answer::Ok
             }
-            ArchivedRequest::Query => Answer::Info(self.wallpapers_info()),
-            ArchivedRequest::Img((_, imgs)) => {
+            Request::Query => Answer::Info(self.wallpapers_info()),
+            Request::Img((transitions, imgs)) => {
                 let mut used_wallpapers = Vec::new();
                 for img in imgs.iter() {
                     let mut wallpapers = self.find_wallpapers_by_names(&img.1);
@@ -376,8 +381,7 @@ impl Daemon {
                     }
                     used_wallpapers.push(wallpapers);
                 }
-                self.animator.transition(bytes, used_wallpapers);
-                Answer::Ok
+                self.animator.transition(transitions, imgs, used_wallpapers)
             }
         };
         if let Err(e) = answer.send(&stream) {
@@ -408,10 +412,7 @@ impl Daemon {
             .collect()
     }
 
-    fn find_wallpapers_by_names(
-        &self,
-        names: &ArchivedBox<[ArchivedString]>,
-    ) -> Vec<Arc<Wallpaper>> {
+    fn find_wallpapers_by_names(&self, names: &[String]) -> Vec<Arc<Wallpaper>> {
         self.output_state
             .outputs()
             .filter_map(|output| {

@@ -3,10 +3,7 @@ use std::{os::unix::net::UnixStream, path::PathBuf, process::Stdio, time::Durati
 
 use utils::{
     cache,
-    ipc::{
-        self, get_socket_path, read_socket, AnimationRequest, Answer, ArchivedAnswer,
-        ArchivedPixelFormat, Request,
-    },
+    ipc::{self, get_socket_path, read_socket, AnimationRequest, Answer, Request},
 };
 
 mod imgproc;
@@ -68,8 +65,8 @@ fn main() -> Result<(), String> {
         Request::Ping.send(&socket)?;
         let bytes = read_socket(&socket)?;
         let answer = Answer::receive(&bytes);
-        if let ArchivedAnswer::Ping(c) = answer {
-            configured = *c;
+        if let Answer::Ping(c) = answer {
+            configured = c;
         } else {
             return Err("Daemon did not return Answer::Ping, as expected".to_string());
         }
@@ -91,9 +88,9 @@ fn process_swww_args(args: &Swww) -> Result<(), String> {
     let bytes = read_socket(&socket)?;
     drop(socket);
     match Answer::receive(&bytes) {
-        ArchivedAnswer::Err(msg) => return Err(msg.to_string()),
-        ArchivedAnswer::Info(info) => info.iter().for_each(|i| println!("{}", i)),
-        ArchivedAnswer::Ok => {
+        Answer::Err(msg) => return Err(msg.to_string()),
+        Answer::Info(info) => info.iter().for_each(|i| println!("{}", i)),
+        Answer::Ok => {
             if let Swww::Kill = args {
                 #[cfg(debug_assertions)]
                 let tries = 20;
@@ -111,7 +108,7 @@ fn process_swww_args(args: &Swww) -> Result<(), String> {
                 ));
             }
         }
-        ArchivedAnswer::Ping(_) => {
+        Answer::Ping(_) => {
             return Ok(());
         }
     }
@@ -151,7 +148,7 @@ fn make_request(args: &Swww) -> Result<Option<Request>, String> {
                     Request::Img(img_request).send(&socket)?;
                     let bytes = read_socket(&socket)?;
                     drop(socket);
-                    if let ArchivedAnswer::Err(e) = Answer::receive(&bytes) {
+                    if let Answer::Err(e) = Answer::receive(&bytes) {
                         return Err(format!("daemon error when sending image: {e}"));
                     }
                     animations
@@ -217,7 +214,7 @@ fn make_img_request(
 #[allow(clippy::type_complexity)]
 fn get_format_dims_and_outputs(
     requested_outputs: &[String],
-) -> Result<(ArchivedPixelFormat, Vec<(u32, u32)>, Vec<Vec<String>>), String> {
+) -> Result<(ipc::PixelFormat, Vec<(u32, u32)>, Vec<Vec<String>>), String> {
     let mut outputs: Vec<Vec<String>> = Vec::new();
     let mut dims: Vec<(u32, u32)> = Vec::new();
     let mut imgs: Vec<ipc::BgImg> = Vec::new();
@@ -228,11 +225,11 @@ fn get_format_dims_and_outputs(
     drop(socket);
     let answer = Answer::receive(&bytes);
     match answer {
-        ArchivedAnswer::Info(infos) => {
-            let mut format = ArchivedPixelFormat::Xrgb;
+        Answer::Info(infos) => {
+            let mut format = ipc::PixelFormat::Xrgb;
             for info in infos.iter() {
                 format = info.pixel_format;
-                let info_img = info.img.de();
+                let info_img = &info.img;
                 let name = info.name.to_string();
                 if !requested_outputs.is_empty() && !requested_outputs.contains(&name) {
                     continue;
@@ -245,13 +242,13 @@ fn get_format_dims_and_outputs(
                     .iter_mut()
                     .zip(&imgs)
                     .zip(&mut outputs)
-                    .find(|((dim, img), _)| real_dim == **dim && info_img == **img)
+                    .find(|((dim, img), _)| real_dim == **dim && info_img == *img)
                 {
                     output.push(name);
                 } else {
                     outputs.push(vec![name]);
                     dims.push(real_dim);
-                    imgs.push(info_img);
+                    imgs.push(info_img.clone());
                 }
             }
             if outputs.is_empty() {
@@ -260,7 +257,7 @@ fn get_format_dims_and_outputs(
                 Ok((format, dims, outputs))
             }
         }
-        ArchivedAnswer::Err(e) => Err(format!("daemon error when sending query: {e}")),
+        Answer::Err(e) => Err(format!("daemon error when sending query: {e}")),
         _ => unreachable!(),
     }
 }
@@ -269,7 +266,7 @@ fn make_animation_request(
     img: &cli::Img,
     imgbuf: &ImgBuf,
     dims: &[(u32, u32)],
-    pixel_format: ArchivedPixelFormat,
+    pixel_format: ipc::PixelFormat,
     outputs: &[Vec<String>],
 ) -> Result<AnimationRequest, String> {
     let filter = make_filter(&img.filter);
@@ -279,7 +276,7 @@ fn make_animation_request(
         if let Some("-") = img.path.to_str() {
             //TODO: make cache work for all resize strategies
             if img.resize == ResizeStrategy::Crop {
-                match cache::load_animation_frames(&img.path, *dim, pixel_format.de()) {
+                match cache::load_animation_frames(&img.path, *dim, pixel_format) {
                     Ok(Some(animation)) => {
                         animations.push((animation, outputs.to_owned().into_boxed_slice()));
                         continue;
@@ -302,7 +299,7 @@ fn make_animation_request(
                 &img.fill_color,
             )?
             .into_boxed_slice(),
-            pixel_format: pixel_format.de(),
+            pixel_format,
         };
         animations.push((animation, outputs.to_owned().into_boxed_slice()));
     }

@@ -3,9 +3,9 @@ Fully automated, complete testing, for every option
 	testing many things with different setups. Maybe we can script it somehow?
 
 Rewrite using rustix + signal_hook instead of nix.
+	- Take oportunity to use shared memory instead of unix sockets
 
-Do not use a pipe as a way of waking up the main thread in the daemon. A simple
-fd should do.
+Rewrite IPC using bitcode
 
 Nuke smithay-client-toolkit
 	- copy over their implementation of RawPool (see if we can improve it for

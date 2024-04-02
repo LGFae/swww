@@ -12,7 +12,7 @@ use std::{
 
 use utils::{
     compression::{BitPack, Compressor},
-    ipc::{self, ArchivedPixelFormat, Coord, Position},
+    ipc::{self, Coord, PixelFormat, Position},
 };
 
 use crate::cli::ResizeStrategy;
@@ -69,7 +69,7 @@ impl ImgBuf {
     }
 
     /// Decode the ImgBuf into am RgbImage
-    pub fn decode(&self, format: ArchivedPixelFormat) -> Result<Image, String> {
+    pub fn decode(&self, format: PixelFormat) -> Result<Image, String> {
         let mut reader = image::io::Reader::new(Cursor::new(&self.bytes));
         reader.set_format(self.format);
         let dynimage = reader
@@ -128,7 +128,7 @@ impl ImgBuf {
 pub struct Image {
     width: u32,
     height: u32,
-    format: ArchivedPixelFormat,
+    format: PixelFormat,
     bytes: Box<[u8]>,
 }
 
@@ -160,15 +160,15 @@ impl Image {
         }
     }
 
-    fn from_frame(frame: image::Frame, format: ArchivedPixelFormat) -> Self {
+    fn from_frame(frame: image::Frame, format: PixelFormat) -> Self {
         let dynimage = DynamicImage::ImageRgba8(frame.into_buffer());
         let (width, height) = dynimage.dimensions();
 
         // NOTE: when animating frames, we ALWAYS use 3 channels
 
         let format = match format {
-            ArchivedPixelFormat::Bgr | ArchivedPixelFormat::Xbgr => ArchivedPixelFormat::Bgr,
-            ArchivedPixelFormat::Rgb | ArchivedPixelFormat::Xrgb => ArchivedPixelFormat::Rgb,
+            PixelFormat::Bgr | PixelFormat::Xbgr => PixelFormat::Bgr,
+            PixelFormat::Rgb | PixelFormat::Xrgb => PixelFormat::Rgb,
         };
 
         let mut bytes = dynimage.into_rgb8().into_raw().into_boxed_slice();
@@ -190,7 +190,7 @@ impl Image {
 pub fn compress_frames(
     mut frames: Frames,
     dim: (u32, u32),
-    format: ArchivedPixelFormat,
+    format: PixelFormat,
     filter: FilterType,
     resize: ResizeStrategy,
     color: &[u8; 3],
