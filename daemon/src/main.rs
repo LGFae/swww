@@ -7,10 +7,7 @@ pub mod bump_pool;
 mod cli;
 mod wallpaper;
 use log::{debug, error, info, warn, LevelFilter};
-use nix::{
-    poll::{poll, PollFd, PollFlags, PollTimeout},
-    sys::signal::{self, SigHandler, Signal},
-};
+use rustix::event::{poll, PollFd, PollFlags};
 use simplelog::{ColorChoice, TermLogger, TerminalMode, ThreadLogMode};
 use wallpaper::Wallpaper;
 
@@ -18,7 +15,7 @@ use std::{
     fs,
     num::NonZeroI32,
     os::{
-        fd::{AsFd, AsRawFd, OwnedFd},
+        fd::OwnedFd,
         unix::net::{UnixListener, UnixStream},
     },
     sync::{
@@ -95,8 +92,9 @@ pub fn wake_poll() {
     // SAFETY: POLL_WAKER is set up in setup_signals_and_pipe, which is called early in main
     // and panics if it fails. By the time anyone calls this function, POLL_WAKER will certainly
     // already have been initialized.
-    if let Err(e) = nix::unistd::write(
-        unsafe { POLL_WAKER.get().unwrap_unchecked() }.as_fd(),
+
+    if let Err(e) = rustix::io::write(
+        unsafe { POLL_WAKER.get().unwrap_unchecked() },
         &1u64.to_ne_bytes(), // eventfd demands we write 8 bytes at once
     ) {
         error!("failed to write to eventfd file descriptor: {e}");
@@ -151,17 +149,16 @@ fn main() -> Result<(), String> {
 
         let events = {
             let connection_fd = read_guard.connection_fd();
-            let waker = wake.as_fd();
             let mut fds = [
-                PollFd::new(listener.0.as_fd(), PollFlags::POLLIN),
-                PollFd::new(connection_fd, PollFlags::POLLIN | PollFlags::POLLRDBAND),
-                PollFd::new(waker, PollFlags::POLLIN),
+                PollFd::new(&listener.0, PollFlags::IN),
+                PollFd::new(&connection_fd, PollFlags::IN | PollFlags::RDBAND),
+                PollFd::new(&wake, PollFlags::IN),
             ];
 
-            match poll(&mut fds, PollTimeout::NONE) {
+            match poll(&mut fds, -1) {
                 Ok(_) => (),
                 Err(e) => match e {
-                    nix::errno::Errno::EINTR => (),
+                    rustix::io::Errno::INTR => (),
                     _ => panic!("failed to poll file descriptors: {e}"),
                 },
             };
@@ -169,32 +166,26 @@ fn main() -> Result<(), String> {
             [fds[0].revents(), fds[1].revents(), fds[2].revents()]
         };
 
-        if let Some(flags) = events[1] {
-            if !flags.is_empty() {
-                read_guard.read().expect("failed to read the event queue");
-                event_queue
-                    .dispatch_pending(&mut daemon)
-                    .expect("failed to dispatch events");
+        if !events[1].is_empty() {
+            read_guard.read().expect("failed to read the event queue");
+            event_queue
+                .dispatch_pending(&mut daemon)
+                .expect("failed to dispatch events");
+        }
+
+        if !events[0].is_empty() {
+            match listener.0.accept() {
+                Ok((stream, _adr)) => daemon.recv_socket_msg(stream),
+                Err(e) => match e.kind() {
+                    std::io::ErrorKind::WouldBlock => (),
+                    _ => return Err(format!("failed to accept incoming connection: {e}")),
+                },
             }
         }
 
-        if let Some(flags) = events[0] {
-            if !flags.is_empty() {
-                match listener.0.accept() {
-                    Ok((stream, _adr)) => daemon.recv_socket_msg(stream),
-                    Err(e) => match e.kind() {
-                        std::io::ErrorKind::WouldBlock => (),
-                        _ => return Err(format!("failed to accept incoming connection: {e}")),
-                    },
-                }
-            }
-        }
-
-        if let Some(flags) = events[2] {
-            if !flags.is_empty() {
-                if let Err(e) = nix::unistd::read(wake.as_raw_fd(), &mut buf) {
-                    error!("error reading pipe file descriptor: {e}");
-                }
+        if !events[2].is_empty() {
+            if let Err(e) = rustix::io::read(&wake, &mut buf) {
+                error!("error reading pipe file descriptor: {e}");
             }
         }
     }
@@ -205,13 +196,25 @@ fn main() -> Result<(), String> {
 
 /// Returns the file descriptor we should install in the poll handler
 fn setup_signals_and_eventfd() -> OwnedFd {
-    let handler = SigHandler::Handler(signal_handler);
-    for signal in [Signal::SIGINT, Signal::SIGQUIT, Signal::SIGTERM] {
-        unsafe { signal::signal(signal, handler).expect("failed to install signal handler") };
+    let mut mask = std::mem::MaybeUninit::uninit();
+    unsafe { libc::sigemptyset(mask.as_mut_ptr()) };
+    let sigaction = libc::sigaction {
+        sa_sigaction: signal_handler as *const extern "C" fn(libc::c_int) as usize,
+        sa_mask: unsafe { mask.assume_init() },
+        sa_flags: 0,
+        sa_restorer: None,
+    };
+
+    for signal in [libc::SIGINT, libc::SIGQUIT, libc::SIGTERM] {
+        let ret =
+            unsafe { libc::sigaction(signal, std::ptr::addr_of!(sigaction), std::ptr::null_mut()) };
+        if ret != 0 {
+            error!("Failed to install signal handler!")
+        }
     }
-    let fd: OwnedFd = nix::sys::eventfd::EventFd::new()
-        .expect("failed to create event fd")
-        .into();
+
+    let fd: OwnedFd = rustix::event::eventfd(0, rustix::event::EventfdFlags::empty())
+        .expect("failed to create event fd");
     POLL_WAKER
         .set(fd.try_clone().expect("failed to clone event fd"))
         .expect("failed to set POLL_WAKER");
