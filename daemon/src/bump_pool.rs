@@ -3,8 +3,11 @@ use std::sync::{
     Arc,
 };
 
-use smithay_client_toolkit::shm::{raw::RawPool, Shm};
-use wayland_client::{protocol::wl_buffer::WlBuffer, QueueHandle};
+use crate::raw_pool::RawPool;
+use wayland_client::{
+    protocol::{wl_buffer::WlBuffer, wl_shm::WlShm},
+    QueueHandle,
+};
 
 use crate::Daemon;
 
@@ -40,9 +43,9 @@ pub(crate) struct BumpPool {
 
 impl BumpPool {
     /// We assume `width` and `height` have already been multiplied by their scale factor
-    pub(crate) fn new(width: i32, height: i32, shm: &Shm, qh: &QueueHandle<Daemon>) -> Self {
+    pub(crate) fn new(width: i32, height: i32, shm: &WlShm, qh: &QueueHandle<Daemon>) -> Self {
         let len = width as usize * height as usize * crate::pixel_format().channels() as usize;
-        let mut pool = RawPool::new(len, shm).expect("failed to create RawPool");
+        let mut pool = RawPool::new(len, shm);
         let released = Arc::new(AtomicBool::new(true));
         let buffers = vec![Buffer::new(
             pool.create_buffer(

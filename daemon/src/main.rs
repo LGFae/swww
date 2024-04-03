@@ -3,6 +3,7 @@
 //! of `expects`, **on purpose**, because we **want** to unwind and exit when they happen
 
 mod animations;
+pub mod raw_pool;
 pub mod bump_pool;
 mod cli;
 mod wallpaper;
@@ -26,7 +27,6 @@ use std::{
 
 use smithay_client_toolkit::{
     delegate_layer, delegate_output, delegate_registry,
-    globals::GlobalData,
     output::{OutputHandler, OutputState},
     registry::{ProvidesRegistryState, RegistryState},
     registry_handlers,
@@ -34,7 +34,6 @@ use smithay_client_toolkit::{
         wlr_layer::{Layer, LayerShell, LayerShellHandler, LayerSurface, LayerSurfaceConfigure},
         WaylandSurface,
     },
-    shm::{Shm, ShmHandler},
 };
 
 use wayland_client::{
@@ -293,7 +292,7 @@ struct Daemon {
     compositor: WlCompositor,
     registry_state: RegistryState,
     output_state: OutputState,
-    shm: Shm,
+    shm: WlShm,
     pixel_format: PixelFormat,
     shm_format: wl_shm::Format,
 
@@ -312,7 +311,9 @@ impl Daemon {
 
         let layer_shell = LayerShell::bind(globals, qh).expect("layer shell is not available");
 
-        let shm = Shm::bind(globals, qh).expect("wl_shm is not available");
+        let shm: WlShm = globals
+            .bind(qh, 1..=1, ())
+            .expect("wl_shm is not available");
 
         let pixel_format = PixelFormat::Xrgb;
         let shm_format = wl_shm::Format::Xrgb8888;
@@ -547,48 +548,6 @@ impl OutputHandler for Daemon {
     }
 }
 
-impl Dispatch<WlShm, GlobalData> for Daemon {
-    fn event(
-        state: &mut Self,
-        _proxy: &WlShm,
-        event: <WlShm as wayland_client::Proxy>::Event,
-        _data: &GlobalData,
-        _conn: &Connection,
-        _qhandle: &QueueHandle<Self>,
-    ) {
-        match event {
-            wl_shm::Event::Format { format: wenum } => match wenum {
-                wayland_client::WEnum::Value(format) => {
-                    if format == wl_shm::Format::Bgr888 {
-                        state.shm_format = wl_shm::Format::Bgr888;
-                        state.pixel_format = PixelFormat::Bgr;
-                    } else if format == wl_shm::Format::Rgb888
-                        && state.pixel_format != PixelFormat::Bgr
-                    {
-                        state.shm_format = wl_shm::Format::Rgb888;
-                        state.pixel_format = PixelFormat::Rgb;
-                    } else if format == wl_shm::Format::Xbgr8888
-                        && state.pixel_format == PixelFormat::Xrgb
-                    {
-                        state.shm_format = wl_shm::Format::Xbgr8888;
-                        state.pixel_format = PixelFormat::Xbgr;
-                    }
-                }
-                wayland_client::WEnum::Unknown(v) => {
-                    error!("Received unknown shm format number {v} from server")
-                }
-            },
-            e => warn!("Unhandled WlShm event: {e:?}"),
-        }
-    }
-}
-
-impl ShmHandler for Daemon {
-    fn shm_state(&mut self) -> &mut Shm {
-        &mut self.shm
-    }
-}
-
 impl LayerShellHandler for Daemon {
     fn closed(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, layer: &LayerSurface) {
         self.wallpapers
@@ -687,6 +646,43 @@ impl Dispatch<WlRegion, ()> for Daemon {
         unreachable!("WlRegion has no events")
     }
 }
+
+impl Dispatch<WlShm, ()> for Daemon {
+    fn event(
+        state: &mut Self,
+        _proxy: &WlShm,
+        event: <WlShm as wayland_client::Proxy>::Event,
+        _data: &(),
+        _conn: &Connection,
+        _qhandle: &QueueHandle<Self>,
+    ) {
+        match event {
+            wl_shm::Event::Format { format: wenum } => match wenum {
+                wayland_client::WEnum::Value(format) => {
+                    if format == wl_shm::Format::Bgr888 {
+                        state.shm_format = wl_shm::Format::Bgr888;
+                        state.pixel_format = PixelFormat::Bgr;
+                    } else if format == wl_shm::Format::Rgb888
+                        && state.pixel_format != PixelFormat::Bgr
+                    {
+                        state.shm_format = wl_shm::Format::Rgb888;
+                        state.pixel_format = PixelFormat::Rgb;
+                    } else if format == wl_shm::Format::Xbgr8888
+                        && state.pixel_format == PixelFormat::Xrgb
+                    {
+                        state.shm_format = wl_shm::Format::Xbgr8888;
+                        state.pixel_format = PixelFormat::Xbgr;
+                    }
+                }
+                wayland_client::WEnum::Unknown(v) => {
+                    error!("Received unknown shm format number {v} from server")
+                }
+            },
+            e => warn!("Unhandled WlShm event: {e:?}"),
+        }
+    }
+}
+
 
 impl Dispatch<WlCallback, WlSurface> for Daemon {
     fn event(

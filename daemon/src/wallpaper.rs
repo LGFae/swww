@@ -14,10 +14,9 @@ use smithay_client_toolkit::{
         wlr_layer::{Anchor, KeyboardInteractivity, LayerSurface},
         WaylandSurface,
     },
-    shm::Shm,
 };
 
-use wayland_client::{protocol::wl_surface::WlSurface, QueueHandle};
+use wayland_client::{protocol::{wl_shm::WlShm, wl_surface::WlSurface}, QueueHandle};
 
 use crate::{bump_pool::BumpPool, Daemon};
 
@@ -78,7 +77,7 @@ impl Wallpaper {
     pub(crate) fn new(
         output_info: OutputInfo,
         layer_surface: LayerSurface,
-        shm: &Shm,
+        shm: &WlShm,
         qh: &QueueHandle<Daemon>,
     ) -> Self {
         let (width, height): (NonZeroI32, NonZeroI32) = if let Some(size) = output_info.logical_size
