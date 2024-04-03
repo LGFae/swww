@@ -25,8 +25,8 @@ use std::{
 };
 
 use smithay_client_toolkit::{
-    compositor::{CompositorHandler, CompositorState, Region},
-    delegate_compositor, delegate_layer, delegate_output, delegate_registry,
+    compositor::{CompositorState, Region},
+    delegate_layer, delegate_output, delegate_registry,
     globals::GlobalData,
     output::{OutputHandler, OutputState},
     registry::{ProvidesRegistryState, RegistryState},
@@ -42,9 +42,11 @@ use wayland_client::{
     globals::{registry_queue_init, GlobalList},
     protocol::{
         wl_buffer::WlBuffer,
+        wl_callback::WlCallback,
+        wl_compositor::WlCompositor,
         wl_output,
         wl_shm::{self, WlShm},
-        wl_surface,
+        wl_surface::{self, WlSurface},
     },
     Connection, Dispatch, QueueHandle,
 };
@@ -440,48 +442,6 @@ impl Daemon {
     }
 }
 
-impl CompositorHandler for Daemon {
-    fn scale_factor_changed(
-        &mut self,
-        _conn: &Connection,
-        _qh: &QueueHandle<Self>,
-        surface: &wl_surface::WlSurface,
-        new_factor: i32,
-    ) {
-        for wallpaper in self.wallpapers.iter_mut() {
-            if wallpaper.has_surface(surface) {
-                wallpaper.resize(None, None, Some(NonZeroI32::new(new_factor).unwrap()));
-                return;
-            }
-        }
-    }
-
-    fn frame(
-        &mut self,
-        _conn: &Connection,
-        _qh: &QueueHandle<Self>,
-        surface: &wl_surface::WlSurface,
-        time: u32,
-    ) {
-        for wallpaper in self.wallpapers.iter_mut() {
-            if wallpaper.has_surface(surface) {
-                wallpaper.frame_callback_completed(time);
-                return;
-            }
-        }
-    }
-
-    fn transform_changed(
-        &mut self,
-        _conn: &Connection,
-        _qh: &QueueHandle<Self>,
-        _surface: &wl_surface::WlSurface,
-        _new_transform: wl_output::Transform,
-    ) {
-        // do not do anything for now
-    }
-}
-
 impl OutputHandler for Daemon {
     fn output_state(&mut self) -> &mut OutputState {
         &mut self.output_state
@@ -498,7 +458,7 @@ impl OutputHandler for Daemon {
             log::info!("Selected wl_shm format: {:?}", self.shm_format);
         }
         if let Some(output_info) = self.output_state.info(&output) {
-            let surface = self.compositor_state.create_surface(qh);
+            let surface = self.compositor_state.wl_compositor().create_surface(qh, ());
 
             // Wayland clients are expected to render the cursor on their input region.
             // By setting the input region to an empty region, the compositor renders the
@@ -672,7 +632,72 @@ impl Dispatch<WlBuffer, Arc<AtomicBool>> for Daemon {
     }
 }
 
-delegate_compositor!(Daemon);
+impl Dispatch<WlCompositor, GlobalData> for Daemon {
+    fn event(
+        _state: &mut Self,
+        _proxy: &WlCompositor,
+        _event: <WlCompositor as wayland_client::Proxy>::Event,
+        _data: &GlobalData,
+        _conn: &Connection,
+        _qhandle: &QueueHandle<Self>,
+    ) {
+        unreachable!("compositor has no events");
+    }
+}
+
+impl Dispatch<WlSurface, ()> for Daemon {
+    fn event(
+        state: &mut Self,
+        proxy: &WlSurface,
+        event: <WlSurface as wayland_client::Proxy>::Event,
+        _data: &(),
+        conn: &Connection,
+        qh: &QueueHandle<Self>,
+    ) {
+        match event {
+            wl_surface::Event::Enter { output } => state.new_output(conn, qh, output),
+            wl_surface::Event::Leave { output } => state.output_destroyed(conn, qh, output),
+            wl_surface::Event::PreferredBufferScale { factor } => {
+                for wallpaper in state.wallpapers.iter_mut() {
+                    if wallpaper.has_surface(proxy) {
+                        wallpaper.resize(None, None, Some(NonZeroI32::new(factor).unwrap()));
+                        return;
+                    }
+                }
+                warn!("received new scale factor for non-existing surface")
+            }
+            wl_surface::Event::PreferredBufferTransform { .. } => {
+                warn!("Received transform. We currently ignore those")
+            }
+            _ => error!("unrecognized WlSurface event!"),
+        }
+    }
+}
+
+impl Dispatch<WlCallback, WlSurface> for Daemon {
+    fn event(
+        state: &mut Self,
+        _proxy: &WlCallback,
+        event: <WlCallback as wayland_client::Proxy>::Event,
+        data: &WlSurface,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+    ) {
+        match event {
+            wayland_client::protocol::wl_callback::Event::Done { callback_data } => {
+                for wallpaper in state.wallpapers.iter_mut() {
+                    if wallpaper.has_surface(data) {
+                        wallpaper.frame_callback_completed(callback_data);
+                        return;
+                    }
+                }
+                warn!("received callback for non-existing surface!")
+            }
+            _ => error!("unrecognized WlCallback event!"),
+        }
+    }
+}
+
 delegate_output!(Daemon);
 delegate_layer!(Daemon);
 delegate_registry!(Daemon);
