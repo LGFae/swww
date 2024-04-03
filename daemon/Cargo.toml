@@ -12,6 +12,7 @@ simplelog = "0.12"
 
 wayland-client = { version = "0.31", default-features = false, features = [ "log" ]}
 wayland-protocols = { version = "0.31", default-features = false, features = [ "client" ]}
+wayland-protocols-wlr = { version = "0.2", default-features = false, features = [ "client" ]}
 smithay-client-toolkit = { version = "0.18", default-features = false }
 
 # use specific git version for Duration implementation. We will do this until the next bitcode release

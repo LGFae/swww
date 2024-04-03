@@ -8,17 +8,16 @@ use std::{
     },
 };
 
-use smithay_client_toolkit::shell::{
-    wlr_layer::{Anchor, KeyboardInteractivity, LayerSurface},
-    WaylandSurface,
-};
-
 use wayland_client::{
     protocol::{wl_output::WlOutput, wl_shm::WlShm, wl_surface::WlSurface},
     QueueHandle,
 };
 
-use crate::{bump_pool::BumpPool, Daemon};
+use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_surface_v1::{
+    Anchor, KeyboardInteractivity,
+};
+
+use crate::{bump_pool::BumpPool, Daemon, LayerSurface};
 
 #[derive(Debug)]
 struct AnimationState {
@@ -75,10 +74,12 @@ impl Default for WallpaperInner {
 
 pub(super) struct Wallpaper {
     output: WlOutput,
+    wl_surface: WlSurface,
+    layer_surface: LayerSurface,
+
     inner: RwLock<WallpaperInner>,
     inner_staging: Mutex<WallpaperInner>,
 
-    layer_surface: LayerSurface,
     animation_state: AnimationState,
     pub configured: AtomicBool,
     qh: QueueHandle<Daemon>,
@@ -91,6 +92,7 @@ pub(super) struct Wallpaper {
 impl Wallpaper {
     pub(crate) fn new(
         output: WlOutput,
+        wl_surface: WlSurface,
         layer_surface: LayerSurface,
         shm: &WlShm,
         qh: &QueueHandle<Daemon>,
@@ -109,17 +111,17 @@ impl Wallpaper {
         layer_surface.set_margin(0, 0, 0, 0);
         layer_surface.set_keyboard_interactivity(KeyboardInteractivity::None);
         layer_surface.set_size(4, 4);
-        layer_surface.set_buffer_scale(1).unwrap();
+        wl_surface.set_buffer_scale(1);
+
         // commit so that the compositor send the initial configuration
-        layer_surface.commit();
-        layer_surface
-            .wl_surface()
-            .frame(qh, layer_surface.wl_surface().clone());
+        wl_surface.commit();
+        wl_surface.frame(qh, wl_surface.clone());
 
         let pool = Mutex::new(BumpPool::new(256, 256, shm, qh));
 
         Self {
             output,
+            wl_surface,
             layer_surface,
             inner,
             inner_staging,
@@ -206,9 +208,7 @@ impl Wallpaper {
 
         self.stop_animations();
 
-        self.layer_surface
-            .set_buffer_scale(scale_factor.get() as u32)
-            .unwrap();
+        self.wl_surface.set_buffer_scale(scale_factor.get());
 
         *self.img.lock().unwrap() = BgImg::Color([0, 0, 0]);
 
@@ -219,10 +219,8 @@ impl Wallpaper {
         *self.frame_callback_handler.time.lock().unwrap() = Some(0);
         self.layer_surface
             .set_size(width.get() as u32, height.get() as u32);
-        self.layer_surface.commit();
-        self.layer_surface
-            .wl_surface()
-            .frame(&self.qh, self.layer_surface.wl_surface().clone());
+        self.wl_surface.commit();
+        self.wl_surface.frame(&self.qh, self.wl_surface.clone());
         self.configured.store(false, Ordering::Release);
     }
 
@@ -248,8 +246,13 @@ impl Wallpaper {
     }
 
     #[inline]
-    pub(super) fn has_surface(&self, surface: &WlSurface) -> bool {
-        self.layer_surface.wl_surface() == surface
+    pub(super) fn has_surface(&self, wl_surface: &WlSurface) -> bool {
+        self.wl_surface == *wl_surface
+    }
+
+    #[inline]
+    pub(super) fn has_layer_surface(&self, layer_surface: &LayerSurface) -> bool {
+        self.layer_surface == *layer_surface
     }
 
     pub(super) fn get_dimensions(&self) -> (u32, u32) {
@@ -318,7 +321,7 @@ impl Wallpaper {
         if let Some(buf) = self.pool.lock().unwrap().get_commitable_buffer() {
             let width = inner.width.get() * inner.scale_factor.get();
             let height = inner.height.get() * inner.scale_factor.get();
-            let surface = self.layer_surface.wl_surface();
+            let surface = &self.wl_surface;
             surface.attach(Some(buf), 0, 0);
             drop(inner);
             surface.damage_buffer(0, 0, width, height);
@@ -327,7 +330,7 @@ impl Wallpaper {
         } else {
             drop(inner);
             // commit and send another frame request, since we consumed the previous one
-            let surface = self.layer_surface.wl_surface();
+            let surface = &self.wl_surface;
             surface.commit();
             surface.frame(&self.qh, surface.clone());
         }

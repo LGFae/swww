@@ -24,14 +24,6 @@ use std::{
     },
 };
 
-use smithay_client_toolkit::{
-    delegate_layer,
-    shell::{
-        wlr_layer::{Layer, LayerShell, LayerShellHandler, LayerSurface, LayerSurfaceConfigure},
-        WaylandSurface,
-    },
-};
-
 use wayland_client::{
     globals::{registry_queue_init, GlobalList, GlobalListContents},
     protocol::{
@@ -50,6 +42,11 @@ use wayland_client::{
 use utils::ipc::{get_socket_path, Answer, BgInfo, PixelFormat, Request};
 
 use animations::Animator;
+
+pub type LayerShell =
+    wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_shell_v1::ZwlrLayerShellV1;
+pub type LayerSurface =
+    wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_surface_v1::ZwlrLayerSurfaceV1;
 
 // We need this because this might be set by signals, so we can't keep it in the daemon
 static EXIT: AtomicBool = AtomicBool::new(false);
@@ -304,7 +301,9 @@ impl Daemon {
             .bind(qh, 1..=6, ())
             .expect("wl_compositor is not available");
 
-        let layer_shell = LayerShell::bind(globals, qh).expect("layer shell is not available");
+        let layer_shell: LayerShell = globals
+            .bind(qh, 1..=4, ())
+            .expect("layer shell is not available");
 
         let shm: WlShm = globals
             .bind(qh, 1..=1, ())
@@ -425,12 +424,13 @@ impl Daemon {
         let region = self.compositor.create_region(qh, ());
         surface.set_input_region(Some(&region));
 
-        let layer_surface = self.layer_shell.create_layer_surface(
-            qh,
-            surface,
-            Layer::Background,
-            Some("swww"),
+        let layer_surface = self.layer_shell.get_layer_surface(
+            &surface,
             Some(&output),
+            wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_shell_v1::Layer::Background,
+            "swww-daemon".to_string(),
+            qh,
+            (),
         );
 
         //if let Some(name) = &output_info.name {
@@ -454,6 +454,7 @@ impl Daemon {
         debug!("New output: {output:?}");
         self.wallpapers.push(Arc::new(Wallpaper::new(
             output,
+            surface,
             layer_surface,
             &self.shm,
             qh,
@@ -495,32 +496,6 @@ impl Dispatch<wl_output::WlOutput, ()> for Daemon {
             }
         }
         warn!("received event for non-existing output")
-    }
-}
-
-impl LayerShellHandler for Daemon {
-    fn closed(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, layer: &LayerSurface) {
-        self.wallpapers
-            .retain(|w| !w.has_surface(layer.wl_surface()));
-    }
-
-    fn configure(
-        &mut self,
-        _conn: &Connection,
-        _qh: &QueueHandle<Self>,
-        layer: &LayerSurface,
-        _configure: LayerSurfaceConfigure,
-        _serial: u32,
-    ) {
-        // we only care about output configs, so we just set the wallpaper as having been
-        // configured
-        for w in &mut self.wallpapers {
-            if w.has_surface(layer.wl_surface()) {
-                w.configured
-                    .store(true, std::sync::atomic::Ordering::Release);
-                break;
-            }
-        }
     }
 }
 
@@ -658,8 +633,6 @@ impl Dispatch<WlCallback, WlSurface> for Daemon {
     }
 }
 
-delegate_layer!(Daemon);
-
 impl Dispatch<WlRegistry, GlobalListContents> for Daemon {
     fn event(
         state: &mut Self,
@@ -691,6 +664,52 @@ impl Dispatch<WlRegistry, GlobalListContents> for Daemon {
                 debug!("Destroyed output with id: {name}");
             }
             _ => error!("unrecognized WlRegistry event!"),
+        }
+    }
+}
+
+impl Dispatch<LayerShell, ()> for Daemon {
+    fn event(
+        _state: &mut Self,
+        _proxy: &LayerShell,
+        _event: <LayerShell as Proxy>::Event,
+        _data: &(),
+        _conn: &Connection,
+        _qhandle: &QueueHandle<Self>,
+    ) {
+        error!("LayerShell has no events");
+    }
+}
+
+impl Dispatch<LayerSurface, ()> for Daemon {
+    fn event(
+        state: &mut Self,
+        proxy: &LayerSurface,
+        event: <LayerSurface as Proxy>::Event,
+        _data: &(),
+        _conn: &Connection,
+        _qhandle: &QueueHandle<Self>,
+    ) {
+        use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_surface_v1::Event;
+        match event {
+            Event::Configure {
+                serial,
+                width,
+                height,
+            } => {
+                //        for w in &mut self.wallpapers {
+                //            if w.has_surface(layer.wl_surface()) {
+                //                w.configured
+                //                    .store(true, std::sync::atomic::Ordering::Release);
+                //                break;
+                //            }
+                //        }
+                todo!();
+            }
+            Event::Closed => {
+                state.wallpapers.retain(|w| !w.has_layer_surface(proxy));
+            }
+            _ => todo!(),
         }
     }
 }
