@@ -1,4 +1,4 @@
-use utils::ipc::BgImg;
+use utils::ipc::{BgImg, BgInfo};
 
 use std::{
     num::NonZeroI32,
@@ -8,16 +8,13 @@ use std::{
     },
 };
 
-use smithay_client_toolkit::{
-    output::OutputInfo,
-    shell::{
-        wlr_layer::{Anchor, KeyboardInteractivity, LayerSurface},
-        WaylandSurface,
-    },
+use smithay_client_toolkit::shell::{
+    wlr_layer::{Anchor, KeyboardInteractivity, LayerSurface},
+    WaylandSurface,
 };
 
 use wayland_client::{
-    protocol::{wl_shm::WlShm, wl_surface::WlSurface},
+    protocol::{wl_output::WlOutput, wl_shm::WlShm, wl_surface::WlSurface},
     QueueHandle,
 };
 
@@ -55,46 +52,51 @@ struct FrameCallbackHandler {
 }
 
 /// Owns all the necessary information for drawing.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct WallpaperInner {
+    name: Option<String>,
+    desc: Option<String>,
     width: NonZeroI32,
     height: NonZeroI32,
     scale_factor: NonZeroI32,
+}
 
-    pool: BumpPool,
-    img: BgImg,
+impl Default for WallpaperInner {
+    fn default() -> Self {
+        Self {
+            name: None,
+            desc: None,
+            width: unsafe { NonZeroI32::new_unchecked(4) },
+            height: unsafe { NonZeroI32::new_unchecked(4) },
+            scale_factor: unsafe { NonZeroI32::new_unchecked(1) },
+        }
+    }
 }
 
 pub(super) struct Wallpaper {
-    output_id: u32,
+    output: WlOutput,
     inner: RwLock<WallpaperInner>,
-    layer_surface: LayerSurface,
+    inner_staging: Mutex<WallpaperInner>,
 
+    layer_surface: LayerSurface,
     animation_state: AnimationState,
     pub configured: AtomicBool,
     qh: QueueHandle<Daemon>,
     frame_callback_handler: FrameCallbackHandler,
+
+    img: Mutex<BgImg>,
+    pool: Mutex<BumpPool>,
 }
 
 impl Wallpaper {
     pub(crate) fn new(
-        output_info: OutputInfo,
+        output: WlOutput,
         layer_surface: LayerSurface,
         shm: &WlShm,
         qh: &QueueHandle<Daemon>,
     ) -> Self {
-        let (width, height): (NonZeroI32, NonZeroI32) = if let Some(size) = output_info.logical_size
-        {
-            if size.0 == 0 || size.1 == 0 {
-                (256.try_into().unwrap(), 256.try_into().unwrap())
-            } else {
-                (size.0.try_into().unwrap(), size.1.try_into().unwrap())
-            }
-        } else {
-            (256.try_into().unwrap(), 256.try_into().unwrap())
-        };
-
-        let scale_factor = NonZeroI32::new(output_info.scale_factor).unwrap();
+        let inner = RwLock::default();
+        let inner_staging = Mutex::default();
 
         let frame_callback_handler = FrameCallbackHandler {
             cvar: Condvar::new(),
@@ -106,30 +108,21 @@ impl Wallpaper {
         layer_surface.set_exclusive_zone(-1);
         layer_surface.set_margin(0, 0, 0, 0);
         layer_surface.set_keyboard_interactivity(KeyboardInteractivity::None);
-        layer_surface.set_size(width.get() as u32, height.get() as u32);
-        layer_surface
-            .set_buffer_scale(scale_factor.get() as u32)
-            .unwrap();
+        layer_surface.set_size(4, 4);
+        layer_surface.set_buffer_scale(1).unwrap();
         // commit so that the compositor send the initial configuration
         layer_surface.commit();
         layer_surface
             .wl_surface()
             .frame(qh, layer_surface.wl_surface().clone());
 
-        let w = width.get() * scale_factor.get();
-        let h = height.get() * scale_factor.get();
-        let pool = BumpPool::new(w, h, shm, qh);
+        let pool = Mutex::new(BumpPool::new(256, 256, shm, qh));
 
         Self {
-            output_id: output_info.id,
+            output,
             layer_surface,
-            inner: RwLock::new(WallpaperInner {
-                width,
-                height,
-                scale_factor,
-                img: BgImg::Color([0, 0, 0]),
-                pool,
-            }),
+            inner,
+            inner_staging,
             animation_state: AnimationState {
                 id: AtomicUsize::new(0),
                 transition_finished: Arc::new(AtomicBool::new(false)),
@@ -137,12 +130,113 @@ impl Wallpaper {
             configured: AtomicBool::new(false),
             qh: qh.clone(),
             frame_callback_handler,
+            img: Mutex::new(BgImg::Color([0, 0, 0])),
+            pool,
+        }
+    }
+
+    #[inline]
+    pub fn get_bg_info(&self) -> BgInfo {
+        let inner = self.inner.read().unwrap();
+        BgInfo {
+            name: inner.name.clone().unwrap_or("?".to_string()),
+            dim: (inner.width.get() as u32, inner.height.get() as u32),
+            scale_factor: inner.scale_factor.get(),
+            img: self.img.lock().unwrap().clone(),
+            pixel_format: crate::pixel_format(),
+        }
+    }
+
+    #[inline]
+    pub fn set_name(&self, name: String) {
+        self.inner_staging.lock().unwrap().name = Some(name);
+    }
+
+    #[inline]
+    pub fn set_desc(&self, desc: String) {
+        self.inner_staging.lock().unwrap().name = Some(desc)
+    }
+
+    #[inline]
+    pub fn set_dimensions(&self, width: i32, height: i32) {
+        let mut lock = self.inner_staging.lock().unwrap();
+
+        if width <= 0 {
+            log::error!("invalid width ({width}) for output: {:?}", self.output);
+        } else {
+            lock.width = unsafe { NonZeroI32::new_unchecked(width) };
+        }
+
+        if height <= 0 {
+            log::error!("invalid height ({height}) for output: {:?}", self.output);
+        } else {
+            lock.height = unsafe { NonZeroI32::new_unchecked(height) };
+        }
+    }
+
+    #[inline]
+    pub fn set_scale(&self, scale: i32) {
+        if scale <= 0 {
+            log::error!("invalid scale ({scale}) for output: {:?}", self.output);
+        } else {
+            self.inner_staging.lock().unwrap().scale_factor =
+                unsafe { NonZeroI32::new_unchecked(scale) }
+        }
+    }
+
+    #[inline]
+    pub fn commit_surface_changes(&self) {
+        let mut inner = self.inner.write().unwrap();
+        let staging = self.inner_staging.lock().unwrap();
+
+        if (inner.width, inner.height, inner.scale_factor)
+            == (staging.width, staging.height, staging.scale_factor)
+        {
+            // just the name and descriptions changed
+            inner.name = staging.name.clone();
+            inner.desc = staging.desc.clone();
+            return;
+        }
+        //otherwise, everything changed
+        *inner = staging.clone();
+
+        let (width, height, scale_factor) = (staging.width, staging.height, staging.scale_factor);
+        drop(inner);
+        drop(staging);
+
+        self.stop_animations();
+
+        self.layer_surface
+            .set_buffer_scale(scale_factor.get() as u32)
+            .unwrap();
+
+        *self.img.lock().unwrap() = BgImg::Color([0, 0, 0]);
+
+        let w = width.get() * scale_factor.get();
+        let h = height.get() * scale_factor.get();
+        self.pool.lock().unwrap().resize(w, h, &self.qh);
+
+        *self.frame_callback_handler.time.lock().unwrap() = Some(0);
+        self.layer_surface
+            .set_size(width.get() as u32, height.get() as u32);
+        self.layer_surface.commit();
+        self.layer_surface
+            .wl_surface()
+            .frame(&self.qh, self.layer_surface.wl_surface().clone());
+        self.configured.store(false, Ordering::Release);
+    }
+
+    #[inline]
+    pub(super) fn has_name(&self, name: &str) -> bool {
+        match self.inner.read().unwrap().name.as_ref() {
+            Some(n) => n == name,
+            None => false,
         }
     }
 
     #[inline]
     pub(super) fn has_id(&self, id: u32) -> bool {
-        self.output_id == id
+        wayland_client::Proxy::id(&self.output).protocol_id() == id
     }
 
     #[inline]
@@ -171,13 +265,7 @@ impl Wallpaper {
     where
         F: FnOnce(&mut [u8]) -> T,
     {
-        let mut inner = self.inner.write().unwrap();
-        f(inner.pool.get_drawable(&self.qh))
-    }
-
-    #[inline]
-    pub(super) fn get_img_info(&self) -> BgImg {
-        self.inner.read().unwrap().img.clone()
+        f(self.pool.lock().unwrap().get_drawable(&self.qh))
     }
 
     #[inline]
@@ -213,8 +301,8 @@ impl Wallpaper {
     }
 
     pub(super) fn set_img_info(&self, img_info: BgImg) {
-        log::debug!("output {} - drawing: {}", self.output_id, img_info);
-        self.inner.write().unwrap().img = img_info;
+        log::debug!("output {:?} - drawing: {}", self.output, img_info);
+        *self.img.lock().unwrap() = img_info;
     }
 
     pub(super) fn draw(&self) {
@@ -227,7 +315,7 @@ impl Wallpaper {
             *time = None;
         }
         let inner = self.inner.read().unwrap();
-        if let Some(buf) = inner.pool.get_commitable_buffer() {
+        if let Some(buf) = self.pool.lock().unwrap().get_commitable_buffer() {
             let width = inner.width.get() * inner.scale_factor.get();
             let height = inner.height.get() * inner.scale_factor.get();
             let surface = self.layer_surface.wl_surface();
@@ -244,42 +332,10 @@ impl Wallpaper {
             surface.frame(&self.qh, surface.clone());
         }
     }
+}
 
-    pub(super) fn resize(
-        &self,
-        width: Option<NonZeroI32>,
-        height: Option<NonZeroI32>,
-        scale_factor: Option<NonZeroI32>,
-    ) {
-        if let Some(s) = scale_factor {
-            self.layer_surface.set_buffer_scale(s.get() as u32).unwrap();
-        }
-        let mut inner = self.inner.write().unwrap();
-        let width = width.unwrap_or(inner.width);
-        let height = height.unwrap_or(inner.height);
-        let scale_factor = scale_factor.unwrap_or(inner.scale_factor);
-        if (width, height, scale_factor) == (inner.width, inner.height, inner.scale_factor) {
-            return;
-        }
-        self.stop_animations();
-
-        inner.width = width;
-        inner.height = height;
-        inner.scale_factor = scale_factor;
-        inner.img = BgImg::Color([0, 0, 0]);
-
-        let w = width.get() * scale_factor.get();
-        let h = height.get() * scale_factor.get();
-        inner.pool.resize(w, h, &self.qh);
-        drop(inner);
-
-        *self.frame_callback_handler.time.lock().unwrap() = Some(0);
-        self.layer_surface
-            .set_size(width.get() as u32, height.get() as u32);
-        self.layer_surface.commit();
-        self.layer_surface
-            .wl_surface()
-            .frame(&self.qh, self.layer_surface.wl_surface().clone());
-        self.configured.store(false, Ordering::Release);
+impl Drop for Wallpaper {
+    fn drop(&mut self) {
+        self.output.release()
     }
 }

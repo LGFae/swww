@@ -186,7 +186,7 @@ impl RawPool {
         use rustix::fs::{MemfdFlags, SealFlags};
 
         loop {
-            let name = CStr::from_bytes_with_nul(b"smithay-client-toolkit\0").unwrap();
+            let name = CStr::from_bytes_with_nul(b"swww-daemon\0").unwrap();
             let flags = MemfdFlags::ALLOW_SEALING | MemfdFlags::CLOEXEC;
 
             match rustix::fs::memfd_create(name, flags) {
