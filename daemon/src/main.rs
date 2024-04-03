@@ -3,9 +3,9 @@
 //! of `expects`, **on purpose**, because we **want** to unwind and exit when they happen
 
 mod animations;
-pub mod raw_pool;
 pub mod bump_pool;
 mod cli;
+pub mod raw_pool;
 mod wallpaper;
 use log::{debug, error, info, warn, LevelFilter};
 use rustix::event::{poll, PollFd, PollFlags};
@@ -26,10 +26,8 @@ use std::{
 };
 
 use smithay_client_toolkit::{
-    delegate_layer, delegate_output, delegate_registry,
+    delegate_layer, delegate_output,
     output::{OutputHandler, OutputState},
-    registry::{ProvidesRegistryState, RegistryState},
-    registry_handlers,
     shell::{
         wlr_layer::{Layer, LayerShell, LayerShellHandler, LayerSurface, LayerSurfaceConfigure},
         WaylandSurface,
@@ -37,13 +35,14 @@ use smithay_client_toolkit::{
 };
 
 use wayland_client::{
-    globals::{registry_queue_init, GlobalList},
+    globals::{registry_queue_init, GlobalList, GlobalListContents},
     protocol::{
         wl_buffer::WlBuffer,
         wl_callback::WlCallback,
         wl_compositor::WlCompositor,
         wl_output,
         wl_region::WlRegion,
+        wl_registry::WlRegistry,
         wl_shm::{self, WlShm},
         wl_surface::{self, WlSurface},
     },
@@ -290,7 +289,6 @@ struct Daemon {
     // Wayland stuff
     layer_shell: LayerShell,
     compositor: WlCompositor,
-    registry_state: RegistryState,
     output_state: OutputState,
     shm: WlShm,
     pixel_format: PixelFormat,
@@ -322,7 +320,6 @@ impl Daemon {
             layer_shell,
             // Outputs may be hotplugged at runtime, therefore we need to setup a registry state to
             // listen for Outputs.
-            registry_state: RegistryState::new(globals),
             output_state: OutputState::new(globals, qh),
             compositor,
             shm,
@@ -683,7 +680,6 @@ impl Dispatch<WlShm, ()> for Daemon {
     }
 }
 
-
 impl Dispatch<WlCallback, WlSurface> for Daemon {
     fn event(
         state: &mut Self,
@@ -710,13 +706,30 @@ impl Dispatch<WlCallback, WlSurface> for Daemon {
 
 delegate_output!(Daemon);
 delegate_layer!(Daemon);
-delegate_registry!(Daemon);
 
-impl ProvidesRegistryState for Daemon {
-    fn registry(&mut self) -> &mut RegistryState {
-        &mut self.registry_state
+impl Dispatch<WlRegistry, GlobalListContents> for Daemon {
+    fn event(
+        _state: &mut Self,
+        _proxy: &WlRegistry,
+        event: <WlRegistry as wayland_client::Proxy>::Event,
+        _data: &GlobalListContents,
+        _conn: &Connection,
+        _qhandle: &QueueHandle<Self>,
+    ) {
+        match event {
+            wayland_client::protocol::wl_registry::Event::Global {
+                name,
+                interface,
+                version,
+            } => {
+                debug!("interface: {interface}, id: {name}, version: {version}")
+            }
+            wayland_client::protocol::wl_registry::Event::GlobalRemove { name } => {
+                debug!("REMOVAL id: {name}")
+            }
+            _ => error!("unrecognized WlRegistry event!"),
+        }
     }
-    registry_handlers![OutputState];
 }
 
 fn make_logger(quiet: bool) {

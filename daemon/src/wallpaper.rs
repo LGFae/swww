@@ -16,7 +16,10 @@ use smithay_client_toolkit::{
     },
 };
 
-use wayland_client::{protocol::{wl_shm::WlShm, wl_surface::WlSurface}, QueueHandle};
+use wayland_client::{
+    protocol::{wl_shm::WlShm, wl_surface::WlSurface},
+    QueueHandle,
+};
 
 use crate::{bump_pool::BumpPool, Daemon};
 
