@@ -25,7 +25,6 @@ use std::{
 };
 
 use smithay_client_toolkit::{
-    compositor::{CompositorState, Region},
     delegate_layer, delegate_output, delegate_registry,
     globals::GlobalData,
     output::{OutputHandler, OutputState},
@@ -45,6 +44,7 @@ use wayland_client::{
         wl_callback::WlCallback,
         wl_compositor::WlCompositor,
         wl_output,
+        wl_region::WlRegion,
         wl_shm::{self, WlShm},
         wl_surface::{self, WlSurface},
     },
@@ -290,7 +290,7 @@ impl Drop for SocketWrapper {
 struct Daemon {
     // Wayland stuff
     layer_shell: LayerShell,
-    compositor_state: CompositorState,
+    compositor: WlCompositor,
     registry_state: RegistryState,
     output_state: OutputState,
     shm: Shm,
@@ -306,8 +306,9 @@ impl Daemon {
     fn new(globals: &GlobalList, qh: &QueueHandle<Self>) -> Self {
         // The compositor (not to be confused with the server which is commonly called the compositor) allows
         // configuring surfaces to be presented.
-        let compositor_state =
-            CompositorState::bind(globals, qh).expect("wl_compositor is not available");
+        let compositor: WlCompositor = globals
+            .bind(qh, 1..=6, ())
+            .expect("wl_compositor is not available");
 
         let layer_shell = LayerShell::bind(globals, qh).expect("layer shell is not available");
 
@@ -322,7 +323,7 @@ impl Daemon {
             // listen for Outputs.
             registry_state: RegistryState::new(globals),
             output_state: OutputState::new(globals, qh),
-            compositor_state,
+            compositor,
             shm,
             pixel_format,
             shm_format,
@@ -458,14 +459,14 @@ impl OutputHandler for Daemon {
             log::info!("Selected wl_shm format: {:?}", self.shm_format);
         }
         if let Some(output_info) = self.output_state.info(&output) {
-            let surface = self.compositor_state.wl_compositor().create_surface(qh, ());
+            let surface = self.compositor.create_surface(qh, ());
 
             // Wayland clients are expected to render the cursor on their input region.
             // By setting the input region to an empty region, the compositor renders the
             // default cursor. Without this, an empty desktop won't render a cursor.
-            if let Ok(region) = Region::new(&self.compositor_state) {
-                surface.set_input_region(Some(region.wl_region()));
-            }
+            let region = self.compositor.create_region(qh, ());
+            surface.set_input_region(Some(&region));
+
             let layer_surface = self.layer_shell.create_layer_surface(
                 qh,
                 surface,
@@ -632,16 +633,16 @@ impl Dispatch<WlBuffer, Arc<AtomicBool>> for Daemon {
     }
 }
 
-impl Dispatch<WlCompositor, GlobalData> for Daemon {
+impl Dispatch<WlCompositor, ()> for Daemon {
     fn event(
         _state: &mut Self,
         _proxy: &WlCompositor,
         _event: <WlCompositor as wayland_client::Proxy>::Event,
-        _data: &GlobalData,
+        _data: &(),
         _conn: &Connection,
         _qhandle: &QueueHandle<Self>,
     ) {
-        unreachable!("compositor has no events");
+        unreachable!("WlCompositor has no events");
     }
 }
 
@@ -671,6 +672,19 @@ impl Dispatch<WlSurface, ()> for Daemon {
             }
             _ => error!("unrecognized WlSurface event!"),
         }
+    }
+}
+
+impl Dispatch<WlRegion, ()> for Daemon {
+    fn event(
+        _state: &mut Self,
+        _proxy: &WlRegion,
+        _event: <WlRegion as wayland_client::Proxy>::Event,
+        _data: &(),
+        _conn: &Connection,
+        _qhandle: &QueueHandle<Self>,
+    ) {
+        unreachable!("WlRegion has no events")
     }
 }
 
