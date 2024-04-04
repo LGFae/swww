@@ -10,7 +10,7 @@ use std::{
 
 use wayland_client::{
     protocol::{wl_output::WlOutput, wl_shm::WlShm, wl_surface::WlSurface},
-    QueueHandle,
+    Proxy, QueueHandle,
 };
 
 use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_surface_v1::{
@@ -117,7 +117,7 @@ impl Wallpaper {
         wl_surface.commit();
         wl_surface.frame(qh, wl_surface.clone());
 
-        let pool = Mutex::new(BumpPool::new(256, 256, shm, qh));
+        let pool = Mutex::new(BumpPool::new(256, 256, shm));
 
         Self {
             output,
@@ -151,11 +151,13 @@ impl Wallpaper {
 
     #[inline]
     pub fn set_name(&self, name: String) {
+        log::debug!("Output {} name: {name}", self.output.id());
         self.inner_staging.lock().unwrap().name = Some(name);
     }
 
     #[inline]
     pub fn set_desc(&self, desc: String) {
+        log::debug!("Output {} description: {desc}", self.output.id());
         self.inner_staging.lock().unwrap().name = Some(desc)
     }
 
@@ -214,7 +216,7 @@ impl Wallpaper {
 
         let w = width.get() * scale_factor.get();
         let h = height.get() * scale_factor.get();
-        self.pool.lock().unwrap().resize(w, h, &self.qh);
+        self.pool.lock().unwrap().resize(w, h);
 
         *self.frame_callback_handler.time.lock().unwrap() = Some(0);
         self.layer_surface

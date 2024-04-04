@@ -43,22 +43,10 @@ pub(crate) struct BumpPool {
 
 impl BumpPool {
     /// We assume `width` and `height` have already been multiplied by their scale factor
-    pub(crate) fn new(width: i32, height: i32, shm: &WlShm, qh: &QueueHandle<Daemon>) -> Self {
+    pub(crate) fn new(width: i32, height: i32, shm: &WlShm) -> Self {
         let len = width as usize * height as usize * crate::pixel_format().channels() as usize;
-        let mut pool = RawPool::new(len, shm);
-        let released = Arc::new(AtomicBool::new(true));
-        let buffers = vec![Buffer::new(
-            pool.create_buffer(
-                0,
-                width,
-                height,
-                width * crate::pixel_format().channels() as i32,
-                crate::wl_shm_format(),
-                released.clone(),
-                qh,
-            ),
-            released,
-        )];
+        let pool = RawPool::new(len, shm);
+        let buffers = vec![];
 
         Self {
             pool,
@@ -153,23 +141,11 @@ impl BumpPool {
     }
 
     /// We assume `width` and `height` have already been multiplied by their scale factor
-    pub(crate) fn resize(&mut self, width: i32, height: i32, qh: &QueueHandle<Daemon>) {
+    #[inline]
+    pub(crate) fn resize(&mut self, width: i32, height: i32) {
         self.width = width;
         self.height = height;
         self.last_used_buffer = None;
         self.buffers.clear();
-        let released = Arc::new(AtomicBool::new(true));
-        self.buffers.push(Buffer::new(
-            self.pool.create_buffer(
-                0,
-                width,
-                height,
-                width * crate::pixel_format().channels() as i32,
-                crate::wl_shm_format(),
-                released.clone(),
-                qh,
-            ),
-            released,
-        ));
     }
 }

@@ -125,6 +125,21 @@ fn main() -> Result<(), String> {
     let qh = event_queue.handle();
 
     let mut daemon = Daemon::new(&globals, &qh);
+    // roundtrip to get the shm formats before setting up the outputs
+    event_queue.roundtrip(&mut daemon).unwrap();
+
+    for global in globals.contents().clone_list() {
+        if global.interface == "wl_output" {
+            if global.version >= 2 {
+                let output = globals
+                    .registry()
+                    .bind(global.name, global.version, &qh, ());
+                daemon.new_output(&qh, output);
+            } else {
+                error!("wl_output must be at least version 2 for swww-daemon!")
+            }
+        }
+    }
 
     if let Ok(true) = sd_notify::booted() {
         if let Err(e) = sd_notify::notify(true, &[sd_notify::NotifyState::Ready]) {
@@ -166,6 +181,8 @@ fn main() -> Result<(), String> {
             event_queue
                 .dispatch_pending(&mut daemon)
                 .expect("failed to dispatch events");
+        } else {
+            drop(read_guard);
         }
 
         if !events[0].is_empty() {
@@ -449,7 +466,7 @@ impl Daemon {
         //    }
         //}
 
-        debug!("New output: {output:?}");
+        debug!("New output: {}", output.id());
         self.wallpapers.push(Arc::new(Wallpaper::new(
             output,
             surface,
@@ -457,7 +474,6 @@ impl Daemon {
             &self.shm,
             qh,
         )));
-        debug!("Output count: {}", self.wallpapers.len());
     }
 }
 
@@ -473,9 +489,9 @@ impl Dispatch<wl_output::WlOutput, ()> for Daemon {
         for wallpaper in state.wallpapers.iter_mut() {
             if wallpaper.has_id(proxy.id().protocol_id()) {
                 match event {
-                    wl_output::Event::Geometry {
-                        x, y, make, model, ..
-                    } => debug!("New output position: {x},{y} - {make}-{model}"),
+                    wl_output::Event::Geometry { x, y, .. } => {
+                        debug!("output {} position: {x},{y}", proxy.id())
+                    }
                     wl_output::Event::Mode {
                         flags: _flags,
                         width,
@@ -602,7 +618,7 @@ impl Dispatch<WlShm, ()> for Daemon {
                     error!("Received unknown shm format number {v} from server")
                 }
             },
-            e => warn!("Unhandled WlShm event: {e:?}"),
+            e => warn!("unhandled WlShm event: {e:?}"),
         }
     }
 }
@@ -690,24 +706,20 @@ impl Dispatch<LayerSurface, ()> for Daemon {
     ) {
         use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_surface_v1::Event;
         match event {
-            Event::Configure {
-                serial,
-                width,
-                height,
-            } => {
-                //        for w in &mut self.wallpapers {
-                //            if w.has_surface(layer.wl_surface()) {
-                //                w.configured
-                //                    .store(true, std::sync::atomic::Ordering::Release);
-                //                break;
-                //            }
-                //        }
-                todo!();
+            Event::Configure { serial, .. } => {
+                for w in &mut state.wallpapers {
+                    if w.has_layer_surface(proxy) {
+                        w.configured
+                            .store(true, std::sync::atomic::Ordering::Release);
+                        proxy.ack_configure(serial);
+                        return;
+                    }
+                }
             }
             Event::Closed => {
                 state.wallpapers.retain(|w| !w.has_layer_surface(proxy));
             }
-            _ => todo!(),
+            _ => error!("unrecognized LayerSurface event"),
         }
     }
 }
