@@ -1,3 +1,4 @@
+use log::{debug, error, warn};
 use utils::ipc::{BgImg, BgInfo};
 
 use std::{
@@ -151,13 +152,13 @@ impl Wallpaper {
 
     #[inline]
     pub fn set_name(&self, name: String) {
-        log::debug!("Output {} name: {name}", self.output.id());
+        debug!("Output {} name: {name}", self.output.id());
         self.inner_staging.lock().unwrap().name = Some(name);
     }
 
     #[inline]
     pub fn set_desc(&self, desc: String) {
-        log::debug!("Output {} description: {desc}", self.output.id());
+        debug!("Output {} description: {desc}", self.output.id());
         self.inner_staging.lock().unwrap().name = Some(desc)
     }
 
@@ -166,13 +167,13 @@ impl Wallpaper {
         let mut lock = self.inner_staging.lock().unwrap();
 
         if width <= 0 {
-            log::error!("invalid width ({width}) for output: {:?}", self.output);
+            error!("invalid width ({width}) for output: {:?}", self.output);
         } else {
             lock.width = unsafe { NonZeroI32::new_unchecked(width) };
         }
 
         if height <= 0 {
-            log::error!("invalid height ({height}) for output: {:?}", self.output);
+            error!("invalid height ({height}) for output: {:?}", self.output);
         } else {
             lock.height = unsafe { NonZeroI32::new_unchecked(height) };
         }
@@ -181,7 +182,7 @@ impl Wallpaper {
     #[inline]
     pub fn set_scale(&self, scale: i32) {
         if scale <= 0 {
-            log::error!("invalid scale ({scale}) for output: {:?}", self.output);
+            error!("invalid scale ({scale}) for output: {:?}", self.output);
         } else {
             self.inner_staging.lock().unwrap().scale_factor =
                 unsafe { NonZeroI32::new_unchecked(scale) }
@@ -192,6 +193,24 @@ impl Wallpaper {
     pub fn commit_surface_changes(&self) {
         let mut inner = self.inner.write().unwrap();
         let staging = self.inner_staging.lock().unwrap();
+
+        if inner.name != staging.name {
+            let name = staging.name.clone().unwrap_or("".to_string());
+            if let Err(e) = std::thread::Builder::new()
+                .name("cache loader".to_string())
+                .stack_size(1 << 14)
+                .spawn(move || {
+                    // Wait for a bit for the surface to be properly configured and stuff
+                    // this is obviously not ideal, but it solves the vast majority of problems
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                    if let Err(e) = utils::cache::load(&name) {
+                        warn!("failed to load cache: {e}");
+                    }
+                })
+            {
+                warn!("failed to spawn `cache loader` thread: {e}");
+            }
+        }
 
         if (inner.width, inner.height, inner.scale_factor)
             == (staging.width, staging.height, staging.scale_factor)
@@ -306,7 +325,11 @@ impl Wallpaper {
     }
 
     pub(super) fn set_img_info(&self, img_info: BgImg) {
-        log::debug!("output {:?} - drawing: {}", self.output, img_info);
+        debug!(
+            "output {:?} - drawing: {}",
+            self.inner.read().unwrap().name,
+            img_info
+        );
         *self.img.lock().unwrap() = img_info;
     }
 
@@ -314,7 +337,7 @@ impl Wallpaper {
         {
             let mut time = self.frame_callback_handler.time.lock().unwrap();
             while time.is_none() {
-                log::debug!("waiting for condvar");
+                debug!("waiting for condvar");
                 time = self.frame_callback_handler.cvar.wait(time).unwrap();
             }
             *time = None;

@@ -448,24 +448,6 @@ impl Daemon {
             (),
         );
 
-        //if let Some(name) = &output_info.name {
-        //    let name = name.to_owned();
-        //    if let Err(e) = std::thread::Builder::new()
-        //        .name("cache loader".to_string())
-        //        .stack_size(1 << 14)
-        //        .spawn(move || {
-        //            // Wait for a bit for the output to be properly configured and stuff
-        //            // this is obviously not ideal, but it solves the vast majority of problems
-        //            std::thread::sleep(std::time::Duration::from_millis(100));
-        //            if let Err(e) = utils::cache::load(&name) {
-        //                warn!("failed to load cache: {e}");
-        //            }
-        //        })
-        //    {
-        //        warn!("failed to spawn `cache loader` thread: {e}");
-        //    }
-        //}
-
         debug!("New output: {}", output.id());
         self.wallpapers.push(Arc::new(Wallpaper::new(
             output,
@@ -504,7 +486,7 @@ impl Dispatch<wl_output::WlOutput, ()> for Daemon {
                     wl_output::Event::Description { description } => {
                         wallpaper.set_desc(description)
                     }
-                    _ => error!("unrecognized WlOutput event!"),
+                    e => error!("unrecognized WlOutput event: {e:?}"),
                 }
                 return;
             }
@@ -526,7 +508,7 @@ impl Dispatch<WlBuffer, Arc<AtomicBool>> for Daemon {
             wayland_client::protocol::wl_buffer::Event::Release => {
                 data.store(true, Ordering::Release);
             }
-            _ => log::error!("There should be no buffer events other than Release"),
+            e => error!("unrecognized WlBuffer event: {e:?}"),
         }
     }
 }
@@ -540,7 +522,7 @@ impl Dispatch<WlCompositor, ()> for Daemon {
         _conn: &Connection,
         _qhandle: &QueueHandle<Self>,
     ) {
-        unreachable!("WlCompositor has no events");
+        error!("WlCompositor has no events");
     }
 }
 
@@ -554,8 +536,8 @@ impl Dispatch<WlSurface, ()> for Daemon {
         _qh: &QueueHandle<Self>,
     ) {
         match event {
-            wl_surface::Event::Enter { output } => debug!("Surface entered for output: {output:?}"),
-            wl_surface::Event::Leave { output } => debug!("Surface left for output: {output:?}"),
+            wl_surface::Event::Enter { output } => debug!("Output {}: Surface Enter", output.id()),
+            wl_surface::Event::Leave { output } => debug!("Output {}: Surface Leave", output.id()),
             wl_surface::Event::PreferredBufferScale { factor } => {
                 for wallpaper in state.wallpapers.iter_mut() {
                     if wallpaper.has_surface(proxy) {
@@ -569,7 +551,7 @@ impl Dispatch<WlSurface, ()> for Daemon {
             wl_surface::Event::PreferredBufferTransform { .. } => {
                 warn!("Received transform. We currently ignore those")
             }
-            _ => error!("unrecognized WlSurface event!"),
+            e => error!("unrecognized WlSurface event: {e:?}"),
         }
     }
 }
@@ -583,7 +565,7 @@ impl Dispatch<WlRegion, ()> for Daemon {
         _conn: &Connection,
         _qhandle: &QueueHandle<Self>,
     ) {
-        unreachable!("WlRegion has no events")
+        error!("WlRegion has no events")
     }
 }
 
@@ -642,7 +624,7 @@ impl Dispatch<WlCallback, WlSurface> for Daemon {
                 }
                 warn!("received callback for non-existing surface!")
             }
-            _ => error!("unrecognized WlCallback event!"),
+            e => error!("unrecognized WlCallback event: {e:?}"),
         }
     }
 }
@@ -677,7 +659,7 @@ impl Dispatch<WlRegistry, GlobalListContents> for Daemon {
 
                 debug!("Destroyed output with id: {name}");
             }
-            _ => error!("unrecognized WlRegistry event!"),
+            e => error!("unrecognized WlRegistry event: {e:?}"),
         }
     }
 }
@@ -719,7 +701,7 @@ impl Dispatch<LayerSurface, ()> for Daemon {
             Event::Closed => {
                 state.wallpapers.retain(|w| !w.has_layer_surface(proxy));
             }
-            _ => error!("unrecognized LayerSurface event"),
+            e => error!("unrecognized LayerSurface event: {e:?}"),
         }
     }
 }
