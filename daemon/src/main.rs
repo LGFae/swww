@@ -314,8 +314,6 @@ impl Daemon {
 
         Self {
             layer_shell,
-            // Outputs may be hotplugged at runtime, therefore we need to setup a registry state to
-            // listen for Outputs.
             compositor,
             shm,
             pixel_format,
