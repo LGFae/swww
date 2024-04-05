@@ -2,11 +2,4 @@ Fully automated, complete testing, for every option
 	This is annoying because it would involve changing the output scaling and
 	testing many things with different setups. Maybe we can script it somehow?
 
-Nuke smithay-client-toolkit
-	- copy over their implementation of RawPool (see if we can improve it for
-	our purposes)
-	- manually implemented all the wayland handling code in daemon/src/main.rs
-	in a wayland.rs module
-This will make it easier to include newer protocols later own. For example,
-fractional scaling, presentation time, and HDR. It will also prevent huge rewrites
-due to changes in sctk's api (like has happened before).
+Change proc traversal code to just try pinging the daemon.
