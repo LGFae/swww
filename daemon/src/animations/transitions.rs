@@ -108,20 +108,29 @@ impl Transition {
     fn simple(&mut self, new_img: &[u8]) {
         let step = self.step;
         let mut now = Instant::now();
-        let done = std::sync::atomic::AtomicBool::new(false);
-        while !done.load(std::sync::atomic::Ordering::Relaxed) {
-            done.store(true, std::sync::atomic::Ordering::Relaxed);
-            self.draw_all(new_img, |_, old, new| {
-                if old.abs_diff(*new) < step {
-                    *old = *new;
-                } else if *old > *new {
-                    *old -= step;
-                    done.store(false, std::sync::atomic::Ordering::Relaxed);
-                } else {
-                    *old += step;
-                    done.store(false, std::sync::atomic::Ordering::Relaxed);
-                }
-            });
+        let mut done = false;
+        while !done {
+            done = true;
+            for wallpaper in self.wallpapers.iter() {
+                wallpaper.canvas_change(|canvas| {
+                    for (old, new) in canvas.iter_mut().zip(new_img) {
+                        if old.abs_diff(*new) < step {
+                            *old = *new;
+                        } else if *old > *new {
+                            *old -= step;
+                            done = false;
+                        } else {
+                            *old += step;
+                            done = false;
+                        }
+                    }
+                });
+            }
+
+            for wallpaper in self.wallpapers.iter() {
+                wallpaper.draw();
+            }
+
             self.send_frame(&mut now);
         }
     }
@@ -132,7 +141,7 @@ impl Transition {
 
         let mut now = Instant::now();
         while start.elapsed().as_secs_f64() < seq.duration() {
-            self.draw_all(new_img, |_, old_col, new_col| {
+            self.parallel_draw_all(new_img, |_, old_col, new_col| {
                 *old_col = (*old_col as f64 * (1.0 - step) + *new_col as f64 * step) as u8;
             });
             self.send_frame(&mut now);
@@ -190,7 +199,7 @@ impl Transition {
         let step = self.step;
 
         while start.elapsed().as_secs_f64() < seq.duration() {
-            self.draw_all(new_img, |i, old, new| {
+            self.parallel_draw_all(new_img, |i, old, new| {
                 let pix_x = i % width;
                 let pix_y = height - i / width;
                 if is_low(pix_x as f64, pix_y as f64, offset) {
@@ -242,7 +251,7 @@ impl Transition {
         let step = self.step;
 
         while start.elapsed().as_secs_f64() < seq.duration() {
-            self.draw_all(new_img, |i, old, new| {
+            self.parallel_draw_all(new_img, |i, old, new| {
                 let pix_x = i % width;
                 let pix_y = height - i / width;
                 if is_low(pix_x as f64, pix_y as f64, offset, circle_radius) {
@@ -281,7 +290,7 @@ impl Transition {
         let (mut seq, start) = self.bezier_seq(0.0, dist_end);
         let mut now = Instant::now();
         while start.elapsed().as_secs_f64() < seq.duration() {
-            self.draw_all(new_img, |i, old, new| {
+            self.parallel_draw_all(new_img, |i, old, new| {
                 let pix_x = i % width;
                 let pix_y = height - i / width;
                 let diff_x = pix_x.abs_diff(center_x);
@@ -322,7 +331,7 @@ impl Transition {
         let (mut seq, start) = self.bezier_seq(dist_center, 0.0);
         let mut now = Instant::now();
         while start.elapsed().as_secs_f64() < seq.duration() {
-            self.draw_all(new_img, |i, old, new| {
+            self.parallel_draw_all(new_img, |i, old, new| {
                 let pix_x = i % width;
                 let pix_y = height - i / width;
                 let diff_x = pix_x.abs_diff(center_x);
@@ -342,23 +351,31 @@ impl Transition {
         self.simple(new_img)
     }
 
-    /// Runs pixels_change_fn for every byte in the old img
+    /// Runs pixels_change_fn for every byte in the old img, in parallel
     #[inline(always)]
-    fn draw_all<F>(&self, new_img: &[u8], pixels_change_fn: F)
+    fn parallel_draw_all<F>(&self, new_img: &[u8], pixels_change_fn: F)
     where
         F: FnOnce(usize, &mut u8, &u8) + Copy + Send + Sync,
     {
         let channels = crate::pixel_format().channels() as usize;
+
         for wallpaper in self.wallpapers.iter() {
             wallpaper.canvas_change(|canvas| {
                 canvas
-                    .par_iter_mut()
-                    .zip(new_img.par_iter())
+                    .par_chunks_mut(channels)
+                    .zip_eq(new_img.par_chunks(channels))
                     .enumerate()
                     .for_each(|(i, (old, new))| {
-                        pixels_change_fn(i / channels, old, new);
+                        for j in 0..channels {
+                            unsafe {
+                                pixels_change_fn(i, old.get_unchecked_mut(j), new.get_unchecked(j))
+                            }
+                        }
                     });
             });
+        }
+
+        for wallpaper in self.wallpapers.iter() {
             wallpaper.draw();
         }
     }
