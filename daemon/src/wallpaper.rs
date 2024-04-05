@@ -164,6 +164,7 @@ impl Wallpaper {
         (width * scale_factor, height * scale_factor)
     }
 
+    #[inline]
     pub(super) fn canvas_change<F, T>(&self, f: F) -> T
     where
         F: FnOnce(&mut [u8]) -> T,
