@@ -101,7 +101,7 @@ pub fn wake_poll() {
     }
 }
 
-extern "C" fn signal_handler(_s: i32) {
+extern "C" fn signal_handler(_s: libc::c_int) {
     exit_daemon();
 }
 
@@ -196,14 +196,18 @@ fn main() -> Result<(), String> {
 
 /// Returns the file descriptor we should install in the poll handler
 fn setup_signals_and_eventfd() -> OwnedFd {
-    let mut mask = std::mem::MaybeUninit::uninit();
-    unsafe { libc::sigemptyset(mask.as_mut_ptr()) };
-    let sigaction = libc::sigaction {
-        sa_sigaction: signal_handler as *const extern "C" fn(libc::c_int) as usize,
-        sa_mask: unsafe { mask.assume_init() },
-        sa_flags: 0,
-        sa_restorer: None,
-    };
+    // C data structure, expected to be zeroed out.
+    let mut sigaction: libc::sigaction = unsafe { std::mem::zeroed() };
+    unsafe { libc::sigemptyset(std::ptr::addr_of_mut!(sigaction.sa_mask)) };
+
+    #[cfg(not(target_os = "aix"))]
+    {
+        sigaction.sa_sigaction = signal_handler as usize;
+    }
+    #[cfg(target_os = "aix")]
+    {
+        sigaction.sa_union.__su_sigaction = handler;
+    }
 
     for signal in [libc::SIGINT, libc::SIGQUIT, libc::SIGTERM] {
         let ret =
