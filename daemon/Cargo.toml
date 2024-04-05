@@ -17,7 +17,6 @@ wayland-protocols-wlr = { version = "0.2", default-features = false, features = 
 # use specific git version for Duration implementation. We will do this until the next bitcode release
 bitcode = { git = "https://github.com/SoftbearStudios/bitcode.git", rev = "5f25a59", default-features = false }
 rustix = { version = "0.38", default-features = false, features = [ "event", "shm", "mm" ] }
-memmap2 = "0.9"
 libc = "0.2"
 
 keyframe = "1.1"

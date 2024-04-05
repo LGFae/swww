@@ -5,7 +5,6 @@
 mod animations;
 pub mod bump_pool;
 mod cli;
-pub mod raw_pool;
 mod wallpaper;
 use log::{debug, error, info, warn, LevelFilter};
 use rustix::{
@@ -31,7 +30,6 @@ use std::{
 use wayland_client::{
     globals::{registry_queue_init, GlobalList, GlobalListContents},
     protocol::{
-        wl_buffer::WlBuffer,
         wl_callback::WlCallback,
         wl_compositor::WlCompositor,
         wl_output,
@@ -504,24 +502,6 @@ impl Dispatch<wl_output::WlOutput, ()> for Daemon {
             }
         }
         warn!("received event for non-existing output")
-    }
-}
-
-impl Dispatch<WlBuffer, Arc<AtomicBool>> for Daemon {
-    fn event(
-        _state: &mut Self,
-        _proxy: &WlBuffer,
-        event: <WlBuffer as wayland_client::Proxy>::Event,
-        data: &Arc<AtomicBool>,
-        _conn: &Connection,
-        _qhandle: &QueueHandle<Self>,
-    ) {
-        match event {
-            wayland_client::protocol::wl_buffer::Event::Release => {
-                data.store(true, Ordering::Release);
-            }
-            e => error!("unrecognized WlBuffer event: {e:?}"),
-        }
     }
 }
 

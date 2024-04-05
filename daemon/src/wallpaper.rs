@@ -311,7 +311,7 @@ impl Wallpaper {
     where
         F: FnOnce(&mut [u8]) -> T,
     {
-        f(self.pool.lock().unwrap().get_drawable(&self.qh))
+        f(self.pool.lock().unwrap().get_drawable())
     }
 
     #[inline]
@@ -389,3 +389,6 @@ impl Drop for Wallpaper {
         self.output.release()
     }
 }
+
+unsafe impl Sync for Wallpaper {}
+unsafe impl Send for Wallpaper {}
