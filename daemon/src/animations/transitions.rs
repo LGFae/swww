@@ -139,10 +139,15 @@ impl Transition {
         let mut step = 0.0;
         let (mut seq, start) = self.bezier_seq(0.0, 1.0);
 
+        let channels = crate::pixel_format().channels() as usize;
         let mut now = Instant::now();
         while start.elapsed().as_secs_f64() < seq.duration() {
-            self.parallel_draw_all(new_img, |_, old_col, new_col| {
-                *old_col = (*old_col as f64 * (1.0 - step) + *new_col as f64 * step) as u8;
+            self.parallel_draw_all(channels, new_img, |_, old, new| {
+                for i in 0..channels {
+                    let old = unsafe { old.get_unchecked_mut(i) };
+                    let new = unsafe { new.get_unchecked(i) };
+                    *old = (*old as f64 * (1.0 - step) + *new as f64 * step) as u8;
+                }
             });
             self.send_frame(&mut now);
             step = seq.now() as f64;
@@ -197,13 +202,13 @@ impl Transition {
         let (mut seq, start) = self.bezier_seq(offset as f32, max_offset as f32);
 
         let step = self.step;
-
+        let channels = crate::pixel_format().channels() as usize;
         while start.elapsed().as_secs_f64() < seq.duration() {
-            self.parallel_draw_all(new_img, |i, old, new| {
+            self.parallel_draw_all(channels, new_img, |i, old, new| {
                 let pix_x = i % width;
                 let pix_y = height - i / width;
                 if is_low(pix_x as f64, pix_y as f64, offset) {
-                    change_byte(step, old, new);
+                    change_byte(channels, step, old, new);
                 }
             });
             self.send_frame(&mut now);
@@ -249,13 +254,13 @@ impl Transition {
         let (mut seq, start) = self.bezier_seq(0.0, max_offset as f32);
 
         let step = self.step;
-
+        let channels = crate::pixel_format().channels() as usize;
         while start.elapsed().as_secs_f64() < seq.duration() {
-            self.parallel_draw_all(new_img, |i, old, new| {
+            self.parallel_draw_all(channels, new_img, |i, old, new| {
                 let pix_x = i % width;
                 let pix_y = height - i / width;
                 if is_low(pix_x as f64, pix_y as f64, offset, circle_radius) {
-                    change_byte(step, old, new);
+                    change_byte(channels, step, old, new);
                 }
             });
             self.send_frame(&mut now);
@@ -287,10 +292,11 @@ impl Transition {
         let (center_x, center_y) = (center_x as usize, center_y as usize);
 
         let step = self.step;
+        let channels = crate::pixel_format().channels() as usize;
         let (mut seq, start) = self.bezier_seq(0.0, dist_end);
         let mut now = Instant::now();
         while start.elapsed().as_secs_f64() < seq.duration() {
-            self.parallel_draw_all(new_img, |i, old, new| {
+            self.parallel_draw_all(channels, new_img, |i, old, new| {
                 let pix_x = i % width;
                 let pix_y = height - i / width;
                 let diff_x = pix_x.abs_diff(center_x);
@@ -298,7 +304,7 @@ impl Transition {
                 let pix_center_dist = f32::sqrt((diff_x.pow(2) + diff_y.pow(2)) as f32);
                 if pix_center_dist <= dist_center {
                     let step = step.saturating_add((dist_center - pix_center_dist).log2() as u8);
-                    change_byte(step, old, new);
+                    change_byte(channels, step, old, new);
                 }
             });
             self.send_frame(&mut now);
@@ -328,10 +334,11 @@ impl Transition {
         let (center_x, center_y) = (center_x as usize, center_y as usize);
 
         let step = self.step;
+        let channels = crate::pixel_format().channels() as usize;
         let (mut seq, start) = self.bezier_seq(dist_center, 0.0);
         let mut now = Instant::now();
         while start.elapsed().as_secs_f64() < seq.duration() {
-            self.parallel_draw_all(new_img, |i, old, new| {
+            self.parallel_draw_all(channels, new_img, |i, old, new| {
                 let pix_x = i % width;
                 let pix_y = height - i / width;
                 let diff_x = pix_x.abs_diff(center_x);
@@ -339,7 +346,7 @@ impl Transition {
                 let pix_center_dist = f32::sqrt((diff_x.pow(2) + diff_y.pow(2)) as f32);
                 if pix_center_dist >= dist_center {
                     let step = step.saturating_add((pix_center_dist - dist_center).log2() as u8);
-                    change_byte(step, old, new);
+                    change_byte(channels, step, old, new);
                 }
             });
             self.send_frame(&mut now);
@@ -353,41 +360,35 @@ impl Transition {
 
     /// Runs pixels_change_fn for every byte in the old img, in parallel
     #[inline(always)]
-    fn parallel_draw_all<F>(&self, new_img: &[u8], pixels_change_fn: F)
+    fn parallel_draw_all<F>(&self, channels: usize, new_img: &[u8], f: F)
     where
-        F: FnOnce(usize, &mut u8, &u8) + Copy + Send + Sync,
+        F: FnOnce(usize, &mut [u8], &[u8]) + Copy + Sync,
     {
-        let channels = crate::pixel_format().channels() as usize;
-
-        for wallpaper in self.wallpapers.iter() {
+        self.wallpapers.iter().for_each(|wallpaper| {
             wallpaper.canvas_change(|canvas| {
                 canvas
-                    .par_chunks_mut(channels)
-                    .zip_eq(new_img.par_chunks(channels))
+                    .par_chunks_exact_mut(channels)
+                    .zip_eq(new_img.par_chunks_exact(channels))
                     .enumerate()
-                    .for_each(|(i, (old, new))| {
-                        for j in 0..channels {
-                            unsafe {
-                                pixels_change_fn(i, old.get_unchecked_mut(j), new.get_unchecked(j))
-                            }
-                        }
-                    });
+                    .for_each(|(i, (old, new))| f(i, old, new));
             });
-        }
+        });
 
-        for wallpaper in self.wallpapers.iter() {
-            wallpaper.draw();
-        }
+        self.wallpapers.iter().for_each(|w| w.draw());
     }
 }
 
 #[inline(always)]
-fn change_byte(step: u8, old: &mut u8, new: &u8) {
-    if old.abs_diff(*new) < step {
-        *old = *new;
-    } else if *old > *new {
-        *old -= step;
-    } else {
-        *old += step;
+fn change_byte(channels: usize, step: u8, old: &mut [u8], new: &[u8]) {
+    for i in 0..channels {
+        let old = unsafe { old.get_unchecked_mut(i) };
+        let new = unsafe { new.get_unchecked(i) };
+        if old.abs_diff(*new) < step {
+            *old = *new;
+        } else if *old > *new {
+            *old -= step;
+        } else {
+            *old += step;
+        }
     }
 }
