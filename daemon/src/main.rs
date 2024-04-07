@@ -5,6 +5,7 @@
 mod animations;
 pub mod bump_pool;
 mod cli;
+pub mod raw_pool;
 mod wallpaper;
 use log::{debug, error, info, warn, LevelFilter};
 use rustix::event::{poll, PollFd, PollFlags};
@@ -13,7 +14,6 @@ use wallpaper::Wallpaper;
 
 use std::{
     fs,
-    num::NonZeroI32,
     os::{
         fd::OwnedFd,
         unix::net::{UnixListener, UnixStream},
@@ -24,34 +24,29 @@ use std::{
     },
 };
 
-use smithay_client_toolkit::{
-    compositor::{CompositorHandler, CompositorState, Region},
-    delegate_compositor, delegate_layer, delegate_output, delegate_registry,
-    globals::GlobalData,
-    output::{OutputHandler, OutputState},
-    registry::{ProvidesRegistryState, RegistryState},
-    registry_handlers,
-    shell::{
-        wlr_layer::{Layer, LayerShell, LayerShellHandler, LayerSurface, LayerSurfaceConfigure},
-        WaylandSurface,
-    },
-    shm::{Shm, ShmHandler},
-};
-
 use wayland_client::{
-    globals::{registry_queue_init, GlobalList},
+    globals::{registry_queue_init, GlobalList, GlobalListContents},
     protocol::{
         wl_buffer::WlBuffer,
+        wl_callback::WlCallback,
+        wl_compositor::WlCompositor,
         wl_output,
+        wl_region::WlRegion,
+        wl_registry::WlRegistry,
         wl_shm::{self, WlShm},
-        wl_surface,
+        wl_surface::{self, WlSurface},
     },
-    Connection, Dispatch, QueueHandle,
+    Connection, Dispatch, Proxy, QueueHandle,
 };
 
 use utils::ipc::{get_socket_path, Answer, BgInfo, PixelFormat, Request};
 
 use animations::Animator;
+
+pub type LayerShell =
+    wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_shell_v1::ZwlrLayerShellV1;
+pub type LayerSurface =
+    wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_surface_v1::ZwlrLayerSurfaceV1;
 
 // We need this because this might be set by signals, so we can't keep it in the daemon
 static EXIT: AtomicBool = AtomicBool::new(false);
@@ -130,6 +125,21 @@ fn main() -> Result<(), String> {
     let qh = event_queue.handle();
 
     let mut daemon = Daemon::new(&globals, &qh);
+    // roundtrip to get the shm formats before setting up the outputs
+    event_queue.roundtrip(&mut daemon).unwrap();
+
+    for global in globals.contents().clone_list() {
+        if global.interface == "wl_output" {
+            if global.version >= 2 {
+                let output = globals
+                    .registry()
+                    .bind(global.name, global.version, &qh, ());
+                daemon.new_output(&qh, output);
+            } else {
+                error!("wl_output must be at least version 2 for swww-daemon!")
+            }
+        }
+    }
 
     if let Ok(true) = sd_notify::booted() {
         if let Err(e) = sd_notify::notify(true, &[sd_notify::NotifyState::Ready]) {
@@ -171,6 +181,8 @@ fn main() -> Result<(), String> {
             event_queue
                 .dispatch_pending(&mut daemon)
                 .expect("failed to dispatch events");
+        } else {
+            drop(read_guard);
         }
 
         if !events[0].is_empty() {
@@ -288,10 +300,8 @@ impl Drop for SocketWrapper {
 struct Daemon {
     // Wayland stuff
     layer_shell: LayerShell,
-    compositor_state: CompositorState,
-    registry_state: RegistryState,
-    output_state: OutputState,
-    shm: Shm,
+    compositor: WlCompositor,
+    shm: WlShm,
     pixel_format: PixelFormat,
     shm_format: wl_shm::Format,
 
@@ -304,23 +314,24 @@ impl Daemon {
     fn new(globals: &GlobalList, qh: &QueueHandle<Self>) -> Self {
         // The compositor (not to be confused with the server which is commonly called the compositor) allows
         // configuring surfaces to be presented.
-        let compositor_state =
-            CompositorState::bind(globals, qh).expect("wl_compositor is not available");
+        let compositor: WlCompositor = globals
+            .bind(qh, 1..=6, ())
+            .expect("wl_compositor is not available");
 
-        let layer_shell = LayerShell::bind(globals, qh).expect("layer shell is not available");
+        let layer_shell: LayerShell = globals
+            .bind(qh, 1..=4, ())
+            .expect("layer shell is not available");
 
-        let shm = Shm::bind(globals, qh).expect("wl_shm is not available");
+        let shm: WlShm = globals
+            .bind(qh, 1..=1, ())
+            .expect("wl_shm is not available");
 
         let pixel_format = PixelFormat::Xrgb;
         let shm_format = wl_shm::Format::Xrgb8888;
 
         Self {
             layer_shell,
-            // Outputs may be hotplugged at runtime, therefore we need to setup a registry state to
-            // listen for Outputs.
-            registry_state: RegistryState::new(globals),
-            output_state: OutputState::new(globals, qh),
-            compositor_state,
+            compositor,
             shm,
             pixel_format,
             shm_format,
@@ -397,201 +408,173 @@ impl Daemon {
     }
 
     fn wallpapers_info(&self) -> Box<[BgInfo]> {
-        self.output_state
-            .outputs()
-            .filter_map(|output| {
-                if let Some(info) = self.output_state.info(&output) {
-                    if let Some(wallpaper) = self.wallpapers.iter().find(|w| w.has_id(info.id)) {
-                        return Some(BgInfo {
-                            name: info.name.unwrap_or("?".to_string()),
-                            dim: info
-                                .logical_size
-                                .map(|(width, height)| (width as u32, height as u32))
-                                .unwrap_or((0, 0)),
-                            scale_factor: info.scale_factor,
-                            img: wallpaper.get_img_info(),
-                            pixel_format: pixel_format(),
-                        });
-                    }
-                }
-                None
-            })
+        self.wallpapers
+            .iter()
+            .map(|wallpaper| wallpaper.get_bg_info())
             .collect()
     }
 
     fn find_wallpapers_by_names(&self, names: &[String]) -> Vec<Arc<Wallpaper>> {
-        self.output_state
-            .outputs()
-            .filter_map(|output| {
-                if let Some(info) = self.output_state.info(&output) {
-                    if let Some(name) = info.name {
-                        if names.is_empty() || names.iter().any(|n| n.as_str() == name) {
-                            if let Some(wallpaper) =
-                                self.wallpapers.iter().find(|w| w.has_id(info.id))
-                            {
-                                return Some(Arc::clone(wallpaper));
-                            }
-                        }
-                    }
+        self.wallpapers
+            .iter()
+            .filter_map(|wallpaper| {
+                if names.is_empty() || names.iter().any(|n| wallpaper.has_name(n)) {
+                    return Some(Arc::clone(wallpaper));
                 }
                 None
             })
             .collect()
     }
-}
 
-impl CompositorHandler for Daemon {
-    fn scale_factor_changed(
-        &mut self,
-        _conn: &Connection,
-        _qh: &QueueHandle<Self>,
-        surface: &wl_surface::WlSurface,
-        new_factor: i32,
-    ) {
-        for wallpaper in self.wallpapers.iter_mut() {
-            if wallpaper.has_surface(surface) {
-                wallpaper.resize(None, None, Some(NonZeroI32::new(new_factor).unwrap()));
-                return;
-            }
-        }
-    }
-
-    fn frame(
-        &mut self,
-        _conn: &Connection,
-        _qh: &QueueHandle<Self>,
-        surface: &wl_surface::WlSurface,
-        time: u32,
-    ) {
-        for wallpaper in self.wallpapers.iter_mut() {
-            if wallpaper.has_surface(surface) {
-                wallpaper.frame_callback_completed(time);
-                return;
-            }
-        }
-    }
-
-    fn transform_changed(
-        &mut self,
-        _conn: &Connection,
-        _qh: &QueueHandle<Self>,
-        _surface: &wl_surface::WlSurface,
-        _new_transform: wl_output::Transform,
-    ) {
-        // do not do anything for now
-    }
-}
-
-impl OutputHandler for Daemon {
-    fn output_state(&mut self) -> &mut OutputState {
-        &mut self.output_state
-    }
-
-    fn new_output(
-        &mut self,
-        _conn: &Connection,
-        qh: &QueueHandle<Self>,
-        output: wl_output::WlOutput,
-    ) {
+    fn new_output(&mut self, qh: &QueueHandle<Self>, output: wl_output::WlOutput) {
         if PIXEL_FORMAT.get().is_none() {
             assert!(PIXEL_FORMAT.set(self.pixel_format).is_ok());
             log::info!("Selected wl_shm format: {:?}", self.shm_format);
         }
-        if let Some(output_info) = self.output_state.info(&output) {
-            let surface = self.compositor_state.create_surface(qh);
+        let surface = self.compositor.create_surface(qh, ());
 
-            // Wayland clients are expected to render the cursor on their input region.
-            // By setting the input region to an empty region, the compositor renders the
-            // default cursor. Without this, an empty desktop won't render a cursor.
-            if let Ok(region) = Region::new(&self.compositor_state) {
-                surface.set_input_region(Some(region.wl_region()));
-            }
-            let layer_surface = self.layer_shell.create_layer_surface(
-                qh,
-                surface,
-                Layer::Background,
-                Some("swww"),
-                Some(&output),
-            );
+        // Wayland clients are expected to render the cursor on their input region.
+        // By setting the input region to an empty region, the compositor renders the
+        // default cursor. Without this, an empty desktop won't render a cursor.
+        let region = self.compositor.create_region(qh, ());
+        surface.set_input_region(Some(&region));
 
-            if let Some(name) = &output_info.name {
-                let name = name.to_owned();
-                if let Err(e) = std::thread::Builder::new()
-                    .name("cache loader".to_string())
-                    .stack_size(1 << 14)
-                    .spawn(move || {
-                        // Wait for a bit for the output to be properly configured and stuff
-                        // this is obviously not ideal, but it solves the vast majority of problems
-                        std::thread::sleep(std::time::Duration::from_millis(100));
-                        if let Err(e) = utils::cache::load(&name) {
-                            warn!("failed to load cache: {e}");
-                        }
-                    })
-                {
-                    warn!("failed to spawn `cache loader` thread: {e}");
-                }
-            }
+        let layer_surface = self.layer_shell.get_layer_surface(
+            &surface,
+            Some(&output),
+            wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_shell_v1::Layer::Background,
+            "swww-daemon".to_string(),
+            qh,
+            (),
+        );
 
-            debug!("New output: {output_info:?}");
-            self.wallpapers.push(Arc::new(Wallpaper::new(
-                output_info,
-                layer_surface,
-                &self.shm,
-                qh,
-            )));
-            debug!("Output count: {}", self.wallpapers.len());
-        }
+        debug!("New output: {}", output.id());
+        self.wallpapers.push(Arc::new(Wallpaper::new(
+            output,
+            surface,
+            layer_surface,
+            &self.shm,
+            qh,
+        )));
     }
+}
 
-    fn update_output(
-        &mut self,
+impl Dispatch<wl_output::WlOutput, ()> for Daemon {
+    fn event(
+        state: &mut Self,
+        proxy: &wl_output::WlOutput,
+        event: <wl_output::WlOutput as wayland_client::Proxy>::Event,
+        _data: &(),
         _conn: &Connection,
-        _qh: &QueueHandle<Self>,
-        output: wl_output::WlOutput,
+        _qhandle: &QueueHandle<Self>,
     ) {
-        if let Some(output_info) = self.output_state.info(&output) {
-            if let Some(output_size) = output_info.logical_size {
-                if output_size.0 == 0 || output_size.1 == 0 {
-                    error!(
-                        "output dimensions cannot be '0'. Received: {:#?}",
-                        output_size
-                    );
-                    return;
-                }
-                for wallpaper in self.wallpapers.iter_mut() {
-                    if wallpaper.has_id(output_info.id) {
-                        let (width, height) = (
-                            Some(NonZeroI32::new(output_size.0).unwrap()),
-                            Some(NonZeroI32::new(output_size.1).unwrap()),
-                        );
-                        let scale_factor = Some(NonZeroI32::new(output_info.scale_factor).unwrap());
-                        wallpaper.resize(width, height, scale_factor);
-                        return;
+        for wallpaper in state.wallpapers.iter_mut() {
+            if wallpaper.has_id(proxy.id().protocol_id()) {
+                match event {
+                    wl_output::Event::Geometry { x, y, .. } => {
+                        debug!("output {} position: {x},{y}", proxy.id())
                     }
+                    wl_output::Event::Mode {
+                        flags: _flags,
+                        width,
+                        height,
+                        ..
+                    } => wallpaper.set_dimensions(width, height),
+                    wl_output::Event::Done => wallpaper.commit_surface_changes(),
+                    wl_output::Event::Scale { factor } => wallpaper.set_scale(factor),
+                    wl_output::Event::Name { name } => wallpaper.set_name(name),
+                    wl_output::Event::Description { description } => {
+                        wallpaper.set_desc(description)
+                    }
+                    e => error!("unrecognized WlOutput event: {e:?}"),
                 }
+                return;
             }
         }
+        warn!("received event for non-existing output")
     }
+}
 
-    fn output_destroyed(
-        &mut self,
+impl Dispatch<WlBuffer, Arc<AtomicBool>> for Daemon {
+    fn event(
+        _state: &mut Self,
+        _proxy: &WlBuffer,
+        event: <WlBuffer as wayland_client::Proxy>::Event,
+        data: &Arc<AtomicBool>,
         _conn: &Connection,
-        _qh: &QueueHandle<Self>,
-        output: wl_output::WlOutput,
+        _qhandle: &QueueHandle<Self>,
     ) {
-        if let Some(output_info) = self.output_state.info(&output) {
-            self.wallpapers.retain(|w| !w.has_id(output_info.id));
-            debug!("Destroyed output: {output_info:?}");
+        match event {
+            wayland_client::protocol::wl_buffer::Event::Release => {
+                data.store(true, Ordering::Release);
+            }
+            e => error!("unrecognized WlBuffer event: {e:?}"),
         }
     }
 }
 
-impl Dispatch<WlShm, GlobalData> for Daemon {
+impl Dispatch<WlCompositor, ()> for Daemon {
+    fn event(
+        _state: &mut Self,
+        _proxy: &WlCompositor,
+        _event: <WlCompositor as wayland_client::Proxy>::Event,
+        _data: &(),
+        _conn: &Connection,
+        _qhandle: &QueueHandle<Self>,
+    ) {
+        error!("WlCompositor has no events");
+    }
+}
+
+impl Dispatch<WlSurface, ()> for Daemon {
+    fn event(
+        state: &mut Self,
+        proxy: &WlSurface,
+        event: <WlSurface as wayland_client::Proxy>::Event,
+        _data: &(),
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+    ) {
+        match event {
+            wl_surface::Event::Enter { output } => debug!("Output {}: Surface Enter", output.id()),
+            wl_surface::Event::Leave { output } => debug!("Output {}: Surface Leave", output.id()),
+            wl_surface::Event::PreferredBufferScale { factor } => {
+                for wallpaper in state.wallpapers.iter_mut() {
+                    if wallpaper.has_surface(proxy) {
+                        wallpaper.set_scale(factor);
+                        wallpaper.commit_surface_changes();
+                        return;
+                    }
+                }
+                warn!("received new scale factor for non-existing surface")
+            }
+            wl_surface::Event::PreferredBufferTransform { .. } => {
+                warn!("Received transform. We currently ignore those")
+            }
+            e => error!("unrecognized WlSurface event: {e:?}"),
+        }
+    }
+}
+
+impl Dispatch<WlRegion, ()> for Daemon {
+    fn event(
+        _state: &mut Self,
+        _proxy: &WlRegion,
+        _event: <WlRegion as wayland_client::Proxy>::Event,
+        _data: &(),
+        _conn: &Connection,
+        _qhandle: &QueueHandle<Self>,
+    ) {
+        error!("WlRegion has no events")
+    }
+}
+
+impl Dispatch<WlShm, ()> for Daemon {
     fn event(
         state: &mut Self,
         _proxy: &WlShm,
         event: <WlShm as wayland_client::Proxy>::Event,
-        _data: &GlobalData,
+        _data: &(),
         _conn: &Connection,
         _qhandle: &QueueHandle<Self>,
     ) {
@@ -617,71 +600,110 @@ impl Dispatch<WlShm, GlobalData> for Daemon {
                     error!("Received unknown shm format number {v} from server")
                 }
             },
-            e => warn!("Unhandled WlShm event: {e:?}"),
+            e => warn!("unhandled WlShm event: {e:?}"),
         }
     }
 }
 
-impl ShmHandler for Daemon {
-    fn shm_state(&mut self) -> &mut Shm {
-        &mut self.shm
-    }
-}
-
-impl LayerShellHandler for Daemon {
-    fn closed(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, layer: &LayerSurface) {
-        self.wallpapers
-            .retain(|w| !w.has_surface(layer.wl_surface()));
-    }
-
-    fn configure(
-        &mut self,
+impl Dispatch<WlCallback, WlSurface> for Daemon {
+    fn event(
+        state: &mut Self,
+        _proxy: &WlCallback,
+        event: <WlCallback as wayland_client::Proxy>::Event,
+        data: &WlSurface,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        layer: &LayerSurface,
-        _configure: LayerSurfaceConfigure,
-        _serial: u32,
     ) {
-        // we only care about output configs, so we just set the wallpaper as having been
-        // configured
-        for w in &mut self.wallpapers {
-            if w.has_surface(layer.wl_surface()) {
-                w.configured
-                    .store(true, std::sync::atomic::Ordering::Release);
-                break;
+        match event {
+            wayland_client::protocol::wl_callback::Event::Done { callback_data } => {
+                for wallpaper in state.wallpapers.iter_mut() {
+                    if wallpaper.has_surface(data) {
+                        wallpaper.frame_callback_completed(callback_data);
+                        return;
+                    }
+                }
+                warn!("received callback for non-existing surface!")
             }
+            e => error!("unrecognized WlCallback event: {e:?}"),
         }
     }
 }
 
-impl Dispatch<WlBuffer, Arc<AtomicBool>> for Daemon {
+impl Dispatch<WlRegistry, GlobalListContents> for Daemon {
+    fn event(
+        state: &mut Self,
+        proxy: &WlRegistry,
+        event: <WlRegistry as wayland_client::Proxy>::Event,
+        _data: &GlobalListContents,
+        _conn: &Connection,
+        qh: &QueueHandle<Self>,
+    ) {
+        match event {
+            wayland_client::protocol::wl_registry::Event::Global {
+                name,
+                interface,
+                version,
+            } => {
+                if interface.as_str() == "wl_output" {
+                    if version < 2 {
+                        error!("your compositor must support at least version 2 of wl_output");
+                    } else {
+                        let output = proxy.bind(name, version, qh, ());
+                        state.new_output(qh, output)
+                    }
+                }
+            }
+
+            wayland_client::protocol::wl_registry::Event::GlobalRemove { name } => {
+                state.wallpapers.retain(|w| !w.has_id(name));
+
+                debug!("Destroyed output with id: {name}");
+            }
+            e => error!("unrecognized WlRegistry event: {e:?}"),
+        }
+    }
+}
+
+impl Dispatch<LayerShell, ()> for Daemon {
     fn event(
         _state: &mut Self,
-        _proxy: &WlBuffer,
-        event: <WlBuffer as wayland_client::Proxy>::Event,
-        data: &Arc<AtomicBool>,
+        _proxy: &LayerShell,
+        _event: <LayerShell as Proxy>::Event,
+        _data: &(),
         _conn: &Connection,
         _qhandle: &QueueHandle<Self>,
     ) {
-        match event {
-            wayland_client::protocol::wl_buffer::Event::Release => {
-                data.store(true, Ordering::Release);
-            }
-            _ => log::error!("There should be no buffer events other than Release"),
-        }
+        error!("LayerShell has no events");
     }
 }
 
-delegate_compositor!(Daemon);
-delegate_output!(Daemon);
-delegate_layer!(Daemon);
-delegate_registry!(Daemon);
-
-impl ProvidesRegistryState for Daemon {
-    fn registry(&mut self) -> &mut RegistryState {
-        &mut self.registry_state
+impl Dispatch<LayerSurface, ()> for Daemon {
+    fn event(
+        state: &mut Self,
+        proxy: &LayerSurface,
+        event: <LayerSurface as Proxy>::Event,
+        _data: &(),
+        _conn: &Connection,
+        _qhandle: &QueueHandle<Self>,
+    ) {
+        use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_surface_v1::Event;
+        match event {
+            Event::Configure { serial, .. } => {
+                for w in &mut state.wallpapers {
+                    if w.has_layer_surface(proxy) {
+                        w.configured
+                            .store(true, std::sync::atomic::Ordering::Release);
+                        proxy.ack_configure(serial);
+                        return;
+                    }
+                }
+            }
+            Event::Closed => {
+                state.wallpapers.retain(|w| !w.has_layer_surface(proxy));
+            }
+            e => error!("unrecognized LayerSurface event: {e:?}"),
+        }
     }
-    registry_handlers![OutputState];
 }
 
 fn make_logger(quiet: bool) {
