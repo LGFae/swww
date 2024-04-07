@@ -209,7 +209,7 @@ fn setup_signals_and_eventfd() -> OwnedFd {
         sigaction.sa_union.__su_sigaction = handler;
     }
 
-    for signal in [libc::SIGINT, libc::SIGQUIT, libc::SIGTERM] {
+    for signal in [libc::SIGINT, libc::SIGQUIT, libc::SIGTERM, libc::SIGHUP] {
         let ret =
             unsafe { libc::sigaction(signal, std::ptr::addr_of!(sigaction), std::ptr::null_mut()) };
         if ret != 0 {
