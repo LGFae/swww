@@ -159,7 +159,7 @@ impl Wallpaper {
     #[inline]
     pub fn set_desc(&self, desc: String) {
         debug!("Output {} description: {desc}", self.output.id());
-        self.inner_staging.lock().unwrap().name = Some(desc)
+        self.inner_staging.lock().unwrap().desc = Some(desc)
     }
 
     #[inline]
