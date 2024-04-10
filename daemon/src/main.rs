@@ -8,16 +8,21 @@ mod cli;
 pub mod raw_pool;
 mod wallpaper;
 use log::{debug, error, info, warn, LevelFilter};
-use rustix::event::{poll, PollFd, PollFlags};
+use rustix::{
+    event::{poll, PollFd, PollFlags},
+    path::Arg,
+};
 use simplelog::{ColorChoice, TermLogger, TerminalMode, ThreadLogMode};
 use wallpaper::Wallpaper;
 
 use std::{
     fs,
+    io::{BufRead, BufReader},
     os::{
         fd::OwnedFd,
         unix::net::{UnixListener, UnixStream},
     },
+    path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, OnceLock,
@@ -242,20 +247,24 @@ fn setup_signals_and_eventfd() -> OwnedFd {
 struct SocketWrapper(UnixListener);
 impl SocketWrapper {
     fn new() -> Result<Self, String> {
-        if is_daemon_running()? {
-            return Err("There is an swww-daemon instance already running!".to_string());
-        }
-
         let socket_addr = get_socket_path();
+
         if socket_addr.exists() {
-            warn!(
-                "socket file {} was not deleted when the previous daemon exited",
-                socket_addr.to_string_lossy()
-            );
-            if let Err(e) = std::fs::remove_file(&socket_addr) {
-                return Err(format!("failed to delete previous socket: {e}"));
+            if is_daemon_running(&socket_addr)? {
+                return Err(
+                    "There is an swww-daemon instance already running on this socket!".to_string(),
+                );
+            } else {
+                warn!(
+                    "socket file {} was not deleted when the previous daemon exited",
+                    socket_addr.to_string_lossy()
+                );
+                if let Err(e) = std::fs::remove_file(&socket_addr) {
+                    return Err(format!("failed to delete previous socket: {e}"));
+                }
             }
         }
+
         let runtime_dir = match socket_addr.parent() {
             Some(path) => path,
             None => return Err("couldn't find a valid runtime directory".to_owned()),
@@ -725,7 +734,75 @@ fn make_logger(quiet: bool) {
     .expect("Failed to initialize logger. Cancelling...");
 }
 
-fn is_daemon_running() -> Result<bool, String> {
+fn find_fd_number(addr: &PathBuf) -> Result<u64, String> {
+    let proc = std::path::PathBuf::from("/proc");
+    let mut sockets = proc.clone();
+    sockets.push("net/unix");
+
+    let file = match std::fs::File::open(sockets) {
+        Ok(f) => f,
+        Err(e) => return Err(e.to_string()),
+    };
+
+    let reader = BufReader::new(file);
+
+    for line in reader.split(b'\n') {
+        let vec = match line {
+            Ok(v) => v,
+            Err(e) => return Err(e.to_string()),
+        };
+
+        let tabulated = vec.to_string_lossy();
+        let entries: Vec<&str> = tabulated.split(' ').collect();
+
+        // eight columns
+        // socket path is the last entry, socket number is the second to last entry
+        // ... unless there's no socket path.
+
+        if entries.len() < 8 {
+            continue;
+        }
+
+        let path = addr.to_string_lossy().to_string();
+        if *entries.last().unwrap() == path {
+            return match entries[entries.len() - 2].parse() {
+                Ok(value) => Ok(value),
+                Err(_) => Err("Couldn't parse fd number".to_string()),
+            };
+        }
+    }
+
+    Err("Couldn't figure out the fd number".to_string())
+}
+
+fn check_fds(fd_num: u64, mut entry_dir: PathBuf) -> Result<bool, String> {
+    let name = format!("socket:[{}]", fd_num);
+    let linux_socket_num = PathBuf::from(name);
+
+    entry_dir.push("fd");
+
+    let entries = match entry_dir.read_dir() {
+        Ok(e) => e,
+        Err(e) => return Err(e.to_string()),
+    };
+
+    for entry in entries.flatten() {
+        match std::fs::read_link(entry.path()) {
+            Ok(real) => {
+                if real == linux_socket_num {
+                    return Ok(true);
+                }
+            }
+            Err(_) => continue,
+        };
+    }
+
+    Ok(false)
+}
+
+fn is_daemon_running(addr: &PathBuf) -> Result<bool, String> {
+    let fd_num = find_fd_number(addr)?;
+
     let proc = std::path::PathBuf::from("/proc");
 
     let entries = match proc.read_dir() {
@@ -739,12 +816,13 @@ fn is_daemon_running() -> Result<bool, String> {
             if std::process::id() == pid {
                 continue;
             }
+
             let mut entry_path = entry.path();
             entry_path.push("cmdline");
             if let Ok(cmd) = std::fs::read_to_string(entry_path) {
                 let mut args = cmd.split(&[' ', '\0']);
                 if let Some(arg0) = args.next() {
-                    if arg0.ends_with("swww-daemon") {
+                    if arg0.ends_with("swww-daemon") && check_fds(fd_num, entry.path())? {
                         return Ok(true);
                     }
                 }
