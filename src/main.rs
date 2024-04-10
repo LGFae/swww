@@ -1,9 +1,11 @@
 use clap::Parser;
-use std::{os::unix::net::UnixStream, path::PathBuf, process::Stdio, time::Duration};
+use std::{path::PathBuf, process::Stdio, time::Duration};
 
 use utils::{
     cache,
-    ipc::{self, get_socket_path, read_socket, AnimationRequest, Answer, Request},
+    ipc::{
+        self, connect_to_socket, get_socket_path, read_socket, AnimationRequest, Answer, Request,
+    },
 };
 
 mod imgproc;
@@ -61,7 +63,7 @@ fn main() -> Result<(), String> {
 
     let mut configured = false;
     while !configured {
-        let socket = connect_to_socket(5, 100)?;
+        let socket = connect_to_socket(&get_socket_path(), 5, 100)?;
         Request::Ping.send(&socket)?;
         let bytes = read_socket(&socket)?;
         let answer = Answer::receive(&bytes);
@@ -83,7 +85,7 @@ fn process_swww_args(args: &Swww) -> Result<(), String> {
         Some(request) => request,
         None => return Ok(()),
     };
-    let socket = connect_to_socket(5, 100)?;
+    let socket = connect_to_socket(&get_socket_path(), 5, 100)?;
     request.send(&socket)?;
     let bytes = read_socket(&socket)?;
     drop(socket);
@@ -144,7 +146,7 @@ fn make_request(args: &Swww) -> Result<Option<Request>, String> {
                     let img_request = make_img_request(img, first_frame, &dims, &outputs)?;
                     let animations = make_animation_request(img, &imgbuf, &dims, format, &outputs);
 
-                    let socket = connect_to_socket(5, 100)?;
+                    let socket = connect_to_socket(&get_socket_path(), 5, 100)?;
                     Request::Img(img_request).send(&socket)?;
                     let bytes = read_socket(&socket)?;
                     drop(socket);
@@ -219,7 +221,7 @@ fn get_format_dims_and_outputs(
     let mut dims: Vec<(u32, u32)> = Vec::new();
     let mut imgs: Vec<ipc::BgImg> = Vec::new();
 
-    let socket = connect_to_socket(5, 100)?;
+    let socket = connect_to_socket(&get_socket_path(), 5, 100)?;
     Request::Query.send(&socket)?;
     let bytes = read_socket(&socket)?;
     drop(socket);
@@ -338,44 +340,6 @@ fn spawn_daemon(no_daemon: bool, format: &Option<cli::PixelFormat>) -> Result<()
             Err(e) => Err(format!("error spawning swww-daemon: {e}")),
         }
     }
-}
-
-/// We make sure the Stream is always set to blocking mode
-///
-/// * `tries` -  how many times to attempt the connection
-/// * `interval` - how long to wait between attempts, in milliseconds
-fn connect_to_socket(tries: u8, interval: u64) -> Result<UnixStream, String> {
-    //Make sure we try at least once
-    let tries = if tries == 0 { 1 } else { tries };
-    let path = get_socket_path();
-    let mut error = None;
-    for _ in 0..tries {
-        match UnixStream::connect(&path) {
-            Ok(socket) => {
-                if let Err(e) = socket.set_nonblocking(false) {
-                    return Err(format!("Failed to set blocking connection: {e}"));
-                }
-                #[cfg(debug_assertions)]
-                let timeout = Duration::from_secs(30); //Some operations take a while to respond in debug mode
-                #[cfg(not(debug_assertions))]
-                let timeout = Duration::from_secs(5);
-
-                if let Err(e) = socket.set_read_timeout(Some(timeout)) {
-                    return Err(format!("failed to set read timeout for socket: {e}"));
-                }
-
-                return Ok(socket);
-            }
-            Err(e) => error = Some(e),
-        }
-        std::thread::sleep(Duration::from_millis(interval));
-    }
-    let error = error.unwrap();
-    if error.kind() == std::io::ErrorKind::NotFound {
-        return Err("Socket file not found. Are you sure swww-daemon is running?".to_string());
-    }
-
-    Err(format!("Failed to connect to socket: {error}"))
 }
 
 fn is_daemon_running() -> Result<bool, String> {

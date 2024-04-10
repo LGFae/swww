@@ -17,7 +17,6 @@ use wallpaper::Wallpaper;
 
 use std::{
     fs,
-    io::{BufRead, BufReader},
     os::{
         fd::OwnedFd,
         unix::net::{UnixListener, UnixStream},
@@ -44,7 +43,9 @@ use wayland_client::{
     Connection, Dispatch, Proxy, QueueHandle,
 };
 
-use utils::ipc::{get_socket_path, Answer, BgInfo, PixelFormat, Request};
+use utils::ipc::{
+    connect_to_socket, get_socket_path, read_socket, Answer, BgInfo, PixelFormat, Request,
+};
 
 use animations::Animator;
 
@@ -734,107 +735,18 @@ fn make_logger(quiet: bool) {
     .expect("Failed to initialize logger. Cancelling...");
 }
 
-enum FdFindResult {
-    GotIt(u64),
-    NobodysListening,
-}
-
-fn find_fd_number(addr: &PathBuf) -> Result<FdFindResult, String> {
-    let sockets = std::path::PathBuf::from("/proc/net/unix");
-
-    let file = match std::fs::File::open(sockets) {
-        Ok(f) => f,
-        Err(e) => return Err(e.to_string()),
+pub fn is_daemon_running(addr: &PathBuf) -> Result<bool, String> {
+    let sock = match connect_to_socket(addr, 5, 100) {
+        Ok(s) => s,
+        // likely a connection refused; either way, this is a reliable signal there's no surviving
+        // daemon.
+        Err(_) => return Ok(false),
     };
 
-    let reader = BufReader::new(file);
-
-    for line in reader.split(b'\n') {
-        let vec = match line {
-            Ok(v) => v,
-            Err(e) => return Err(e.to_string()),
-        };
-
-        let tabulated = vec.to_string_lossy();
-        let entries: Vec<&str> = tabulated.split(' ').collect();
-
-        // eight columns
-        // socket path is the last entry, socket number is the second to last entry
-        // ... unless there's no socket path.
-
-        if entries.len() < 8 {
-            continue;
-        }
-
-        let path = addr.to_string_lossy().to_string();
-        if *entries.last().unwrap() == path {
-            return match entries[entries.len() - 2].parse() {
-                Ok(value) => Ok(FdFindResult::GotIt(value)),
-                Err(_) => Err("Couldn't parse fd number".to_string()),
-            };
-        }
+    Request::Ping.send(&sock)?;
+    let answer = Answer::receive(&read_socket(&sock)?);
+    match answer {
+        Answer::Ping(_) => Ok(true),
+        _ => Err("Daemon did not return Answer::Ping, as expected".to_string()),
     }
-
-    Ok(FdFindResult::NobodysListening)
-}
-
-fn check_fds(fd_num: u64, mut entry_dir: PathBuf) -> Result<bool, String> {
-    let name = format!("socket:[{}]", fd_num);
-    let linux_socket_num = PathBuf::from(name);
-
-    entry_dir.push("fd");
-
-    let entries = match entry_dir.read_dir() {
-        Ok(e) => e,
-        Err(e) => return Err(e.to_string()),
-    };
-
-    for entry in entries.flatten() {
-        match std::fs::read_link(entry.path()) {
-            Ok(real) => {
-                if real == linux_socket_num {
-                    return Ok(true);
-                }
-            }
-            Err(_) => continue,
-        };
-    }
-
-    Ok(false)
-}
-
-fn is_daemon_running(addr: &PathBuf) -> Result<bool, String> {
-    let fd_num = match find_fd_number(addr)? {
-        FdFindResult::GotIt(n) => n,
-        FdFindResult::NobodysListening => return Ok(false),
-    };
-
-    let proc = std::path::PathBuf::from("/proc");
-
-    let entries = match proc.read_dir() {
-        Ok(e) => e,
-        Err(e) => return Err(e.to_string()),
-    };
-
-    for entry in entries.flatten() {
-        let dirname = entry.file_name();
-        if let Ok(pid) = dirname.to_string_lossy().parse::<u32>() {
-            if std::process::id() == pid {
-                continue;
-            }
-
-            let mut entry_path = entry.path();
-            entry_path.push("cmdline");
-            if let Ok(cmd) = std::fs::read_to_string(entry_path) {
-                let mut args = cmd.split(&[' ', '\0']);
-                if let Some(arg0) = args.next() {
-                    if arg0.ends_with("swww-daemon") && check_fds(fd_num, entry.path())? {
-                        return Ok(true);
-                    }
-                }
-            }
-        }
-    }
-
-    Ok(false)
 }

@@ -374,3 +374,40 @@ pub fn get_cache_path() -> Result<PathBuf, String> {
 
     Ok(cache_path)
 }
+
+/// We make sure the Stream is always set to blocking mode
+///
+/// * `tries` -  how many times to attempt the connection
+/// * `interval` - how long to wait between attempts, in milliseconds
+pub fn connect_to_socket(addr: &PathBuf, tries: u8, interval: u64) -> Result<UnixStream, String> {
+    //Make sure we try at least once
+    let tries = if tries == 0 { 1 } else { tries };
+    let mut error = None;
+    for _ in 0..tries {
+        match UnixStream::connect(addr) {
+            Ok(socket) => {
+                if let Err(e) = socket.set_nonblocking(false) {
+                    return Err(format!("Failed to set blocking connection: {e}"));
+                }
+                #[cfg(debug_assertions)]
+                let timeout = Duration::from_secs(30); //Some operations take a while to respond in debug mode
+                #[cfg(not(debug_assertions))]
+                let timeout = Duration::from_secs(5);
+
+                if let Err(e) = socket.set_read_timeout(Some(timeout)) {
+                    return Err(format!("failed to set read timeout for socket: {e}"));
+                }
+
+                return Ok(socket);
+            }
+            Err(e) => error = Some(e),
+        }
+        std::thread::sleep(Duration::from_millis(interval));
+    }
+    let error = error.unwrap();
+    if error.kind() == std::io::ErrorKind::NotFound {
+        return Err("Socket file not found. Are you sure swww-daemon is running?".to_string());
+    }
+
+    Err(format!("Failed to connect to socket: {error}"))
+}
