@@ -735,9 +735,7 @@ fn make_logger(quiet: bool) {
 }
 
 fn find_fd_number(addr: &PathBuf) -> Result<u64, String> {
-    let proc = std::path::PathBuf::from("/proc");
-    let mut sockets = proc.clone();
-    sockets.push("net/unix");
+    let sockets = std::path::PathBuf::from("/proc/net/unix");
 
     let file = match std::fs::File::open(sockets) {
         Ok(f) => f,
