@@ -734,7 +734,12 @@ fn make_logger(quiet: bool) {
     .expect("Failed to initialize logger. Cancelling...");
 }
 
-fn find_fd_number(addr: &PathBuf) -> Result<u64, String> {
+enum FdFindResult {
+    GotIt(u64),
+    NobodysListening,
+}
+
+fn find_fd_number(addr: &PathBuf) -> Result<FdFindResult, String> {
     let sockets = std::path::PathBuf::from("/proc/net/unix");
 
     let file = match std::fs::File::open(sockets) {
@@ -764,13 +769,13 @@ fn find_fd_number(addr: &PathBuf) -> Result<u64, String> {
         let path = addr.to_string_lossy().to_string();
         if *entries.last().unwrap() == path {
             return match entries[entries.len() - 2].parse() {
-                Ok(value) => Ok(value),
+                Ok(value) => Ok(FdFindResult::GotIt(value)),
                 Err(_) => Err("Couldn't parse fd number".to_string()),
             };
         }
     }
 
-    Err("Couldn't figure out the fd number".to_string())
+    Ok(FdFindResult::NobodysListening)
 }
 
 fn check_fds(fd_num: u64, mut entry_dir: PathBuf) -> Result<bool, String> {
@@ -799,7 +804,10 @@ fn check_fds(fd_num: u64, mut entry_dir: PathBuf) -> Result<bool, String> {
 }
 
 fn is_daemon_running(addr: &PathBuf) -> Result<bool, String> {
-    let fd_num = find_fd_number(addr)?;
+    let fd_num = match find_fd_number(addr)? {
+        FdFindResult::GotIt(n) => n,
+        FdFindResult::NobodysListening => return Ok(false),
+    };
 
     let proc = std::path::PathBuf::from("/proc");
 
