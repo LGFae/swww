@@ -3,7 +3,7 @@ use std::{
     fmt,
     io::{BufReader, BufWriter, Read, Write},
     os::unix::net::UnixStream,
-    path::{Path, PathBuf},
+    path::PathBuf,
     time::Duration,
 };
 
@@ -328,8 +328,22 @@ pub fn get_socket_path() -> PathBuf {
     } else {
         "/tmp/swww".to_string()
     };
-    let runtime_dir = Path::new(&runtime_dir);
-    runtime_dir.join("swww.socket")
+
+    let mut socket_path = PathBuf::new();
+    socket_path.push(runtime_dir);
+
+    let mut socket_name = String::new();
+    socket_name.push_str("swww-");
+    if let Ok(socket) = std::env::var("WAYLAND_DISPLAY") {
+        socket_name.push_str(socket.as_str());
+    } else {
+        socket_name.push_str("wayland-0")
+    }
+    socket_name.push_str(".socket");
+
+    socket_path.push(socket_name);
+
+    socket_path
 }
 
 pub fn get_cache_path() -> Result<PathBuf, String> {
