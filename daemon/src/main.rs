@@ -8,7 +8,10 @@ mod cli;
 pub mod raw_pool;
 mod wallpaper;
 use log::{debug, error, info, warn, LevelFilter};
-use rustix::event::{poll, PollFd, PollFlags};
+use rustix::{
+    event::{poll, PollFd, PollFlags},
+    path::Arg,
+};
 use simplelog::{ColorChoice, TermLogger, TerminalMode, ThreadLogMode};
 use wallpaper::Wallpaper;
 
@@ -18,6 +21,7 @@ use std::{
         fd::OwnedFd,
         unix::net::{UnixListener, UnixStream},
     },
+    path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, OnceLock,
@@ -39,7 +43,9 @@ use wayland_client::{
     Connection, Dispatch, Proxy, QueueHandle,
 };
 
-use utils::ipc::{get_socket_path, Answer, BgInfo, PixelFormat, Request};
+use utils::ipc::{
+    connect_to_socket, get_socket_path, read_socket, Answer, BgInfo, PixelFormat, Request,
+};
 
 use animations::Animator;
 
@@ -242,20 +248,24 @@ fn setup_signals_and_eventfd() -> OwnedFd {
 struct SocketWrapper(UnixListener);
 impl SocketWrapper {
     fn new() -> Result<Self, String> {
-        if is_daemon_running()? {
-            return Err("There is an swww-daemon instance already running!".to_string());
-        }
-
         let socket_addr = get_socket_path();
+
         if socket_addr.exists() {
-            warn!(
-                "socket file {} was not deleted when the previous daemon exited",
-                socket_addr.to_string_lossy()
-            );
-            if let Err(e) = std::fs::remove_file(&socket_addr) {
-                return Err(format!("failed to delete previous socket: {e}"));
+            if is_daemon_running(&socket_addr)? {
+                return Err(
+                    "There is an swww-daemon instance already running on this socket!".to_string(),
+                );
+            } else {
+                warn!(
+                    "socket file {} was not deleted when the previous daemon exited",
+                    socket_addr.to_string_lossy()
+                );
+                if let Err(e) = std::fs::remove_file(&socket_addr) {
+                    return Err(format!("failed to delete previous socket: {e}"));
+                }
             }
         }
+
         let runtime_dir = match socket_addr.parent() {
             Some(path) => path,
             None => return Err("couldn't find a valid runtime directory".to_owned()),
@@ -725,32 +735,18 @@ fn make_logger(quiet: bool) {
     .expect("Failed to initialize logger. Cancelling...");
 }
 
-fn is_daemon_running() -> Result<bool, String> {
-    let proc = std::path::PathBuf::from("/proc");
-
-    let entries = match proc.read_dir() {
-        Ok(e) => e,
-        Err(e) => return Err(e.to_string()),
+pub fn is_daemon_running(addr: &PathBuf) -> Result<bool, String> {
+    let sock = match connect_to_socket(addr, 5, 100) {
+        Ok(s) => s,
+        // likely a connection refused; either way, this is a reliable signal there's no surviving
+        // daemon.
+        Err(_) => return Ok(false),
     };
 
-    for entry in entries.flatten() {
-        let dirname = entry.file_name();
-        if let Ok(pid) = dirname.to_string_lossy().parse::<u32>() {
-            if std::process::id() == pid {
-                continue;
-            }
-            let mut entry_path = entry.path();
-            entry_path.push("cmdline");
-            if let Ok(cmd) = std::fs::read_to_string(entry_path) {
-                let mut args = cmd.split(&[' ', '\0']);
-                if let Some(arg0) = args.next() {
-                    if arg0.ends_with("swww-daemon") {
-                        return Ok(true);
-                    }
-                }
-            }
-        }
+    Request::Ping.send(&sock)?;
+    let answer = Answer::receive(&read_socket(&sock)?);
+    match answer {
+        Answer::Ping(_) => Ok(true),
+        _ => Err("Daemon did not return Answer::Ping, as expected".to_string()),
     }
-
-    Ok(false)
 }
