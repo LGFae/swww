@@ -10,7 +10,11 @@ use std::{
 };
 
 use wayland_client::{
-    protocol::{wl_output::WlOutput, wl_shm::WlShm, wl_surface::WlSurface},
+    protocol::{
+        wl_output::{Transform, WlOutput},
+        wl_shm::WlShm,
+        wl_surface::WlSurface,
+    },
     Proxy, QueueHandle,
 };
 
@@ -187,6 +191,11 @@ impl Wallpaper {
             self.inner_staging.lock().unwrap().scale_factor =
                 unsafe { NonZeroI32::new_unchecked(scale) }
         }
+    }
+
+    #[inline]
+    pub fn set_transform(&self, transform: Transform) {
+        self.wl_surface.set_buffer_transform(transform);
     }
 
     #[inline]

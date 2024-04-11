@@ -558,8 +558,17 @@ impl Dispatch<WlSurface, ()> for Daemon {
                 }
                 warn!("received new scale factor for non-existing surface")
             }
-            wl_surface::Event::PreferredBufferTransform { .. } => {
-                warn!("Received transform. We currently ignore those")
+            wl_surface::Event::PreferredBufferTransform { transform } => {
+                if let wayland_client::WEnum::Value(transform) = transform {
+                    for wallpaper in state.wallpapers.iter_mut() {
+                        if wallpaper.has_surface(proxy) {
+                            wallpaper.set_transform(transform);
+                            wallpaper.commit_surface_changes();
+                            return;
+                        }
+                    }
+                    warn!("received new transform for non-existing surface")
+                }
             }
             e => error!("unrecognized WlSurface event: {e:?}"),
         }
