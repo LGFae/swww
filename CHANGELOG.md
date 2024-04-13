@@ -1,6 +1,33 @@
 ### Unreleased
 
 
+### 0.9.2
+
+#### Fixes
+
+  * fix stack overflow on some systems, by @iynaix
+  * make sure we start the daemon even when the socket file already exists
+  * fix build in 32bit x86, by @Calandracas606
+  * fix image resize when image is larger than monitor
+  * fix transitions performance that had regressed from versions 0.8.*
+  * added SIGHUP to the list of signals we catch to exit properly
+  * allow `swww` to run on a nested wayland environment, by @Fuyukai.
+
+#### Improvements
+
+  * we no longer traverse `/proc` to detect whether the daemon is running, we
+  just try pinging it instead, by @Fuyukai
+  * many internal refactors:
+    - client now sends images in the format requested by the daemon (previously
+    we were transforming the images in the daemon itself)
+    - simplified the daemon's transitions
+    - using `bitcode` instead of `rkyv` for serialization
+    - using `rustix` instead of `nix` for unix stuff 
+    - The Big One: we've eliminated our dependency on `smithay-client-toolkit`,
+    now make calls directly to `wayland-client`. This gives us more control over
+    our code for the price of a little extra verbosity.
+
+
 ### 0.9.1
 
 My bad everyone, `0.9.0` wasn't loading the cache, so I am publishing this quick
