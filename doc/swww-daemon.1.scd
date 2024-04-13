@@ -28,9 +28,10 @@ swww-daemon [-q|--quiet] [-f|--format <xrgb|xbgr|rgb|bgr>]
 # DESCRIPTION
 
 The *swww-daemon* will run continuously, waiting for commands in
-_$XDG_RUNTIME_DIR/swww.socket_ (or _/tmp/swww/swww.socket_, if $XDG_RUNTIME_DIR
-is not set). The daemon will take care of both creating and deleting that file
-when it is initialized or killed.
+_${XDG_RUNTIME_DIR}/swww-${WAYLAND_DISPLAY}.socket_ (or
+_/tmp/swww/swww-${WAYLAND_DISPLAY}.socket_, if $XDG_RUNTIME_DIR is not set). The
+daemon will take care of both creating and deleting that file when it is
+initialized or killed.
 
 # SEE ALSO
 *swww-init*(1)

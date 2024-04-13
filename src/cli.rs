@@ -167,7 +167,7 @@ pub enum Swww {
     /// Use `-` to read from stdin
     Img(Img),
 
-    /// Initializes the daemon.
+    /// [DEPRECATED] Initializes the daemon.
     ///
     /// Exits if there is already a daemon running. We check that by seeing if
     /// $XDG_RUNTIME_DIR/swww.socket exists.
