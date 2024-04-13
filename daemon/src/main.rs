@@ -245,7 +245,6 @@ fn setup_signals_and_eventfd() -> OwnedFd {
 }
 
 /// This is a wrapper that makes sure to delete the socket when it is dropped
-/// It also makes sure to set the listener to nonblocking mode
 struct SocketWrapper(UnixListener);
 impl SocketWrapper {
     fn new() -> Result<Self, String> {
@@ -288,11 +287,6 @@ impl SocketWrapper {
             "Made socket in {:?} and initialized logger. Starting daemon...",
             listener.local_addr().unwrap() //this should always work if the socket connected correctly
         );
-
-        if let Err(e) = listener.set_nonblocking(true) {
-            let _ = fs::remove_file(&socket_addr);
-            return Err(format!("failed to set socket to nonblocking mode: {e}"));
-        }
 
         Ok(Self(listener))
     }
