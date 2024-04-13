@@ -61,23 +61,22 @@ fn main() -> Result<(), String> {
         return cache::clean();
     }
 
-    let mut configured = false;
-    while !configured {
+    loop {
         let socket = connect_to_socket(&get_socket_path(), 5, 100)?;
         Request::Ping.send(&socket)?;
         let bytes = read_socket(&socket)?;
         let answer = Answer::receive(&bytes);
-        if let Answer::Ping(c) = answer {
-            configured = c;
+        if let Answer::Ping(configured) = answer {
+            if configured {
+                break;
+            }
         } else {
             return Err("Daemon did not return Answer::Ping, as expected".to_string());
         }
         std::thread::sleep(Duration::from_millis(1));
     }
 
-    process_swww_args(&swww)?;
-
-    Ok(())
+    process_swww_args(&swww)
 }
 
 fn process_swww_args(args: &Swww) -> Result<(), String> {
@@ -347,33 +346,19 @@ fn spawn_daemon(no_daemon: bool, format: &Option<cli::PixelFormat>) -> Result<()
 }
 
 fn is_daemon_running() -> Result<bool, String> {
-    let proc = PathBuf::from("/proc");
-
-    let entries = match proc.read_dir() {
-        Ok(e) => e,
-        Err(e) => return Err(e.to_string()),
+    let socket = match connect_to_socket(&get_socket_path(), 5, 100) {
+        Ok(s) => s,
+        // likely a connection refused; either way, this is a reliable signal there's no surviving
+        // daemon.
+        Err(_) => return Ok(false),
     };
 
-    for entry in entries.flatten() {
-        let dirname = entry.file_name();
-        if let Ok(pid) = dirname.to_string_lossy().parse::<u32>() {
-            if std::process::id() == pid {
-                continue;
-            }
-            let mut entry_path = entry.path();
-            entry_path.push("cmdline");
-            if let Ok(cmd) = std::fs::read_to_string(entry_path) {
-                let mut args = cmd.split(&[' ', '\0']);
-                if let Some(arg0) = args.next() {
-                    if arg0.ends_with("swww-daemon") {
-                        return Ok(true);
-                    }
-                }
-            }
-        }
+    Request::Ping.send(&socket)?;
+    let answer = Answer::receive(&read_socket(&socket)?);
+    match answer {
+        Answer::Ping(_) => Ok(true),
+        _ => Err("Daemon did not return Answer::Ping, as expected".to_string()),
     }
-
-    Ok(false)
 }
 
 fn restore_from_cache(requested_outputs: &[String]) -> Result<(), String> {
