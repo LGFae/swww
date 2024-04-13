@@ -74,7 +74,7 @@ impl Animator {
     pub(super) fn transition(
         &mut self,
         transition: ipc::Transition,
-        imgs: Box<[(Img, Box<[String]>)]>,
+        imgs: Box<[Img]>,
         wallpapers: Vec<Vec<Arc<Wallpaper>>>,
     ) -> Answer {
         match thread::Builder::new()
@@ -82,7 +82,7 @@ impl Animator {
             .name("transition spawner".to_string())
             .spawn(move || {
                 thread::scope(|s| {
-                    for ((Img { img, path }, _), wallpapers) in imgs.iter().zip(wallpapers) {
+                    for (Img { img, path }, wallpapers) in imgs.iter().zip(wallpapers) {
                         Self::spawn_transition_thread(s, &transition, img, path, wallpapers);
                     }
                 });
@@ -172,7 +172,7 @@ impl Animator {
 
     pub(super) fn animate(
         &mut self,
-        animations: Box<[(Animation, Box<[String]>)]>,
+        animations: Box<[Animation]>,
         wallpapers: Vec<Vec<Arc<Wallpaper>>>,
     ) -> Answer {
         let barrier = self.anim_barrier.clone();
@@ -181,7 +181,7 @@ impl Animator {
             .name("animation spawner".to_string())
             .spawn(move || {
                 thread::scope(|s| {
-                    for ((animation, _), wallpapers) in animations.iter().zip(wallpapers) {
+                    for (animation, wallpapers) in animations.iter().zip(wallpapers) {
                         let barrier = barrier.clone();
                         Self::spawn_animation_thread(s, animation, wallpapers, barrier);
                     }

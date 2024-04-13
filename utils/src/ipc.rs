@@ -199,7 +199,7 @@ pub struct Img {
     pub img: Box<[u8]>,
 }
 
-#[derive(Encode, Decode)]
+#[derive(Decode, Encode)]
 pub struct Animation {
     pub animation: Box<[(BitPack, Duration)]>,
     pub path: String,
@@ -207,8 +207,80 @@ pub struct Animation {
     pub pixel_format: PixelFormat,
 }
 
-pub type AnimationRequest = Box<[(Animation, Box<[String]>)]>;
-pub type ImageRequest = (Transition, Box<[(Img, Box<[String]>)]>);
+#[derive(Decode, Encode)]
+pub struct AnimationRequest {
+    pub animations: Box<[Animation]>,
+    pub outputs: Box<[Box<[String]>]>,
+}
+
+pub struct AnimationRequestBuilder {
+    animations: Vec<Animation>,
+    outputs: Vec<Box<[String]>>,
+}
+
+impl AnimationRequestBuilder {
+    #[inline]
+    #[allow(clippy::new_without_default)]
+    pub fn new() -> Self {
+        Self {
+            animations: Vec::new(),
+            outputs: Vec::new(),
+        }
+    }
+
+    #[inline]
+    pub fn push(&mut self, animation: Animation, outputs: Box<[String]>) {
+        self.animations.push(animation);
+        self.outputs.push(outputs);
+    }
+
+    #[inline]
+    pub fn build(self) -> AnimationRequest {
+        AnimationRequest {
+            animations: self.animations.into_boxed_slice(),
+            outputs: self.outputs.into_boxed_slice(),
+        }
+    }
+}
+
+#[derive(Decode, Encode)]
+pub struct ImageRequest {
+    pub transition: Transition,
+    pub imgs: Box<[Img]>,
+    pub outputs: Box<[Box<[String]>]>,
+}
+
+pub struct ImageRequestBuilder {
+    pub transition: Transition,
+    pub imgs: Vec<Img>,
+    pub outputs: Vec<Box<[String]>>,
+}
+
+impl ImageRequestBuilder {
+    #[inline]
+    pub fn new(transition: Transition) -> Self {
+        Self {
+            transition,
+            imgs: Vec::new(),
+            outputs: Vec::new(),
+        }
+    }
+
+    #[inline]
+    pub fn push(&mut self, img: Img, outputs: Box<[String]>) {
+        self.imgs.push(img);
+        self.outputs.push(outputs);
+    }
+
+    #[inline]
+    pub fn build(self) -> ImageRequest {
+        ImageRequest {
+            transition: self.transition,
+            imgs: self.imgs.into_boxed_slice(),
+            outputs: self.outputs.into_boxed_slice(),
+        }
+    }
+}
 
 #[derive(Decode, Encode)]
 pub enum Request {
@@ -224,9 +296,9 @@ impl Request {
     pub fn send(&self, stream: &UnixStream) -> Result<(), String> {
         let bytes = bitcode::encode(self);
         std::thread::scope(|s| {
-            if let Self::Animation(animations) = self {
+            if let Self::Animation(AnimationRequest { animations, .. }) = self {
                 s.spawn(|| {
-                    for (animation, _) in animations.iter() {
+                    for animation in animations.iter() {
                         // only store the cache if we aren't reading from stdin
                         if animation.path != "-" {
                             if let Err(e) = cache::store_animation_frames(animation) {
@@ -243,8 +315,8 @@ impl Request {
             if let Err(e) = writer.write_all(&bytes) {
                 Err(format!("failed to write serialized request: {e}"))
             } else {
-                if let Self::Img((_, imgs)) = self {
-                    for (Img { path, .. }, outputs) in imgs.iter() {
+                if let Self::Img(ImageRequest { imgs, outputs, .. }) = self {
+                    for (Img { path, .. }, outputs) in imgs.iter().zip(outputs.iter()) {
                         for output in outputs.iter() {
                             if let Err(e) = super::cache::store(output, path) {
                                 eprintln!("ERROR: failed to store cache: {e}");

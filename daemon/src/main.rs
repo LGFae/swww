@@ -44,7 +44,8 @@ use wayland_client::{
 };
 
 use utils::ipc::{
-    connect_to_socket, get_socket_path, read_socket, Answer, BgInfo, PixelFormat, Request,
+    connect_to_socket, get_socket_path, read_socket, AnimationRequest, Answer, BgInfo,
+    ImageRequest, PixelFormat, Request,
 };
 
 use animations::Animator;
@@ -362,9 +363,12 @@ impl Daemon {
         };
         let request = Request::receive(&bytes);
         let answer = match request {
-            Request::Animation(animations) => {
+            Request::Animation(AnimationRequest {
+                animations,
+                outputs,
+            }) => {
                 let mut wallpapers = Vec::new();
-                for (_, names) in animations.iter() {
+                for names in outputs.iter() {
                     wallpapers.push(self.find_wallpapers_by_names(names));
                 }
                 self.animator.animate(animations, wallpapers)
@@ -400,16 +404,20 @@ impl Daemon {
                 Answer::Ok
             }
             Request::Query => Answer::Info(self.wallpapers_info()),
-            Request::Img((transitions, imgs)) => {
+            Request::Img(ImageRequest {
+                transition,
+                imgs,
+                outputs,
+            }) => {
                 let mut used_wallpapers = Vec::new();
-                for img in imgs.iter() {
-                    let mut wallpapers = self.find_wallpapers_by_names(&img.1);
+                for names in outputs.iter() {
+                    let mut wallpapers = self.find_wallpapers_by_names(names);
                     for wallpaper in wallpapers.iter_mut() {
                         wallpaper.stop_animations();
                     }
                     used_wallpapers.push(wallpapers);
                 }
-                self.animator.transition(transitions, imgs, used_wallpapers)
+                self.animator.transition(transition, imgs, used_wallpapers)
             }
         };
         if let Err(e) = answer.send(&stream) {

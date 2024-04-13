@@ -183,7 +183,7 @@ fn make_img_request(
     outputs: &[Vec<String>],
 ) -> Result<ipc::ImageRequest, String> {
     let transition = make_transition(img);
-    let mut unique_requests = Vec::with_capacity(dims.len());
+    let mut img_req_builder = ipc::ImageRequestBuilder::new(transition);
     for (dim, outputs) in dims.iter().zip(outputs) {
         let path = match img.path.canonicalize() {
             Ok(p) => p.to_string_lossy().to_string(),
@@ -204,13 +204,13 @@ fn make_img_request(
             }
         };
 
-        unique_requests.push((
+        img_req_builder.push(
             ipc::Img { img, path },
             outputs.to_owned().into_boxed_slice(),
-        ));
+        );
     }
 
-    Ok((transition, unique_requests.into_boxed_slice()))
+    Ok(img_req_builder.build())
 }
 
 #[allow(clippy::type_complexity)]
@@ -271,6 +271,8 @@ fn make_animation_request(
     pixel_format: ipc::PixelFormat,
     outputs: &[Vec<String>],
 ) -> Result<AnimationRequest, String> {
+    let mut anim_req_builder = ipc::AnimationRequestBuilder::new();
+
     let filter = make_filter(&img.filter);
     let mut animations = Vec::with_capacity(dims.len());
     for (dim, outputs) in dims.iter().zip(outputs) {
@@ -303,9 +305,11 @@ fn make_animation_request(
             .into_boxed_slice(),
             pixel_format,
         };
-        animations.push((animation, outputs.to_owned().into_boxed_slice()));
+
+        anim_req_builder.push(animation, outputs.to_owned().into_boxed_slice());
     }
-    Ok(animations.into_boxed_slice())
+
+    Ok(anim_req_builder.build())
 }
 
 fn split_cmdline_outputs(outputs: &str) -> Box<[String]> {
