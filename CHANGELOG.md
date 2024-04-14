@@ -1,6 +1,19 @@
 ### Unreleased
 
 
+### 0.9.3
+
+Quick release to fix a scaling error that might affect a lot of people.
+
+#### Fixes
+  * fix wrong scale calculation
+
+#### Internal Improvements
+  * deleted leftover `/proc` traversal code in the client
+  * no longer setting nonblocking mode for daemon socket, since we are already
+  polling it
+  * better IPC structs between client and daemon
+
 ### 0.9.2
 
 #### Fixes
