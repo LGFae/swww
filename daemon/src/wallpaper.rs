@@ -165,17 +165,20 @@ impl Wallpaper {
     #[inline]
     pub fn set_dimensions(&self, width: i32, height: i32) {
         let mut lock = self.inner_staging.lock().unwrap();
+        let scale = lock.scale_factor.get();
 
-        if width <= 0 {
-            error!("invalid width ({width}) for output: {:?}", self.output);
-        } else {
-            lock.width = unsafe { NonZeroI32::new_unchecked(width) };
+        match NonZeroI32::new(width / scale) {
+            Some(width) => lock.width = width,
+            None => {
+                error!("dividing width {width} by scale_factor {scale} results in width 0!")
+            }
         }
 
-        if height <= 0 {
-            error!("invalid height ({height}) for output: {:?}", self.output);
-        } else {
-            lock.height = unsafe { NonZeroI32::new_unchecked(height) };
+        match NonZeroI32::new(height / scale) {
+            Some(height) => lock.height = height,
+            None => {
+                error!("dividing height {height} by scale_factor {scale} results in height 0!")
+            }
         }
     }
 
@@ -183,9 +186,28 @@ impl Wallpaper {
     pub fn set_scale(&self, scale: i32) {
         if scale <= 0 {
             error!("invalid scale ({scale}) for output: {:?}", self.output);
-        } else {
-            self.inner_staging.lock().unwrap().scale_factor =
-                unsafe { NonZeroI32::new_unchecked(scale) }
+            return;
+        }
+
+        let mut lock = self.inner_staging.lock().unwrap();
+        let (width, height) = (
+            lock.width.get() * lock.scale_factor.get(),
+            lock.height.get() * lock.scale_factor.get(),
+        );
+        lock.scale_factor = unsafe { NonZeroI32::new_unchecked(scale) };
+
+        match NonZeroI32::new(width / scale) {
+            Some(width) => lock.width = width,
+            None => {
+                error!("dividing width {width} by scale_factor {scale} results in width 0!")
+            }
+        }
+
+        match NonZeroI32::new(height / scale) {
+            Some(height) => lock.height = height,
+            None => {
+                error!("dividing height {height} by scale_factor {scale} results in height 0!")
+            }
         }
     }
 
