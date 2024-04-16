@@ -235,10 +235,7 @@ fn get_format_dims_and_outputs(
                 if !requested_outputs.is_empty() && !requested_outputs.contains(&name) {
                     continue;
                 }
-                let real_dim = (
-                    info.dim.0 * info.scale_factor as u32,
-                    info.dim.1 * info.scale_factor as u32,
-                );
+                let real_dim = info.real_dim();
                 if let Some((_, output)) = dims
                     .iter_mut()
                     .zip(&imgs)
