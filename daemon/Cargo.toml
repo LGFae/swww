@@ -11,7 +11,7 @@ log = { version = "0.4", features = ["max_level_debug", "release_max_level_info"
 simplelog = "0.12"
 
 wayland-client = { version = "0.31", default-features = false, features = [ "log" ]}
-wayland-protocols = { version = "0.31", default-features = false, features = [ "client" ]}
+wayland-protocols = { version = "0.31", default-features = false, features = [ "client", "staging" ]}
 wayland-protocols-wlr = { version = "0.2", default-features = false, features = [ "client" ]}
 
 # use specific git version for Duration implementation. We will do this until the next bitcode release

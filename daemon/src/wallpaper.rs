@@ -1,5 +1,9 @@
 use log::{debug, error, warn};
-use utils::ipc::{BgImg, BgInfo};
+use utils::ipc::{BgImg, BgInfo, Scale};
+use wayland_protocols::wp::{
+    fractional_scale::v1::client::wp_fractional_scale_v1::WpFractionalScaleV1,
+    viewporter::client::wp_viewport::WpViewport,
+};
 
 use std::{
     num::NonZeroI32,
@@ -58,7 +62,7 @@ struct WallpaperInner {
     desc: Option<String>,
     width: NonZeroI32,
     height: NonZeroI32,
-    scale_factor: NonZeroI32,
+    scale_factor: Scale,
 }
 
 impl Default for WallpaperInner {
@@ -68,7 +72,7 @@ impl Default for WallpaperInner {
             desc: None,
             width: unsafe { NonZeroI32::new_unchecked(4) },
             height: unsafe { NonZeroI32::new_unchecked(4) },
-            scale_factor: unsafe { NonZeroI32::new_unchecked(1) },
+            scale_factor: Scale::Whole(unsafe { NonZeroI32::new_unchecked(1) }),
         }
     }
 }
@@ -76,6 +80,9 @@ impl Default for WallpaperInner {
 pub(super) struct Wallpaper {
     output: WlOutput,
     wl_surface: WlSurface,
+    wp_viewport: WpViewport,
+    #[allow(unused)]
+    wp_fractional: Option<WpFractionalScaleV1>,
     layer_surface: LayerSurface,
 
     inner: RwLock<WallpaperInner>,
@@ -94,6 +101,8 @@ impl Wallpaper {
     pub(crate) fn new(
         output: WlOutput,
         wl_surface: WlSurface,
+        wp_viewport: WpViewport,
+        wp_fractional: Option<WpFractionalScaleV1>,
         layer_surface: LayerSurface,
         shm: &WlShm,
         qh: &QueueHandle<Daemon>,
@@ -111,7 +120,7 @@ impl Wallpaper {
         layer_surface.set_exclusive_zone(-1);
         layer_surface.set_margin(0, 0, 0, 0);
         layer_surface.set_keyboard_interactivity(KeyboardInteractivity::None);
-        layer_surface.set_size(4, 4);
+        //layer_surface.set_size(4, 4);
         wl_surface.set_buffer_scale(1);
 
         // commit so that the compositor send the initial configuration
@@ -123,6 +132,8 @@ impl Wallpaper {
         Self {
             output,
             wl_surface,
+            wp_viewport,
+            wp_fractional,
             layer_surface,
             inner,
             inner_staging,
@@ -144,7 +155,7 @@ impl Wallpaper {
         BgInfo {
             name: inner.name.clone().unwrap_or("?".to_string()),
             dim: (inner.width.get() as u32, inner.height.get() as u32),
-            scale_factor: inner.scale_factor.get(),
+            scale_factor: inner.scale_factor,
             img: self.img.lock().unwrap().clone(),
             pixel_format: crate::pixel_format(),
         }
@@ -165,48 +176,59 @@ impl Wallpaper {
     #[inline]
     pub fn set_dimensions(&self, width: i32, height: i32) {
         let mut lock = self.inner_staging.lock().unwrap();
-        let scale = lock.scale_factor.get();
+        let (width, height) = lock.scale_factor.div_dim(width as u32, height as u32);
 
-        match NonZeroI32::new(width / scale) {
+        match NonZeroI32::new(width as i32) {
             Some(width) => lock.width = width,
             None => {
-                error!("dividing width {width} by scale_factor {scale} results in width 0!")
+                error!(
+                    "dividing width {width} by scale_factor {} results in width 0!",
+                    lock.scale_factor
+                )
             }
         }
 
-        match NonZeroI32::new(height / scale) {
+        match NonZeroI32::new(height as i32) {
             Some(height) => lock.height = height,
             None => {
-                error!("dividing height {height} by scale_factor {scale} results in height 0!")
+                error!(
+                    "dividing height {height} by scale_factor {} results in height 0!",
+                    lock.scale_factor
+                )
             }
         }
     }
 
     #[inline]
-    pub fn set_scale(&self, scale: i32) {
-        if scale <= 0 {
-            error!("invalid scale ({scale}) for output: {:?}", self.output);
+    pub fn set_scale(&self, scale: Scale) {
+        let mut lock = self.inner_staging.lock().unwrap();
+        if matches!(lock.scale_factor, Scale::Fractional(_)) && matches!(scale, Scale::Whole(_)) {
             return;
         }
 
-        let mut lock = self.inner_staging.lock().unwrap();
-        let (width, height) = (
-            lock.width.get() * lock.scale_factor.get(),
-            lock.height.get() * lock.scale_factor.get(),
-        );
-        lock.scale_factor = unsafe { NonZeroI32::new_unchecked(scale) };
+        let (old_width, old_height) = lock
+            .scale_factor
+            .mul_dim(lock.width.get() as u32, lock.height.get() as u32);
 
-        match NonZeroI32::new(width / scale) {
+        lock.scale_factor = scale;
+        let (width, height) = lock.scale_factor.div_dim(old_width, old_height);
+        match NonZeroI32::new(width as i32) {
             Some(width) => lock.width = width,
             None => {
-                error!("dividing width {width} by scale_factor {scale} results in width 0!")
+                error!(
+                    "dividing width {width} by scale_factor {} results in width 0!",
+                    lock.scale_factor
+                )
             }
         }
 
-        match NonZeroI32::new(height / scale) {
+        match NonZeroI32::new(height as i32) {
             Some(height) => lock.height = height,
             None => {
-                error!("dividing height {height} by scale_factor {scale} results in height 0!")
+                error!(
+                    "dividing height {height} by scale_factor {} results in height 0!",
+                    lock.scale_factor
+                )
             }
         }
     }
@@ -251,17 +273,24 @@ impl Wallpaper {
 
         self.stop_animations();
 
-        self.wl_surface.set_buffer_scale(scale_factor.get());
-
-        *self.img.lock().unwrap() = BgImg::Color([0, 0, 0]);
-
-        let w = width.get() * scale_factor.get();
-        let h = height.get() * scale_factor.get();
-        self.pool.lock().unwrap().resize(w, h);
-
-        *self.frame_callback_handler.time.lock().unwrap() = Some(0);
+        match scale_factor {
+            Scale::Whole(i) => {
+                // unset destination
+                self.wp_viewport.set_destination(-1, -1);
+                self.wl_surface.set_buffer_scale(i.get());
+            }
+            Scale::Fractional(_) => {
+                self.wl_surface.set_buffer_scale(1);
+                self.wp_viewport.set_destination(width.get(), height.get());
+            }
+        }
         self.layer_surface
             .set_size(width.get() as u32, height.get() as u32);
+
+        let (w, h) = scale_factor.mul_dim(width.get() as u32, height.get() as u32);
+        self.pool.lock().unwrap().resize(w as i32, h as i32);
+
+        *self.frame_callback_handler.time.lock().unwrap() = Some(0);
         self.wl_surface.commit();
         self.wl_surface.frame(&self.qh, self.wl_surface.clone());
         self.configured.store(false, Ordering::Release);
@@ -300,10 +329,9 @@ impl Wallpaper {
 
     pub(super) fn get_dimensions(&self) -> (u32, u32) {
         let inner = self.inner.read().unwrap();
-        let width = inner.width.get() as u32;
-        let height = inner.height.get() as u32;
-        let scale_factor = inner.scale_factor.get() as u32;
-        (width * scale_factor, height * scale_factor)
+        inner
+            .scale_factor
+            .mul_dim(inner.width.get() as u32, inner.height.get() as u32)
     }
 
     #[inline]
@@ -366,12 +394,13 @@ impl Wallpaper {
         }
         let inner = self.inner.read().unwrap();
         if let Some(buf) = self.pool.lock().unwrap().get_commitable_buffer() {
-            let width = inner.width.get() * inner.scale_factor.get();
-            let height = inner.height.get() * inner.scale_factor.get();
+            let (width, height) = inner
+                .scale_factor
+                .mul_dim(inner.width.get() as u32, inner.height.get() as u32);
             let surface = &self.wl_surface;
             surface.attach(Some(buf), 0, 0);
             drop(inner);
-            surface.damage_buffer(0, 0, width, height);
+            surface.damage_buffer(0, 0, width as i32, height as i32);
             surface.commit();
             surface.frame(&self.qh, surface.clone());
         } else {

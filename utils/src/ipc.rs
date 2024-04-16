@@ -2,6 +2,7 @@ use bitcode::{Decode, Encode};
 use std::{
     fmt,
     io::{BufReader, BufWriter, Read, Write},
+    num::NonZeroI32,
     os::unix::net::UnixStream,
     path::PathBuf,
     time::Duration,
@@ -134,11 +135,56 @@ impl PixelFormat {
     }
 }
 
+#[derive(Clone, Copy, Debug, Decode, Encode, PartialEq)]
+pub enum Scale {
+    Whole(NonZeroI32),
+    Fractional(NonZeroI32),
+}
+
+impl Scale {
+    #[inline]
+    #[must_use]
+    pub fn mul_dim(&self, width: u32, height: u32) -> (u32, u32) {
+        match self {
+            Scale::Whole(i) => (width * i.get() as u32, height * i.get() as u32),
+            Scale::Fractional(f) => (
+                (width * f.get() as u32 + 60) / 120,
+                (height * f.get() as u32 + 60) / 120,
+            ),
+        }
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn div_dim(&self, width: u32, height: u32) -> (u32, u32) {
+        match self {
+            Scale::Whole(i) => (width / i.get() as u32, height / i.get() as u32),
+            Scale::Fractional(f) => (
+                (width * 120) / f.get() as u32,
+                (height * 120) / f.get() as u32,
+            ),
+        }
+    }
+}
+
+impl fmt::Display for Scale {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Scale::Whole(i) => i.get() as f32,
+                Scale::Fractional(f) => f.get() as f32 / 120.0,
+            }
+        )
+    }
+}
+
 #[derive(Clone, Decode, Encode)]
 pub struct BgInfo {
     pub name: String,
     pub dim: (u32, u32),
-    pub scale_factor: i32,
+    pub scale_factor: Scale,
     pub img: BgImg,
     pub pixel_format: PixelFormat,
 }
@@ -147,10 +193,7 @@ impl BgInfo {
     #[inline]
     #[must_use]
     pub fn real_dim(&self) -> (u32, u32) {
-        (
-            self.dim.0 * self.scale_factor as u32,
-            self.dim.1 * self.scale_factor as u32,
-        )
+        self.scale_factor.mul_dim(self.dim.0, self.dim.1)
     }
 }
 

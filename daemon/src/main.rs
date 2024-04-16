@@ -13,9 +13,17 @@ use rustix::{
 };
 use simplelog::{ColorChoice, TermLogger, TerminalMode, ThreadLogMode};
 use wallpaper::Wallpaper;
+use wayland_protocols::wp::{
+    fractional_scale::v1::client::{
+        wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1,
+        wp_fractional_scale_v1::WpFractionalScaleV1,
+    },
+    viewporter::client::{wp_viewport::WpViewport, wp_viewporter::WpViewporter},
+};
 
 use std::{
     fs,
+    num::NonZeroI32,
     os::{
         fd::OwnedFd,
         unix::net::{UnixListener, UnixStream},
@@ -43,7 +51,7 @@ use wayland_client::{
 
 use utils::ipc::{
     connect_to_socket, get_socket_path, read_socket, AnimationRequest, Answer, BgInfo,
-    ImageRequest, PixelFormat, Request,
+    ImageRequest, PixelFormat, Request, Scale,
 };
 
 use animations::Animator;
@@ -182,10 +190,24 @@ fn main() -> Result<(), String> {
         };
 
         if !events[1].is_empty() {
-            read_guard.read().expect("failed to read the event queue");
-            event_queue
-                .dispatch_pending(&mut daemon)
-                .expect("failed to dispatch events");
+            match read_guard.read() {
+                Ok(_) => {
+                    event_queue
+                        .dispatch_pending(&mut daemon)
+                        .expect("failed to dispatch events");
+                }
+                Err(e) => match e {
+                    wayland_client::backend::WaylandError::Io(io) => match io.kind() {
+                        std::io::ErrorKind::WouldBlock => {
+                            warn!("failed to read wayland events because it would block")
+                        }
+                        _ => panic!("Io error when reading wayland events: {io}"),
+                    },
+                    wayland_client::backend::WaylandError::Protocol(e) => {
+                        panic!("{e}")
+                    }
+                },
+            }
         } else {
             drop(read_guard);
         }
@@ -307,6 +329,8 @@ struct Daemon {
     shm: WlShm,
     pixel_format: PixelFormat,
     shm_format: wl_shm::Format,
+    viewporter: WpViewporter,
+    fractional_scale_manager: Option<WpFractionalScaleManagerV1>,
 
     // swww stuff
     wallpapers: Vec<Arc<Wallpaper>>,
@@ -332,12 +356,19 @@ impl Daemon {
         let pixel_format = PixelFormat::Xrgb;
         let shm_format = wl_shm::Format::Xrgb8888;
 
+        let viewporter = globals
+            .bind(qh, 1..=1, ())
+            .expect("viewported not available");
+        let fractional_scale_manager = globals.bind(qh, 1..=1, ()).ok();
+
         Self {
             layer_shell,
             compositor,
             shm,
             pixel_format,
             shm_format,
+            viewporter,
+            fractional_scale_manager,
 
             wallpapers: Vec::new(),
             animator: Animator::new(),
@@ -441,6 +472,7 @@ impl Daemon {
             assert!(PIXEL_FORMAT.set(self.pixel_format).is_ok());
             log::info!("Selected wl_shm format: {:?}", self.shm_format);
         }
+
         let surface = self.compositor.create_surface(qh, ());
 
         // Wayland clients are expected to render the cursor on their input region.
@@ -458,10 +490,18 @@ impl Daemon {
             (),
         );
 
+        let wp_viewport = self.viewporter.get_viewport(&surface, qh, ());
+        let wp_fractional = self
+            .fractional_scale_manager
+            .as_ref()
+            .map(|f| f.get_fractional_scale(&surface, qh, surface.clone()));
+
         debug!("New output: {}", output.id());
         self.wallpapers.push(Arc::new(Wallpaper::new(
             output,
             surface,
+            wp_viewport,
+            wp_fractional,
             layer_surface,
             &self.shm,
             qh,
@@ -491,7 +531,10 @@ impl Dispatch<wl_output::WlOutput, ()> for Daemon {
                         ..
                     } => wallpaper.set_dimensions(width, height),
                     wl_output::Event::Done => wallpaper.commit_surface_changes(),
-                    wl_output::Event::Scale { factor } => wallpaper.set_scale(factor),
+                    wl_output::Event::Scale { factor } => match NonZeroI32::new(factor) {
+                        Some(factor) => wallpaper.set_scale(Scale::Whole(factor)),
+                        None => error!("received scale factor of 0 from compositor"),
+                    },
                     wl_output::Event::Name { name } => wallpaper.set_name(name),
                     wl_output::Event::Description { description } => {
                         wallpaper.set_desc(description)
@@ -533,8 +576,13 @@ impl Dispatch<WlSurface, ()> for Daemon {
             wl_surface::Event::PreferredBufferScale { factor } => {
                 for wallpaper in state.wallpapers.iter_mut() {
                     if wallpaper.has_surface(proxy) {
-                        wallpaper.set_scale(factor);
-                        wallpaper.commit_surface_changes();
+                        match NonZeroI32::new(factor) {
+                            Some(factor) => {
+                                wallpaper.set_scale(Scale::Whole(factor));
+                                wallpaper.commit_surface_changes();
+                            }
+                            None => error!("received scale factor of 0 from compositor"),
+                        }
                         return;
                     }
                 }
@@ -652,6 +700,76 @@ impl Dispatch<WlRegistry, GlobalListContents> for Daemon {
                 debug!("Destroyed output with id: {name}");
             }
             e => error!("unrecognized WlRegistry event: {e:?}"),
+        }
+    }
+}
+
+impl Dispatch<WpViewporter, ()> for Daemon {
+    fn event(
+        _state: &mut Self,
+        _proxy: &WpViewporter,
+        _event: <WpViewporter as Proxy>::Event,
+        _data: &(),
+        _conn: &Connection,
+        _qhandle: &QueueHandle<Self>,
+    ) {
+        error!("WpViewporter has no events");
+    }
+}
+
+impl Dispatch<WpViewport, ()> for Daemon {
+    fn event(
+        _state: &mut Self,
+        _proxy: &WpViewport,
+        _event: <WpViewport as Proxy>::Event,
+        _data: &(),
+        _conn: &Connection,
+        _qhandle: &QueueHandle<Self>,
+    ) {
+        error!("WpViewport has no events");
+    }
+}
+
+impl Dispatch<WpFractionalScaleManagerV1, ()> for Daemon {
+    fn event(
+        _state: &mut Self,
+        _proxy: &WpFractionalScaleManagerV1,
+        _event: <WpFractionalScaleManagerV1 as Proxy>::Event,
+        _data: &(),
+        _conn: &Connection,
+        _qhandle: &QueueHandle<Self>,
+    ) {
+        error!("WpFractionalScaleManagerV1 has no events");
+    }
+}
+
+impl Dispatch<WpFractionalScaleV1, WlSurface> for Daemon {
+    fn event(
+        state: &mut Self,
+        _proxy: &WpFractionalScaleV1,
+        event: <WpFractionalScaleV1 as Proxy>::Event,
+        data: &WlSurface,
+        _conn: &Connection,
+        _qhandle: &QueueHandle<Self>,
+    ) {
+        use wayland_protocols::wp::fractional_scale::v1::client::wp_fractional_scale_v1;
+        match event {
+            wp_fractional_scale_v1::Event::PreferredScale { scale } => {
+                for wallpaper in state.wallpapers.iter_mut() {
+                    if wallpaper.has_surface(data) {
+                        match NonZeroI32::new(scale as i32) {
+                            Some(factor) => {
+                                wallpaper.set_scale(Scale::Fractional(factor));
+                                wallpaper.commit_surface_changes();
+                            }
+                            None => error!("received scale factor of 0 from compositor"),
+                        }
+                        return;
+                    }
+                }
+                warn!("received new fractional scale factor for non-existing surface")
+            }
+            e => error!("unrecognized WpFractionalScaleV1 event: {e:?}"),
         }
     }
 }
