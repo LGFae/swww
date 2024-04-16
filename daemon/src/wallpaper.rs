@@ -176,9 +176,9 @@ impl Wallpaper {
     #[inline]
     pub fn set_dimensions(&self, width: i32, height: i32) {
         let mut lock = self.inner_staging.lock().unwrap();
-        let (width, height) = lock.scale_factor.div_dim(width as u32, height as u32);
+        let (width, height) = lock.scale_factor.div_dim(width, height);
 
-        match NonZeroI32::new(width as i32) {
+        match NonZeroI32::new(width) {
             Some(width) => lock.width = width,
             None => {
                 error!(
@@ -188,7 +188,7 @@ impl Wallpaper {
             }
         }
 
-        match NonZeroI32::new(height as i32) {
+        match NonZeroI32::new(height) {
             Some(height) => lock.height = height,
             None => {
                 error!(
@@ -208,11 +208,11 @@ impl Wallpaper {
 
         let (old_width, old_height) = lock
             .scale_factor
-            .mul_dim(lock.width.get() as u32, lock.height.get() as u32);
+            .mul_dim(lock.width.get(), lock.height.get());
 
         lock.scale_factor = scale;
         let (width, height) = lock.scale_factor.div_dim(old_width, old_height);
-        match NonZeroI32::new(width as i32) {
+        match NonZeroI32::new(width) {
             Some(width) => lock.width = width,
             None => {
                 error!(
@@ -222,7 +222,7 @@ impl Wallpaper {
             }
         }
 
-        match NonZeroI32::new(height as i32) {
+        match NonZeroI32::new(height) {
             Some(height) => lock.height = height,
             None => {
                 error!(
@@ -287,8 +287,8 @@ impl Wallpaper {
         self.layer_surface
             .set_size(width.get() as u32, height.get() as u32);
 
-        let (w, h) = scale_factor.mul_dim(width.get() as u32, height.get() as u32);
-        self.pool.lock().unwrap().resize(w as i32, h as i32);
+        let (w, h) = scale_factor.mul_dim(width.get(), height.get());
+        self.pool.lock().unwrap().resize(w, h);
 
         *self.frame_callback_handler.time.lock().unwrap() = Some(0);
         self.wl_surface.commit();
@@ -329,9 +329,10 @@ impl Wallpaper {
 
     pub(super) fn get_dimensions(&self) -> (u32, u32) {
         let inner = self.inner.read().unwrap();
-        inner
+        let dim = inner
             .scale_factor
-            .mul_dim(inner.width.get() as u32, inner.height.get() as u32)
+            .mul_dim(inner.width.get(), inner.height.get());
+        (dim.0 as u32, dim.1 as u32)
     }
 
     #[inline]
@@ -396,11 +397,11 @@ impl Wallpaper {
         if let Some(buf) = self.pool.lock().unwrap().get_commitable_buffer() {
             let (width, height) = inner
                 .scale_factor
-                .mul_dim(inner.width.get() as u32, inner.height.get() as u32);
+                .mul_dim(inner.width.get(), inner.height.get());
             let surface = &self.wl_surface;
             surface.attach(Some(buf), 0, 0);
             drop(inner);
-            surface.damage_buffer(0, 0, width as i32, height as i32);
+            surface.damage_buffer(0, 0, width, height);
             surface.commit();
             surface.frame(&self.qh, surface.clone());
         } else {

@@ -144,25 +144,19 @@ pub enum Scale {
 impl Scale {
     #[inline]
     #[must_use]
-    pub fn mul_dim(&self, width: u32, height: u32) -> (u32, u32) {
+    pub fn mul_dim(&self, width: i32, height: i32) -> (i32, i32) {
         match self {
-            Scale::Whole(i) => (width * i.get() as u32, height * i.get() as u32),
-            Scale::Fractional(f) => (
-                (width * f.get() as u32 + 60) / 120,
-                (height * f.get() as u32 + 60) / 120,
-            ),
+            Scale::Whole(i) => (width * i.get(), height * i.get()),
+            Scale::Fractional(f) => ((width * f.get() + 60) / 120, (height * f.get() + 60) / 120),
         }
     }
 
     #[inline]
     #[must_use]
-    pub fn div_dim(&self, width: u32, height: u32) -> (u32, u32) {
+    pub fn div_dim(&self, width: i32, height: i32) -> (i32, i32) {
         match self {
-            Scale::Whole(i) => (width / i.get() as u32, height / i.get() as u32),
-            Scale::Fractional(f) => (
-                (width * 120) / f.get() as u32,
-                (height * 120) / f.get() as u32,
-            ),
+            Scale::Whole(i) => (width / i.get(), height / i.get()),
+            Scale::Fractional(f) => ((width * 120) / f.get(), (height * 120) / f.get()),
         }
     }
 }
@@ -193,7 +187,10 @@ impl BgInfo {
     #[inline]
     #[must_use]
     pub fn real_dim(&self) -> (u32, u32) {
-        self.scale_factor.mul_dim(self.dim.0, self.dim.1)
+        let dim = self
+            .scale_factor
+            .mul_dim(self.dim.0 as i32, self.dim.1 as i32);
+        (dim.0 as u32, dim.1 as u32)
     }
 }
 
