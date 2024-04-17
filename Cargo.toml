@@ -4,7 +4,7 @@ default-members = [".", "daemon"]
 
 [package]
 name = "swww"
-version = "0.9.3"
+version = "0.9.4"
 authors = ["Leonardo Gibrowski Faé <leonardo.fae44@gmail.com>"]
 edition = "2021"
 rust-version = "1.74"
@@ -34,7 +34,7 @@ image = "0.25"
 fast_image_resize = "3.0"
 clap = { version = "4.5", features = ["derive", "wrap_help", "env"] }
 rand = "0.8"
-utils = { version = "0.9.3", path = "utils" }
+utils = { version = "0.9.4", path = "utils" }
 
 [dev-dependencies]
 assert_cmd = "2.0"

@@ -1,6 +1,16 @@
 ### Unreleased
 
 
+### 0.9.4
+
+Fractional Scaling is finally implemented! Woooo!!
+
+That also fixes a nasty problem some people were having with fractionally
+scaled outputs.
+
+Apologies for spaming small releases like these in short order. Hopefully this
+will be the last one for a while.
+
 ### 0.9.3
 
 Quick release to fix a scaling error that might affect a lot of people.
