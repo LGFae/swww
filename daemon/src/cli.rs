@@ -3,11 +3,13 @@ use utils::ipc::PixelFormat;
 pub struct Cli {
     pub format: Option<PixelFormat>,
     pub quiet: bool,
+    pub no_cache: bool,
 }
 
 impl Cli {
     pub fn new() -> Self {
         let mut quiet = false;
+        let mut no_cache = false;
         let mut format = None;
         let mut args = std::env::args();
         args.next(); // skip the first argument
@@ -25,6 +27,7 @@ impl Cli {
                     }
                 },
                 "-q" | "--quiet" => quiet = true,
+                "--no-cache" => no_cache = true,
                 "-h" | "--help" => {
                     println!("swww-daemon");
                     println!();
@@ -39,6 +42,12 @@ impl Cli {
                     println!("          Only use this as a workaround when you run into problems.");
                     println!("          Whatever you chose, make sure you compositor actually supports it!");
                     println!("          'xrgb' is the most compatible one.");
+                    println!();
+                    println!("  --no-cache");
+                    println!(
+                        "          Don't search the cache for the last wallpaper for each output"
+                    );
+                    println!("          Useful if you always want to select which iamge `swww` loads manually using `swww img`");
                     println!();
                     println!("  -q|--quiet    will only log errors");
                     println!("  -h|--help     print help");
@@ -57,6 +66,10 @@ impl Cli {
             }
         }
 
-        Self { format, quiet }
+        Self {
+            format,
+            quiet,
+            no_cache,
+        }
     }
 }
