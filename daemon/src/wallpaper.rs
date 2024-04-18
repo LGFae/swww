@@ -234,11 +234,11 @@ impl Wallpaper {
     }
 
     #[inline]
-    pub fn commit_surface_changes(&self) {
+    pub fn commit_surface_changes(&self, use_cache: bool) {
         let mut inner = self.inner.write().unwrap();
         let staging = self.inner_staging.lock().unwrap();
 
-        if inner.name != staging.name {
+        if inner.name != staging.name && use_cache {
             let name = staging.name.clone().unwrap_or("".to_string());
             if let Err(e) = std::thread::Builder::new()
                 .name("cache loader".to_string())

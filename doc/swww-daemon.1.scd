@@ -4,7 +4,7 @@ swww-daemon(1)
 swww-daemon
 
 # SYNOPSIS
-swww-daemon [-q|--quiet] [-f|--format <xrgb|xbgr|rgb|bgr>]
+swww-daemon [-q|--quiet] [-f|--format <xrgb|xbgr|rgb|bgr>] [--no-cache]
 
 # OPTIONS
 
@@ -15,6 +15,11 @@ swww-daemon [-q|--quiet] [-f|--format <xrgb|xbgr|rgb|bgr>]
 	'swww-daemon' will automatically select the best format for itself during
 	initialization; this is only here for fallback, debug, and workaround
 	purposes.
+
+*--no-cache*
+	Don't search the cache for the last wallpaper for each output.
+	Useful if you always want to select which image 'swww' loads manually using
+	'swww img'
 
 *-q*,*--quiet*
 	Makes the daemon only log errors.

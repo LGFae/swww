@@ -137,7 +137,7 @@ fn main() -> Result<(), String> {
         registry_queue_init(&conn).expect("failed to initialize the event queue");
     let qh = event_queue.handle();
 
-    let mut daemon = Daemon::new(&globals, &qh);
+    let mut daemon = Daemon::new(&globals, &qh, cli.no_cache);
     // roundtrip to get the shm formats before setting up the outputs
     event_queue.roundtrip(&mut daemon).unwrap();
 
@@ -335,10 +335,11 @@ struct Daemon {
     // swww stuff
     wallpapers: Vec<Arc<Wallpaper>>,
     animator: Animator,
+    use_cache: bool,
 }
 
 impl Daemon {
-    fn new(globals: &GlobalList, qh: &QueueHandle<Self>) -> Self {
+    fn new(globals: &GlobalList, qh: &QueueHandle<Self>, no_cache: bool) -> Self {
         // The compositor (not to be confused with the server which is commonly called the compositor) allows
         // configuring surfaces to be presented.
         let compositor: WlCompositor = globals
@@ -372,6 +373,7 @@ impl Daemon {
 
             wallpapers: Vec::new(),
             animator: Animator::new(),
+            use_cache: !no_cache,
         }
     }
 
@@ -530,7 +532,7 @@ impl Dispatch<wl_output::WlOutput, ()> for Daemon {
                         height,
                         ..
                     } => wallpaper.set_dimensions(width, height),
-                    wl_output::Event::Done => wallpaper.commit_surface_changes(),
+                    wl_output::Event::Done => wallpaper.commit_surface_changes(state.use_cache),
                     wl_output::Event::Scale { factor } => match NonZeroI32::new(factor) {
                         Some(factor) => wallpaper.set_scale(Scale::Whole(factor)),
                         None => error!("received scale factor of 0 from compositor"),
@@ -579,7 +581,7 @@ impl Dispatch<WlSurface, ()> for Daemon {
                         match NonZeroI32::new(factor) {
                             Some(factor) => {
                                 wallpaper.set_scale(Scale::Whole(factor));
-                                wallpaper.commit_surface_changes();
+                                wallpaper.commit_surface_changes(state.use_cache);
                             }
                             None => error!("received scale factor of 0 from compositor"),
                         }
@@ -760,7 +762,7 @@ impl Dispatch<WpFractionalScaleV1, WlSurface> for Daemon {
                         match NonZeroI32::new(scale as i32) {
                             Some(factor) => {
                                 wallpaper.set_scale(Scale::Fractional(factor));
-                                wallpaper.commit_surface_changes();
+                                wallpaper.commit_surface_changes(state.use_cache);
                             }
                             None => error!("received scale factor of 0 from compositor"),
                         }
