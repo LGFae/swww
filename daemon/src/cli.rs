@@ -45,9 +45,9 @@ impl Cli {
                     println!();
                     println!("  --no-cache");
                     println!(
-                        "          Don't search the cache for the last wallpaper for each output"
+                        "         Don't search the cache for the last wallpaper for each output."
                     );
-                    println!("          Useful if you always want to select which iamge `swww` loads manually using `swww img`");
+                    println!("          Useful if you always want to select which image 'swww' loads manually using 'swww img'");
                     println!();
                     println!("  -q|--quiet    will only log errors");
                     println!("  -h|--help     print help");
