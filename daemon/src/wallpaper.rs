@@ -293,7 +293,8 @@ impl Wallpaper {
         *self.frame_callback_handler.time.lock().unwrap() = Some(0);
         self.wl_surface.commit();
         self.wl_surface.frame(&self.qh, self.wl_surface.clone());
-        self.configured.store(false, Ordering::Release);
+        self.configured
+            .store(true, std::sync::atomic::Ordering::Release);
     }
 
     #[inline]

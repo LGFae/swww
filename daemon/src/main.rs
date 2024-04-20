@@ -803,8 +803,6 @@ impl Dispatch<LayerSurface, ()> for Daemon {
             Event::Configure { serial, .. } => {
                 for w in &mut state.wallpapers {
                     if w.has_layer_surface(proxy) {
-                        w.configured
-                            .store(true, std::sync::atomic::Ordering::Release);
                         proxy.ack_configure(serial);
                         return;
                     }
