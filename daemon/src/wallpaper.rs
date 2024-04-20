@@ -200,6 +200,26 @@ impl Wallpaper {
     }
 
     #[inline]
+    pub fn set_vertical(&self) {
+        let mut lock = self.inner_staging.lock().unwrap();
+        if lock.width > lock.height {
+            let t = lock.width;
+            lock.width = lock.height;
+            lock.height = t;
+        }
+    }
+
+    #[inline]
+    pub fn set_horizontal(&self) {
+        let mut lock = self.inner_staging.lock().unwrap();
+        if lock.width < lock.height {
+            let t = lock.width;
+            lock.width = lock.height;
+            lock.height = t;
+        }
+    }
+
+    #[inline]
     pub fn set_scale(&self, scale: Scale) {
         let mut lock = self.inner_staging.lock().unwrap();
         if matches!(lock.scale_factor, Scale::Fractional(_)) && matches!(scale, Scale::Whole(_)) {

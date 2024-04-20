@@ -523,8 +523,26 @@ impl Dispatch<wl_output::WlOutput, ()> for Daemon {
         for wallpaper in state.wallpapers.iter_mut() {
             if wallpaper.has_id(proxy.id().protocol_id()) {
                 match event {
-                    wl_output::Event::Geometry { x, y, .. } => {
-                        debug!("output {} position: {x},{y}", proxy.id())
+                    wl_output::Event::Geometry {
+                        x, y, transform, ..
+                    } => {
+                        debug!("output {} position: {x},{y}", proxy.id());
+                        match transform {
+                            wayland_client::WEnum::Value(v) => match v {
+                                wl_output::Transform::_90
+                                | wl_output::Transform::_270
+                                | wl_output::Transform::Flipped90
+                                | wl_output::Transform::Flipped270 => wallpaper.set_vertical(),
+                                wl_output::Transform::Normal
+                                | wl_output::Transform::_180
+                                | wl_output::Transform::Flipped
+                                | wl_output::Transform::Flipped180 => wallpaper.set_horizontal(),
+                                e => warn!("unprocessed transform: {e:?}"),
+                            },
+                            wayland_client::WEnum::Unknown(u) => {
+                                error!("received unknown transfrom from compositor: {u}")
+                            }
+                        }
                     }
                     wl_output::Event::Mode {
                         flags: _flags,
