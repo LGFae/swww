@@ -79,6 +79,7 @@ impl Default for WallpaperInner {
 
 pub(super) struct Wallpaper {
     output: WlOutput,
+    output_name: u32,
     wl_surface: WlSurface,
     wp_viewport: WpViewport,
     #[allow(unused)]
@@ -98,8 +99,10 @@ pub(super) struct Wallpaper {
 }
 
 impl Wallpaper {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         output: WlOutput,
+        output_name: u32,
         wl_surface: WlSurface,
         wp_viewport: WpViewport,
         wp_fractional: Option<WpFractionalScaleV1>,
@@ -131,6 +134,7 @@ impl Wallpaper {
 
         Self {
             output,
+            output_name,
             wl_surface,
             wp_viewport,
             wp_fractional,
@@ -326,8 +330,13 @@ impl Wallpaper {
     }
 
     #[inline]
-    pub(super) fn has_id(&self, id: u32) -> bool {
-        wayland_client::Proxy::id(&self.output).protocol_id() == id
+    pub(super) fn has_output(&self, output: &WlOutput) -> bool {
+        self.output == *output
+    }
+
+    #[inline]
+    pub(super) fn has_output_name(&self, name: u32) -> bool {
+        self.output_name == name
     }
 
     #[inline]
