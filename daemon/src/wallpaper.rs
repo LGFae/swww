@@ -63,6 +63,7 @@ struct WallpaperInner {
     width: NonZeroI32,
     height: NonZeroI32,
     scale_factor: Scale,
+    is_vertical: bool,
 }
 
 impl Default for WallpaperInner {
@@ -73,6 +74,7 @@ impl Default for WallpaperInner {
             width: unsafe { NonZeroI32::new_unchecked(4) },
             height: unsafe { NonZeroI32::new_unchecked(4) },
             scale_factor: Scale::Whole(unsafe { NonZeroI32::new_unchecked(1) }),
+            is_vertical: false,
         }
     }
 }
@@ -201,26 +203,32 @@ impl Wallpaper {
                 )
             }
         }
+
+        if lock.is_vertical {
+            if lock.width > lock.height {
+                let t = lock.width;
+                lock.width = lock.height;
+                lock.height = t;
+            }
+        } else {
+            if lock.width < lock.height {
+                let t = lock.width;
+                lock.width = lock.height;
+                lock.height = t;
+            }
+        }
     }
 
     #[inline]
     pub fn set_vertical(&self) {
         let mut lock = self.inner_staging.lock().unwrap();
-        if lock.width > lock.height {
-            let t = lock.width;
-            lock.width = lock.height;
-            lock.height = t;
-        }
+        lock.is_vertical = true;
     }
 
     #[inline]
     pub fn set_horizontal(&self) {
         let mut lock = self.inner_staging.lock().unwrap();
-        if lock.width < lock.height {
-            let t = lock.width;
-            lock.width = lock.height;
-            lock.height = t;
-        }
+        lock.is_vertical = false;
     }
 
     #[inline]
