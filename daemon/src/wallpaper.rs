@@ -63,6 +63,7 @@ struct WallpaperInner {
     width: NonZeroI32,
     height: NonZeroI32,
     scale_factor: Scale,
+    is_vertical: bool,
 }
 
 impl Default for WallpaperInner {
@@ -73,12 +74,14 @@ impl Default for WallpaperInner {
             width: unsafe { NonZeroI32::new_unchecked(4) },
             height: unsafe { NonZeroI32::new_unchecked(4) },
             scale_factor: Scale::Whole(unsafe { NonZeroI32::new_unchecked(1) }),
+            is_vertical: false,
         }
     }
 }
 
 pub(super) struct Wallpaper {
     output: WlOutput,
+    output_name: u32,
     wl_surface: WlSurface,
     wp_viewport: WpViewport,
     #[allow(unused)]
@@ -98,8 +101,10 @@ pub(super) struct Wallpaper {
 }
 
 impl Wallpaper {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         output: WlOutput,
+        output_name: u32,
         wl_surface: WlSurface,
         wp_viewport: WpViewport,
         wp_fractional: Option<WpFractionalScaleV1>,
@@ -131,6 +136,7 @@ impl Wallpaper {
 
         Self {
             output,
+            output_name,
             wl_surface,
             wp_viewport,
             wp_fractional,
@@ -197,6 +203,32 @@ impl Wallpaper {
                 )
             }
         }
+
+        if lock.is_vertical {
+            if lock.width > lock.height {
+                let t = lock.width;
+                lock.width = lock.height;
+                lock.height = t;
+            }
+        } else {
+            if lock.width < lock.height {
+                let t = lock.width;
+                lock.width = lock.height;
+                lock.height = t;
+            }
+        }
+    }
+
+    #[inline]
+    pub fn set_vertical(&self) {
+        let mut lock = self.inner_staging.lock().unwrap();
+        lock.is_vertical = true;
+    }
+
+    #[inline]
+    pub fn set_horizontal(&self) {
+        let mut lock = self.inner_staging.lock().unwrap();
+        lock.is_vertical = false;
     }
 
     #[inline]
@@ -306,8 +338,13 @@ impl Wallpaper {
     }
 
     #[inline]
-    pub(super) fn has_id(&self, id: u32) -> bool {
-        wayland_client::Proxy::id(&self.output).protocol_id() == id
+    pub(super) fn has_output(&self, output: &WlOutput) -> bool {
+        self.output == *output
+    }
+
+    #[inline]
+    pub(super) fn has_output_name(&self, name: u32) -> bool {
+        self.output_name == name
     }
 
     #[inline]

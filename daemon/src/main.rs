@@ -147,7 +147,7 @@ fn main() -> Result<(), String> {
                 let output = globals
                     .registry()
                     .bind(global.name, global.version, &qh, ());
-                daemon.new_output(&qh, output);
+                daemon.new_output(&qh, output, global.name);
             } else {
                 error!("wl_output must be at least version 2 for swww-daemon!")
             }
@@ -469,7 +469,7 @@ impl Daemon {
             .collect()
     }
 
-    fn new_output(&mut self, qh: &QueueHandle<Self>, output: wl_output::WlOutput) {
+    fn new_output(&mut self, qh: &QueueHandle<Self>, output: wl_output::WlOutput, name: u32) {
         if PIXEL_FORMAT.get().is_none() {
             assert!(PIXEL_FORMAT.set(self.pixel_format).is_ok());
             log::info!("Selected wl_shm format: {:?}", self.shm_format);
@@ -501,6 +501,7 @@ impl Daemon {
         debug!("New output: {}", output.id());
         self.wallpapers.push(Arc::new(Wallpaper::new(
             output,
+            name,
             surface,
             wp_viewport,
             wp_fractional,
@@ -521,10 +522,28 @@ impl Dispatch<wl_output::WlOutput, ()> for Daemon {
         _qhandle: &QueueHandle<Self>,
     ) {
         for wallpaper in state.wallpapers.iter_mut() {
-            if wallpaper.has_id(proxy.id().protocol_id()) {
+            if wallpaper.has_output(proxy) {
                 match event {
-                    wl_output::Event::Geometry { x, y, .. } => {
-                        debug!("output {} position: {x},{y}", proxy.id())
+                    wl_output::Event::Geometry {
+                        x, y, transform, ..
+                    } => {
+                        debug!("output {} position: {x},{y}", proxy.id());
+                        match transform {
+                            wayland_client::WEnum::Value(v) => match v {
+                                wl_output::Transform::_90
+                                | wl_output::Transform::_270
+                                | wl_output::Transform::Flipped90
+                                | wl_output::Transform::Flipped270 => wallpaper.set_vertical(),
+                                wl_output::Transform::Normal
+                                | wl_output::Transform::_180
+                                | wl_output::Transform::Flipped
+                                | wl_output::Transform::Flipped180 => wallpaper.set_horizontal(),
+                                e => warn!("unprocessed transform: {e:?}"),
+                            },
+                            wayland_client::WEnum::Unknown(u) => {
+                                error!("received unknown transfrom from compositor: {u}")
+                            }
+                        }
                     }
                     wl_output::Event::Mode {
                         flags: _flags,
@@ -691,13 +710,13 @@ impl Dispatch<WlRegistry, GlobalListContents> for Daemon {
                         error!("your compositor must support at least version 2 of wl_output");
                     } else {
                         let output = proxy.bind(name, version, qh, ());
-                        state.new_output(qh, output)
+                        state.new_output(qh, output, name)
                     }
                 }
             }
 
             wayland_client::protocol::wl_registry::Event::GlobalRemove { name } => {
-                state.wallpapers.retain(|w| !w.has_id(name));
+                state.wallpapers.retain(|w| !w.has_output_name(name));
 
                 debug!("Destroyed output with id: {name}");
             }

@@ -147,7 +147,12 @@ impl Scale {
     pub fn mul_dim(&self, width: i32, height: i32) -> (i32, i32) {
         match self {
             Scale::Whole(i) => (width * i.get(), height * i.get()),
-            Scale::Fractional(f) => ((width * f.get() + 60) / 120, (height * f.get() + 60) / 120),
+            Scale::Fractional(f) => {
+                let scale = f.get() as f64 / 120.0;
+                let width = (width as f64 * scale).round() as i32;
+                let height = (height as f64 * scale).round() as i32;
+                (width, height)
+            }
         }
     }
 
@@ -156,7 +161,12 @@ impl Scale {
     pub fn div_dim(&self, width: i32, height: i32) -> (i32, i32) {
         match self {
             Scale::Whole(i) => (width / i.get(), height / i.get()),
-            Scale::Fractional(f) => ((width * 120) / f.get(), (height * 120) / f.get()),
+            Scale::Fractional(f) => {
+                let scale = 120.0 / f.get() as f64;
+                let width = (width as f64 * scale).round() as i32;
+                let height = (height as f64 * scale).round() as i32;
+                (width, height)
+            }
         }
     }
 }
