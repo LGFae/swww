@@ -274,9 +274,6 @@ impl Wallpaper {
                 .name("cache loader".to_string())
                 .stack_size(1 << 14)
                 .spawn(move || {
-                    // Wait for a bit for the surface to be properly configured and stuff
-                    // this is obviously not ideal, but it solves the vast majority of problems
-                    std::thread::sleep(std::time::Duration::from_millis(100));
                     if let Err(e) = utils::cache::load(&name) {
                         warn!("failed to load cache: {e}");
                     }
