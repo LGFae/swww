@@ -82,7 +82,6 @@ impl Transition {
     }
 
     fn updt_wallpapers(&mut self, now: &mut Instant) {
-        let fps = self.fps;
         let mut i = 0;
         while i < self.wallpapers.len() {
             let token = &self.animation_tokens[i];
@@ -93,8 +92,12 @@ impl Transition {
             }
             i += 1;
         }
-        let timeout = fps.saturating_sub(now.elapsed());
+
+        self.wallpapers.iter().for_each(|w| w.draw());
+
+        let timeout = self.fps.saturating_sub(now.elapsed());
         spin_sleep::sleep(timeout);
+        crate::flush_wayland();
         *now = Instant::now();
     }
 
@@ -113,6 +116,8 @@ impl Transition {
         for wallpaper in self.wallpapers.iter() {
             wallpaper.draw();
         }
+
+        crate::flush_wayland();
     }
 
     fn simple(&mut self, new_img: &[u8]) {
@@ -136,11 +141,6 @@ impl Transition {
                     }
                 });
             }
-
-            for wallpaper in self.wallpapers.iter() {
-                wallpaper.draw();
-            }
-
             self.updt_wallpapers(&mut now);
         }
     }
@@ -383,8 +383,6 @@ impl Transition {
                     .for_each(|(i, (old, new))| f(i, old, new));
             });
         });
-
-        self.wallpapers.iter().for_each(|w| w.draw());
     }
 }
 

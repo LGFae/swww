@@ -33,6 +33,7 @@ use std::{
 };
 
 use wayland_client::{
+    backend::WeakBackend,
     globals::{registry_queue_init, GlobalList, GlobalListContents},
     protocol::{
         wl_callback::WlCallback,
@@ -72,6 +73,7 @@ fn should_daemon_exit() -> bool {
 }
 
 static PIXEL_FORMAT: OnceLock<PixelFormat> = OnceLock::new();
+static BACKEND: OnceLock<WeakBackend> = OnceLock::new();
 
 #[inline]
 pub fn wl_shm_format() -> wl_shm::Format {
@@ -81,6 +83,12 @@ pub fn wl_shm_format() -> wl_shm::Format {
         PixelFormat::Rgb => wl_shm::Format::Rgb888,
         PixelFormat::Bgr => wl_shm::Format::Bgr888,
     }
+}
+
+#[inline]
+pub fn flush_wayland() {
+    debug_assert!(BACKEND.get().is_some());
+    BACKEND.get().unwrap().upgrade().unwrap().flush().unwrap();
 }
 
 #[inline]
@@ -112,6 +120,7 @@ fn main() -> Result<(), String> {
     setup_signals();
 
     let conn = Connection::connect_to_env().expect("failed to connect to the wayland server");
+    BACKEND.set(conn.backend().downgrade()).unwrap();
     // Enumerate the list of globals to get the protocols the server implements.
     let (globals, mut event_queue) =
         registry_queue_init(&conn).expect("failed to initialize the event queue");
@@ -152,7 +161,7 @@ fn main() -> Result<(), String> {
         let events = {
             let connection_fd = read_guard.connection_fd();
             let mut fds = [
-                PollFd::new(&connection_fd, PollFlags::IN | PollFlags::OUT),
+                PollFd::new(&connection_fd, PollFlags::IN),
                 PollFd::new(&listener.0, PollFlags::IN),
             ];
 
@@ -167,7 +176,7 @@ fn main() -> Result<(), String> {
             [fds[0].revents(), fds[1].revents()]
         };
 
-        if events[0].contains(PollFlags::IN) {
+        if !events[0].is_empty() {
             match read_guard.read() {
                 Ok(_) => {
                     event_queue

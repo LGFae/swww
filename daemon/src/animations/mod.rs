@@ -151,7 +151,6 @@ impl Animator {
                             continue;
                         }
 
-                        wallpapers[i].draw();
                         i += 1;
                     }
 
@@ -159,8 +158,13 @@ impl Animator {
                         return;
                     }
 
+                    for wallpaper in &wallpapers {
+                        wallpaper.draw();
+                    }
                     let timeout = duration.saturating_sub(now.elapsed());
                     spin_sleep::sleep(timeout);
+                    crate::flush_wayland();
+
                     now = std::time::Instant::now();
                 }
             })
