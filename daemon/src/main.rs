@@ -24,10 +24,7 @@ use wayland_protocols::wp::{
 use std::{
     fs,
     num::NonZeroI32,
-    os::{
-        fd::OwnedFd,
-        unix::net::{UnixListener, UnixStream},
-    },
+    os::unix::net::{UnixListener, UnixStream},
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -74,7 +71,6 @@ fn should_daemon_exit() -> bool {
     EXIT.load(Ordering::Acquire)
 }
 
-static POLL_WAKER: OnceLock<OwnedFd> = OnceLock::new();
 static PIXEL_FORMAT: OnceLock<PixelFormat> = OnceLock::new();
 
 #[inline]
@@ -91,22 +87,6 @@ pub fn wl_shm_format() -> wl_shm::Format {
 pub fn pixel_format() -> PixelFormat {
     debug_assert!(PIXEL_FORMAT.get().is_some());
     *PIXEL_FORMAT.get().unwrap_or(&PixelFormat::Xrgb)
-}
-
-#[inline]
-pub fn wake_poll() {
-    debug_assert!(POLL_WAKER.get().is_some());
-
-    // SAFETY: POLL_WAKER is set up in setup_signals_and_pipe, which is called early in main
-    // and panics if it fails. By the time anyone calls this function, POLL_WAKER will certainly
-    // already have been initialized.
-
-    if let Err(e) = rustix::io::write(
-        unsafe { POLL_WAKER.get().unwrap_unchecked() },
-        &1u64.to_ne_bytes(), // eventfd demands we write 8 bytes at once
-    ) {
-        error!("failed to write to eventfd file descriptor: {e}");
-    }
 }
 
 extern "C" fn signal_handler(_s: libc::c_int) {
@@ -129,7 +109,7 @@ fn main() -> Result<(), String> {
         .expect("failed to configure rayon global thread pool");
 
     let listener = SocketWrapper::new()?;
-    let wake = setup_signals_and_eventfd();
+    setup_signals();
 
     let conn = Connection::connect_to_env().expect("failed to connect to the wayland server");
     // Enumerate the list of globals to get the protocols the server implements.
@@ -173,9 +153,8 @@ fn main() -> Result<(), String> {
         let events = {
             let connection_fd = read_guard.connection_fd();
             let mut fds = [
+                PollFd::new(&connection_fd, PollFlags::IN | PollFlags::OUT),
                 PollFd::new(&listener.0, PollFlags::IN),
-                PollFd::new(&connection_fd, PollFlags::IN | PollFlags::RDBAND),
-                PollFd::new(&wake, PollFlags::IN),
             ];
 
             match poll(&mut fds, -1) {
@@ -186,10 +165,10 @@ fn main() -> Result<(), String> {
                 },
             };
 
-            [fds[0].revents(), fds[1].revents(), fds[2].revents()]
+            [fds[0].revents(), fds[1].revents()]
         };
 
-        if !events[1].is_empty() {
+        if events[0].contains(PollFlags::IN) {
             match read_guard.read() {
                 Ok(_) => {
                     event_queue
@@ -212,7 +191,7 @@ fn main() -> Result<(), String> {
             drop(read_guard);
         }
 
-        if !events[0].is_empty() {
+        if !events[1].is_empty() {
             match listener.0.accept() {
                 Ok((stream, _adr)) => daemon.recv_socket_msg(stream),
                 Err(e) => match e.kind() {
@@ -221,20 +200,13 @@ fn main() -> Result<(), String> {
                 },
             }
         }
-
-        if !events[2].is_empty() {
-            if let Err(e) = rustix::io::read(&wake, &mut buf) {
-                error!("error reading pipe file descriptor: {e}");
-            }
-        }
     }
 
     info!("Goodbye!");
     Ok(())
 }
 
-/// Returns the file descriptor we should install in the poll handler
-fn setup_signals_and_eventfd() -> OwnedFd {
+fn setup_signals() {
     // C data structure, expected to be zeroed out.
     let mut sigaction: libc::sigaction = unsafe { std::mem::zeroed() };
     unsafe { libc::sigemptyset(std::ptr::addr_of_mut!(sigaction.sa_mask)) };
@@ -255,13 +227,6 @@ fn setup_signals_and_eventfd() -> OwnedFd {
             error!("Failed to install signal handler!")
         }
     }
-
-    let fd: OwnedFd = rustix::event::eventfd(0, rustix::event::EventfdFlags::empty())
-        .expect("failed to create event fd");
-    POLL_WAKER
-        .set(fd.try_clone().expect("failed to clone event fd"))
-        .expect("failed to set POLL_WAKER");
-    fd
 }
 
 /// This is a wrapper that makes sure to delete the socket when it is dropped
@@ -413,7 +378,6 @@ impl Daemon {
                             wallpaper.clear(color);
                             wallpaper.draw();
                         }
-                        wake_poll();
                     }) {
                     Ok(_) => Answer::Ok,
                     Err(e) => Answer::Err(format!("failed to spawn `clear` thread: {e}")),

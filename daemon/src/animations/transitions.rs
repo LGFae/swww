@@ -80,7 +80,7 @@ impl Transition {
         }
     }
 
-    fn send_frame(&mut self, now: &mut Instant) {
+    fn updt_wallpapers(&mut self, now: &mut Instant) {
         let fps = self.fps;
         let mut i = 0;
         while i < self.wallpapers.len() {
@@ -94,7 +94,6 @@ impl Transition {
         }
         let timeout = fps.saturating_sub(now.elapsed());
         spin_sleep::sleep(timeout);
-        crate::wake_poll();
         *now = Instant::now();
     }
 
@@ -131,7 +130,7 @@ impl Transition {
                 wallpaper.draw();
             }
 
-            self.send_frame(&mut now);
+            self.updt_wallpapers(&mut now);
         }
     }
 
@@ -149,7 +148,7 @@ impl Transition {
                     *old = (*old as f64 * (1.0 - step) + *new as f64 * step) as u8;
                 }
             });
-            self.send_frame(&mut now);
+            self.updt_wallpapers(&mut now);
             step = seq.now() as f64;
             seq.advance_to(start.elapsed().as_secs_f64());
         }
@@ -211,7 +210,7 @@ impl Transition {
                     change_byte(channels, step, old, new);
                 }
             });
-            self.send_frame(&mut now);
+            self.updt_wallpapers(&mut now);
 
             offset = seq.now() as f64;
             seq.advance_to(start.elapsed().as_secs_f64());
@@ -263,7 +262,7 @@ impl Transition {
                     change_byte(channels, step, old, new);
                 }
             });
-            self.send_frame(&mut now);
+            self.updt_wallpapers(&mut now);
 
             offset = seq.now() as f64;
             seq.advance_to(start.elapsed().as_secs_f64());
@@ -307,7 +306,7 @@ impl Transition {
                     change_byte(channels, step, old, new);
                 }
             });
-            self.send_frame(&mut now);
+            self.updt_wallpapers(&mut now);
 
             dist_center = seq.now();
             seq.advance_to(start.elapsed().as_secs_f64());
@@ -349,7 +348,7 @@ impl Transition {
                     change_byte(channels, step, old, new);
                 }
             });
-            self.send_frame(&mut now);
+            self.updt_wallpapers(&mut now);
 
             dist_center = seq.now();
             seq.advance_to(start.elapsed().as_secs_f64());
