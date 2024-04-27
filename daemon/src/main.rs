@@ -140,7 +140,6 @@ fn main() -> Result<(), String> {
         }
     }
     info!("Initialization succeeded! Starting main loop...");
-    let mut buf = [0; 8];
     while !should_daemon_exit() {
         // Process wayland events
         event_queue
