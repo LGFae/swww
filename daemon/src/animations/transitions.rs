@@ -45,7 +45,7 @@ impl Transition {
             dimensions,
             transition_type: transition.transition_type,
             duration: transition.duration,
-            step: transition.step,
+            step: transition.step.get(),
             fps: Duration::from_nanos(1_000_000_000 / transition.fps as u64),
             angle: transition.angle,
             pos: transition.pos.clone(),
@@ -67,6 +67,7 @@ impl Transition {
     pub(super) fn execute(mut self, new_img: &[u8]) {
         debug!("Starting transitions");
         match self.transition_type {
+            TransitionType::None => self.none(new_img),
             TransitionType::Simple => self.simple(new_img),
             TransitionType::Wipe => self.wipe(new_img),
             TransitionType::Grow => self.grow(new_img),
@@ -102,6 +103,16 @@ impl Transition {
             keyframes![(start, 0.0, self.bezier), (end, self.duration, self.bezier)],
             Instant::now(),
         )
+    }
+
+    fn none(&mut self, new: &[u8]) {
+        for wallpaper in self.wallpapers.iter() {
+            wallpaper.canvas_change(|canvas| canvas.copy_from_slice(new));
+        }
+
+        for wallpaper in self.wallpapers.iter() {
+            wallpaper.draw();
+        }
     }
 
     fn simple(&mut self, new_img: &[u8]) {
@@ -379,6 +390,13 @@ impl Transition {
 
 #[inline(always)]
 fn change_byte(channels: usize, step: u8, old: &mut [u8], new: &[u8]) {
+    // this check improves the assembly generation slightly, by making the compiler not assume
+    // channels can be arbitrarly large
+    if channels != 3 && channels != 4 {
+        log::error!("weird channel size of: {channels}");
+        return;
+    }
+
     for i in 0..channels {
         let old = unsafe { old.get_unchecked_mut(i) };
         let new = unsafe { new.get_unchecked(i) };

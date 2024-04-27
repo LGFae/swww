@@ -80,8 +80,7 @@ swww-img
 :- _outer_
 :- _random_
 
-	_none_ is an alias to _simple_, that also sets the _transition-step_ to
-	255. This has the effect of the transition completing instantly.
+	_none_ will complete the transition instantly.
 
 	_fade_ is like _simple_ but uses bezier curves while fading the image, its a
 	more polished looking version of _simple_ with less artifacts

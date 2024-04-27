@@ -339,7 +339,7 @@ pub struct Img {
         default_value = "90",
         default_value_if("transition_type", "simple", "2")
     )]
-    pub transition_step: u8,
+    pub transition_step: std::num::NonZeroU8,
 
     ///How long the transition takes to complete in seconds.
     ///

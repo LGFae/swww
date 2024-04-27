@@ -2,7 +2,7 @@ use bitcode::{Decode, Encode};
 use std::{
     fmt,
     io::{BufReader, BufWriter, Read, Write},
-    num::NonZeroI32,
+    num::{NonZeroI32, NonZeroU8},
     os::unix::net::UnixStream,
     path::PathBuf,
     time::Duration,
@@ -216,6 +216,7 @@ impl fmt::Display for BgInfo {
 
 #[derive(Clone, Copy, Decode, Encode)]
 pub enum TransitionType {
+    None,
     Simple,
     Fade,
     Outer,
@@ -228,7 +229,7 @@ pub enum TransitionType {
 pub struct Transition {
     pub transition_type: TransitionType,
     pub duration: f32,
-    pub step: u8,
+    pub step: NonZeroU8,
     pub fps: u16,
     pub angle: f64,
     pub pos: Position,

@@ -372,7 +372,7 @@ fn restore_from_cache(requested_outputs: &[String]) -> Result<(), String> {
             fill_color: [0, 0, 0],
             filter: cli::Filter::Lanczos3,
             transition_type: cli::TransitionType::None,
-            transition_step: u8::MAX,
+            transition_step: std::num::NonZeroU8::MAX,
             transition_duration: 0.0,
             transition_fps: 30,
             transition_angle: 0.0,
