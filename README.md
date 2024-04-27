@@ -11,6 +11,8 @@
    * xdg-output
  - [lz4](https://github.com/lz4/lz4) (for compressing frames when animating)
 
+**Note that this means `swww` will not run on Gnome, because it does not implement the `wlr-layer-shell` protocol**.
+
 ## Build
 
 <a href="https://repology.org/project/swww/versions">
