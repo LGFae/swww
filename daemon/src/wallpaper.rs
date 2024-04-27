@@ -283,10 +283,23 @@ impl Wallpaper {
             }
         }
 
-        if (inner.width, inner.height, inner.scale_factor)
-            == (staging.width, staging.height, staging.scale_factor)
-        {
-            // just the name and descriptions changed
+        if staging.scale_factor != inner.scale_factor {
+            match staging.scale_factor {
+                Scale::Whole(i) => {
+                    // unset destination
+                    self.wp_viewport.set_destination(-1, -1);
+                    self.wl_surface.set_buffer_scale(i.get());
+                }
+                Scale::Fractional(_) => {
+                    self.wl_surface.set_buffer_scale(1);
+                    self.wp_viewport
+                        .set_destination(staging.width.get(), staging.height.get());
+                }
+            }
+        }
+
+        if (inner.width, inner.height) == (staging.width, staging.height) {
+            inner.scale_factor = staging.scale_factor;
             inner.name = staging.name.clone();
             inner.desc = staging.desc.clone();
             return;
@@ -300,17 +313,6 @@ impl Wallpaper {
 
         self.stop_animations();
 
-        match scale_factor {
-            Scale::Whole(i) => {
-                // unset destination
-                self.wp_viewport.set_destination(-1, -1);
-                self.wl_surface.set_buffer_scale(i.get());
-            }
-            Scale::Fractional(_) => {
-                self.wl_surface.set_buffer_scale(1);
-                self.wp_viewport.set_destination(width.get(), height.get());
-            }
-        }
         self.layer_surface
             .set_size(width.get() as u32, height.get() as u32);
 
