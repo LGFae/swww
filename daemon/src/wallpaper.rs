@@ -210,12 +210,10 @@ impl Wallpaper {
                 lock.width = lock.height;
                 lock.height = t;
             }
-        } else {
-            if lock.width < lock.height {
-                let t = lock.width;
-                lock.width = lock.height;
-                lock.height = t;
-            }
+        } else if lock.width < lock.height {
+            let t = lock.width;
+            lock.width = lock.height;
+            lock.height = t;
         }
     }
 
