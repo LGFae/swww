@@ -32,14 +32,12 @@ pub fn store_animation_frames(animation: &Animation) -> Result<(), String> {
     let mut filepath = cache_dir()?;
     filepath.push(&filename);
 
-    let bytes = bitcode::encode(animation);
+    let mut bytes = Vec::new();
+    animation.serialize(&mut bytes);
 
     if !filepath.is_file() {
-        let file = File::create(filepath).map_err(|e| e.to_string())?;
-
-        let mut writer = BufWriter::new(file);
-        writer
-            .write_all(&bytes)
+        let mut file = File::create(filepath).map_err(|e| e.to_string())?;
+        file.write_all(&bytes)
             .map_err(|e| format!("failed to write cache: {e}"))
     } else {
         Ok(())
@@ -62,15 +60,12 @@ pub fn load_animation_frames(
 
     for entry in read_dir.into_iter().flatten() {
         if entry.path() == filepath {
-            let file = File::open(&filepath).map_err(|e| e.to_string())?;
-            let mut buf_reader = BufReader::new(file);
+            let mut file = File::open(&filepath).map_err(|e| e.to_string())?;
             let mut buf = Vec::new();
-            buf_reader
-                .read_to_end(&mut buf)
+            file.read_to_end(&mut buf)
                 .map_err(|e| format!("failed to read file `{filepath:?}`: {e}"))?;
 
-            let frames: Animation =
-                bitcode::decode(&buf).expect("failed to decode cached animations");
+            let (frames, _) = Animation::deserialize(&buf);
             return Ok(Some(frames));
         }
     }

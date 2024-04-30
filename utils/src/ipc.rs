@@ -10,13 +10,13 @@ use std::{
 
 use crate::{cache, compression::BitPack};
 
-#[derive(Clone, PartialEq, Decode, Encode)]
+#[derive(Clone, PartialEq)]
 pub enum Coord {
     Pixel(f32),
     Percent(f32),
 }
 
-#[derive(Clone, PartialEq, Decode, Encode)]
+#[derive(Clone, PartialEq)]
 pub struct Position {
     pub x: Coord,
     pub y: Coord,
@@ -89,15 +89,16 @@ impl fmt::Display for BgImg {
 }
 
 #[derive(Clone, Copy, Debug, Encode, Decode, PartialEq)]
+#[repr(u8)]
 pub enum PixelFormat {
     /// No swap, can copy directly onto WlBuffer
-    Bgr,
+    Bgr = 0,
     /// Swap R and B channels at client, can copy directly onto WlBuffer
-    Rgb,
+    Rgb = 1,
     /// No swap, must extend pixel with an extra byte when copying
-    Xbgr,
+    Xbgr = 2,
     /// Swap R and B channels at client, must extend pixel with an extra byte when copying
-    Xrgb,
+    Xrgb = 3,
 }
 
 impl PixelFormat {
@@ -214,18 +215,18 @@ impl fmt::Display for BgInfo {
     }
 }
 
-#[derive(Clone, Copy, Decode, Encode)]
+#[repr(u8)]
+#[derive(Clone, Copy)]
 pub enum TransitionType {
-    None,
-    Simple,
-    Fade,
-    Outer,
-    Wipe,
-    Grow,
-    Wave,
+    Simple = 0,
+    Fade = 1,
+    Outer = 2,
+    Wipe = 3,
+    Grow = 4,
+    Wave = 5,
+    None = 6,
 }
 
-#[derive(Decode, Encode)]
 pub struct Transition {
     pub transition_type: TransitionType,
     pub duration: f32,
@@ -238,19 +239,121 @@ pub struct Transition {
     pub invert_y: bool,
 }
 
-#[derive(Decode, Encode)]
+impl Transition {
+    fn serialize(&self, buf: &mut Vec<u8>) {
+        let Self {
+            transition_type,
+            duration,
+            step,
+            fps,
+            angle,
+            pos,
+            bezier,
+            wave,
+            invert_y,
+        } = self;
+
+        buf.push(*transition_type as u8);
+        buf.extend(duration.to_ne_bytes());
+        buf.push(step.get());
+        buf.extend(fps.to_ne_bytes());
+        buf.extend(angle.to_ne_bytes());
+        match pos.x {
+            Coord::Pixel(f) => {
+                buf.push(0);
+                buf.extend(f.to_ne_bytes());
+            }
+            Coord::Percent(f) => {
+                buf.push(1);
+                buf.extend(f.to_ne_bytes());
+            }
+        }
+        match pos.y {
+            Coord::Pixel(f) => {
+                buf.push(0);
+                buf.extend(f.to_ne_bytes());
+            }
+            Coord::Percent(f) => {
+                buf.push(1);
+                buf.extend(f.to_ne_bytes());
+            }
+        }
+        buf.extend(bezier.0.to_ne_bytes());
+        buf.extend(bezier.1.to_ne_bytes());
+        buf.extend(bezier.2.to_ne_bytes());
+        buf.extend(bezier.3.to_ne_bytes());
+        buf.extend(wave.0.to_ne_bytes());
+        buf.extend(wave.1.to_ne_bytes());
+        buf.push(*invert_y as u8);
+    }
+
+    fn deserialize(bytes: &[u8]) -> Self {
+        assert!(bytes.len() > 50);
+        let transition_type = match bytes[0] {
+            0 => TransitionType::Simple,
+            1 => TransitionType::Fade,
+            2 => TransitionType::Outer,
+            3 => TransitionType::Wipe,
+            4 => TransitionType::Grow,
+            5 => TransitionType::Wave,
+            _ => TransitionType::None,
+        };
+        let duration = unsafe { bytes.as_ptr().add(1).cast::<f32>().read_unaligned() };
+        let step = NonZeroU8::new(bytes[5]).expect("received step of 0");
+        let fps = unsafe { bytes.as_ptr().add(6).cast::<u16>().read_unaligned() };
+        let angle = unsafe { bytes.as_ptr().add(8).cast::<f64>().read_unaligned() };
+        let pos = {
+            let x = if bytes[16] == 0 {
+                Coord::Pixel(unsafe { bytes.as_ptr().add(17).cast::<f32>().read_unaligned() })
+            } else {
+                Coord::Percent(unsafe { bytes.as_ptr().add(17).cast::<f32>().read_unaligned() })
+            };
+            let y = if bytes[21] == 0 {
+                Coord::Pixel(unsafe { bytes.as_ptr().add(22).cast::<f32>().read_unaligned() })
+            } else {
+                Coord::Percent(unsafe { bytes.as_ptr().add(22).cast::<f32>().read_unaligned() })
+            };
+            Position { x, y }
+        };
+
+        let bezier = (
+            unsafe { bytes.as_ptr().add(26).cast::<f32>().read_unaligned() },
+            unsafe { bytes.as_ptr().add(30).cast::<f32>().read_unaligned() },
+            unsafe { bytes.as_ptr().add(34).cast::<f32>().read_unaligned() },
+            unsafe { bytes.as_ptr().add(38).cast::<f32>().read_unaligned() },
+        );
+
+        let wave = (
+            unsafe { bytes.as_ptr().add(42).cast::<f32>().read_unaligned() },
+            unsafe { bytes.as_ptr().add(46).cast::<f32>().read_unaligned() },
+        );
+
+        let invert_y = bytes[50] != 0;
+
+        Self {
+            transition_type,
+            duration,
+            step,
+            fps,
+            angle,
+            pos,
+            bezier,
+            wave,
+            invert_y,
+        }
+    }
+}
+
 pub struct Clear {
     pub color: [u8; 3],
     pub outputs: Box<[String]>,
 }
 
-#[derive(Decode, Encode)]
 pub struct Img {
     pub path: String,
     pub img: Box<[u8]>,
 }
 
-#[derive(Decode, Encode)]
 pub struct Animation {
     pub animation: Box<[(BitPack, Duration)]>,
     pub path: String,
@@ -258,7 +361,76 @@ pub struct Animation {
     pub pixel_format: PixelFormat,
 }
 
-#[derive(Decode, Encode)]
+impl Animation {
+    pub(crate) fn serialize(&self, buf: &mut Vec<u8>) {
+        let Self {
+            animation,
+            path,
+            dimensions,
+            pixel_format,
+        } = self;
+
+        buf.extend((animation.len() as u32).to_ne_bytes());
+        for (bitpack, duration) in animation.iter() {
+            bitpack.serialize(buf);
+            buf.extend(duration.as_secs_f64().to_ne_bytes())
+        }
+        buf.extend((path.len() as u32).to_ne_bytes());
+        buf.extend(path.as_bytes());
+
+        buf.extend(dimensions.0.to_ne_bytes());
+        buf.extend(dimensions.1.to_ne_bytes());
+        buf.push(*pixel_format as u8);
+    }
+
+    pub(crate) fn deserialize(bytes: &[u8]) -> (Self, usize) {
+        let mut i = 0;
+        let animation_len =
+            unsafe { bytes.as_ptr().add(i).cast::<u32>().read_unaligned() } as usize;
+        i += 4;
+        let mut animation = Vec::with_capacity(animation_len);
+        for _ in 0..animation_len {
+            let (anim, offset) = BitPack::deserialize(&bytes[i..]);
+            i += offset;
+            let duration = Duration::from_secs_f64(unsafe {
+                bytes.as_ptr().add(i).cast::<f64>().read_unaligned()
+            });
+            i += 8;
+            animation.push((anim, duration));
+        }
+
+        let path_size = unsafe { bytes.as_ptr().add(i).cast::<u32>().read_unaligned() } as usize;
+        i += 4;
+        let path = std::str::from_utf8(&bytes[i..i + path_size])
+            .unwrap()
+            .to_string();
+        i += path_size;
+
+        let dimensions = (
+            unsafe { bytes.as_ptr().add(i).cast::<u32>().read_unaligned() },
+            unsafe { bytes.as_ptr().add(i + 4).cast::<u32>().read_unaligned() },
+        );
+        i += 8;
+        let pixel_format = match bytes[i] {
+            0 => PixelFormat::Bgr,
+            1 => PixelFormat::Rgb,
+            2 => PixelFormat::Xbgr,
+            _ => PixelFormat::Xrgb,
+        };
+        i += 1;
+
+        (
+            Self {
+                animation: animation.into(),
+                path,
+                dimensions,
+                pixel_format,
+            },
+            i,
+        )
+    }
+}
+
 pub struct AnimationRequest {
     pub animations: Box<[Animation]>,
     pub outputs: Box<[Box<[String]>]>,
@@ -294,7 +466,6 @@ impl AnimationRequestBuilder {
     }
 }
 
-#[derive(Decode, Encode)]
 pub struct ImageRequest {
     pub transition: Transition,
     pub imgs: Box<[Img]>,
@@ -333,19 +504,85 @@ impl ImageRequestBuilder {
     }
 }
 
-#[derive(Decode, Encode)]
 pub enum Request {
-    Animation(AnimationRequest),
-    Clear(Clear),
     Ping,
-    Kill,
     Query,
+    Clear(Clear),
     Img(ImageRequest),
+    Animation(AnimationRequest),
+    Kill,
 }
 
 impl Request {
     pub fn send(&self, stream: &UnixStream) -> Result<(), String> {
-        let bytes = bitcode::encode(self);
+        let now = std::time::Instant::now();
+        let bytes: Vec<u8> = match self {
+            Self::Ping => vec![0],
+            Self::Query => vec![1],
+            Self::Clear(clear) => {
+                let mut buf = Vec::with_capacity(64);
+                buf.push(2);
+                buf.push(clear.outputs.len() as u8); // we assume someone does not have more than
+                                                     // 255 monitors. Seems reasonable
+                for output in clear.outputs.iter() {
+                    buf.extend((output.len() as u32).to_ne_bytes());
+                    buf.extend(output.as_bytes());
+                }
+                buf.extend(clear.color);
+                buf
+            }
+            Self::Img(img) => {
+                let ImageRequest {
+                    transition,
+                    imgs,
+                    outputs,
+                } = img;
+
+                let mut buf = Vec::with_capacity(imgs[0].img.len() + 1024);
+                buf.push(3);
+                transition.serialize(&mut buf);
+                buf.push(imgs.len() as u8); // we assume someone does not have more than 255
+
+                for (img, output) in imgs.iter().zip(outputs.iter()) {
+                    let Img { path, img } = img;
+                    buf.extend((path.len() as u32).to_ne_bytes());
+                    buf.extend(path.as_bytes());
+
+                    buf.extend((img.len() as u32).to_ne_bytes());
+                    buf.extend(img.iter());
+
+                    buf.push(output.len() as u8);
+                    for output in output.iter() {
+                        buf.extend((output.len() as u32).to_ne_bytes());
+                        buf.extend(output.as_bytes());
+                    }
+                }
+
+                buf
+            }
+            Self::Animation(anim) => {
+                let AnimationRequest {
+                    animations,
+                    outputs,
+                } = anim;
+                let mut buf = Vec::with_capacity(1 << 20);
+                buf.push(4);
+                buf.push(animations.len() as u8);
+
+                for (animation, output) in animations.iter().zip(outputs.iter()) {
+                    animation.serialize(&mut buf);
+                    buf.push(output.len() as u8);
+                    for output in output.iter() {
+                        buf.extend((output.len() as u32).to_ne_bytes());
+                        buf.extend(output.as_bytes());
+                    }
+                }
+
+                buf
+            }
+            Self::Kill => vec![5],
+        };
+        println!("Send encode time: {}us, size: {}", now.elapsed().as_micros(), bytes.len());
         std::thread::scope(|s| {
             if let Self::Animation(AnimationRequest { animations, .. }) = self {
                 s.spawn(|| {
@@ -383,7 +620,117 @@ impl Request {
     #[must_use]
     #[inline]
     pub fn receive(bytes: &[u8]) -> Self {
-        bitcode::decode(bytes).expect("failed to decode request")
+        let now = std::time::Instant::now();
+        let ret = match bytes[0] {
+            0 => Self::Ping,
+            1 => Self::Query,
+            2 => {
+                let len = bytes[1] as usize;
+                let mut outputs = Vec::with_capacity(len);
+                let mut i = 2;
+                for _ in 0..len {
+                    let str_size =
+                        unsafe { bytes.as_ptr().add(i).cast::<u32>().read_unaligned() } as usize;
+                    i += 4;
+                    outputs.push(
+                        std::str::from_utf8(&bytes[i..i + str_size])
+                            .unwrap()
+                            .to_string(),
+                    );
+                    i += str_size;
+                }
+                let color = [bytes[i], bytes[i + 1], bytes[i + 2]];
+                Self::Clear(Clear {
+                    color,
+                    outputs: outputs.into(),
+                })
+            }
+            3 => {
+                let transition = Transition::deserialize(&bytes[1..]);
+                let len = bytes[52] as usize;
+
+                let mut imgs = Vec::with_capacity(len);
+                let mut outputs = Vec::with_capacity(len);
+
+                let mut i = 53;
+                for _ in 0..len {
+                    let path_size =
+                        unsafe { bytes.as_ptr().add(i).cast::<u32>().read_unaligned() } as usize;
+                    i += 4;
+                    let path = std::str::from_utf8(&bytes[i..i + path_size])
+                        .unwrap()
+                        .to_string();
+                    i += path_size;
+
+                    let img_size =
+                        unsafe { bytes.as_ptr().add(i).cast::<u32>().read_unaligned() } as usize;
+                    i += 4;
+                    let img = bytes[i..i + img_size].into();
+                    i += img_size;
+
+                    imgs.push(Img { path, img });
+
+                    let n_outputs = bytes[i] as usize;
+                    i += 1;
+                    let mut out = Vec::with_capacity(n_outputs);
+                    for _ in 0..n_outputs {
+                        let str_size =
+                            unsafe { bytes.as_ptr().add(i).cast::<u32>().read_unaligned() }
+                                as usize;
+                        i += 4;
+                        out.push(
+                            std::str::from_utf8(&bytes[i..i + str_size])
+                                .unwrap()
+                                .to_string(),
+                        );
+                        i += str_size;
+                    }
+                    outputs.push(out.into());
+                }
+
+                Self::Img(ImageRequest {
+                    transition,
+                    imgs: imgs.into(),
+                    outputs: outputs.into(),
+                })
+            }
+            4 => {
+                let len = bytes[1] as usize;
+                let mut animations = Vec::with_capacity(len);
+                let mut outputs = Vec::with_capacity(len);
+
+                let mut i = 2;
+                for _ in 0..len {
+                    let (animation, offset) = Animation::deserialize(&bytes[i..]);
+                    i += offset;
+                    animations.push(animation);
+                    let n_outputs = bytes[i] as usize;
+                    i += 1;
+                    let mut out = Vec::with_capacity(n_outputs);
+                    for _ in 0..n_outputs {
+                        let str_size =
+                            unsafe { bytes.as_ptr().add(i).cast::<u32>().read_unaligned() }
+                                as usize;
+                        i += 4;
+                        out.push(
+                            std::str::from_utf8(&bytes[i..i + str_size])
+                                .unwrap()
+                                .to_string(),
+                        );
+                        i += str_size;
+                    }
+                    outputs.push(out.into());
+                }
+
+                Self::Animation(AnimationRequest {
+                    animations: animations.into(),
+                    outputs: outputs.into(),
+                })
+            }
+            _ => Self::Kill,
+        };
+        println!("Receive decode time: {}us", now.elapsed().as_micros());
+        ret
     }
 }
 
