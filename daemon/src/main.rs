@@ -9,6 +9,7 @@ mod wallpaper;
 use log::{debug, error, info, warn, LevelFilter};
 use rustix::{
     event::{poll, PollFd, PollFlags},
+    fd::OwnedFd,
     path::Arg,
 };
 use simplelog::{ColorChoice, TermLogger, TerminalMode, ThreadLogMode};
@@ -24,7 +25,6 @@ use wayland_protocols::wp::{
 use std::{
     fs,
     num::NonZeroI32,
-    os::unix::net::{UnixListener, UnixStream},
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -200,8 +200,8 @@ fn main() -> Result<(), String> {
         }
 
         if !events[1].is_empty() {
-            match listener.0.accept() {
-                Ok((stream, _adr)) => daemon.recv_socket_msg(stream),
+            match rustix::net::accept(&listener.0) {
+                Ok(stream) => daemon.recv_socket_msg(stream),
                 Err(e) => match e.kind() {
                     std::io::ErrorKind::WouldBlock => (),
                     _ => return Err(format!("failed to accept incoming connection: {e}")),
@@ -238,7 +238,7 @@ fn setup_signals() {
 }
 
 /// This is a wrapper that makes sure to delete the socket when it is dropped
-struct SocketWrapper(UnixListener);
+struct SocketWrapper(OwnedFd);
 impl SocketWrapper {
     fn new() -> Result<Self, String> {
         let socket_addr = get_socket_path();
@@ -271,17 +271,28 @@ impl SocketWrapper {
             }
         }
 
-        let listener = match UnixListener::bind(socket_addr.clone()) {
-            Ok(address) => address,
-            Err(e) => return Err(format!("couldn't bind socket: {e}")),
-        };
+        let socket = rustix::net::socket_with(
+            rustix::net::AddressFamily::UNIX,
+            rustix::net::SocketType::STREAM,
+            rustix::net::SocketFlags::CLOEXEC.union(rustix::net::SocketFlags::NONBLOCK),
+            None,
+        )
+        .expect("failed to create socket file descriptor");
+
+        rustix::net::bind_unix(
+            &socket,
+            &rustix::net::SocketAddrUnix::new(&socket_addr).unwrap(),
+        )
+        .unwrap();
+
+        rustix::net::listen(&socket, 0).unwrap();
 
         debug!(
             "Made socket in {:?} and initialized logger. Starting daemon...",
-            listener.local_addr().unwrap() //this should always work if the socket connected correctly
+            socket_addr
         );
 
-        Ok(Self(listener))
+        Ok(Self(socket))
     }
 }
 
@@ -350,7 +361,7 @@ impl Daemon {
         }
     }
 
-    fn recv_socket_msg(&mut self, stream: UnixStream) {
+    fn recv_socket_msg(&mut self, stream: OwnedFd) {
         let now = std::time::Instant::now();
         let bytes = match utils::ipc::read_socket(&stream) {
             Ok(bytes) => bytes,

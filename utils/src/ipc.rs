@@ -1,10 +1,13 @@
 use std::{
     fmt,
-    io::{BufReader, BufWriter, Read, Write},
     num::{NonZeroI32, NonZeroU8},
-    os::unix::net::UnixStream,
     path::PathBuf,
     time::Duration,
+};
+
+use rustix::{
+    fd::OwnedFd,
+    net::{self, RecvFlags},
 };
 
 use crate::{cache, compression::BitPack};
@@ -618,7 +621,7 @@ pub enum Request {
 }
 
 impl Request {
-    pub fn send(&self, stream: &UnixStream) -> Result<(), String> {
+    pub fn send(&self, stream: &OwnedFd) -> Result<(), String> {
         let now = std::time::Instant::now();
         let bytes: Vec<u8> = match self {
             Self::Ping => vec![0],
@@ -704,24 +707,29 @@ impl Request {
                     }
                 });
             }
-            let mut writer = BufWriter::new(stream);
-            if let Err(e) = writer.write_all(&bytes.len().to_ne_bytes()) {
+            if let Err(e) = net::send(stream, &bytes.len().to_ne_bytes(), net::SendFlags::empty()) {
                 return Err(format!("failed to write serialized request's length: {e}"));
             }
-            if let Err(e) = writer.write_all(&bytes) {
-                Err(format!("failed to write serialized request: {e}"))
-            } else {
-                if let Self::Img(ImageRequest { imgs, outputs, .. }) = self {
-                    for (Img { path, .. }, outputs) in imgs.iter().zip(outputs.iter()) {
-                        for output in outputs.iter() {
-                            if let Err(e) = super::cache::store(output, path) {
-                                eprintln!("ERROR: failed to store cache: {e}");
-                            }
+            loop {
+                let mut i = 0;
+                match net::send(stream, &bytes[i..], net::SendFlags::empty()) {
+                    Ok(written) => i += written,
+                    Err(e) => return Err(format!("failed to write serialized request: {e}")),
+                }
+                if i == bytes.len() {
+                    break;
+                }
+            }
+            if let Self::Img(ImageRequest { imgs, outputs, .. }) = self {
+                for (Img { path, .. }, outputs) in imgs.iter().zip(outputs.iter()) {
+                    for output in outputs.iter() {
+                        if let Err(e) = super::cache::store(output, path) {
+                            eprintln!("ERROR: failed to store cache: {e}");
                         }
                     }
                 }
-                Ok(())
             }
+            Ok(())
         })
     }
 
@@ -850,7 +858,7 @@ pub enum Answer {
 }
 
 impl Answer {
-    pub fn send(&self, stream: &UnixStream) -> Result<(), String> {
+    pub fn send(&self, stream: &OwnedFd) -> Result<(), String> {
         let bytes = match self {
             Self::Ok => vec![0],
             Self::Ping(true) => vec![1],
@@ -875,15 +883,20 @@ impl Answer {
             }
         };
 
-        let mut writer = BufWriter::new(stream);
-        if let Err(e) = writer.write_all(&bytes.len().to_ne_bytes()) {
+        if let Err(e) = net::send(stream, &bytes.len().to_ne_bytes(), net::SendFlags::empty()) {
             return Err(format!("failed to write serialized answer's length: {e}"));
         }
-        if let Err(e) = writer.write_all(&bytes) {
-            Err(format!("Failed to write serialized answer: {e}"))
-        } else {
-            Ok(())
+        loop {
+            let mut i = 0;
+            match net::send(stream, &bytes[i..], net::SendFlags::empty()) {
+                Ok(written) => i += written,
+                Err(e) => return Err(format!("failed to write serialized answer: {e}")),
+            }
+            if i == bytes.len() {
+                break;
+            }
         }
+        Ok(())
     }
 
     #[must_use]
@@ -919,14 +932,17 @@ impl Answer {
     }
 }
 
-pub fn read_socket(stream: &UnixStream) -> Result<Vec<u8>, String> {
-    let mut reader = BufReader::new(stream);
+pub fn read_socket(stream: &OwnedFd) -> Result<Vec<u8>, String> {
     let mut buf = vec![0; 8];
 
     let mut tries = 0;
     loop {
-        match reader.read_exact(&mut buf[0..std::mem::size_of::<usize>()]) {
-            Ok(()) => break,
+        match net::recv(
+            stream,
+            &mut buf[0..std::mem::size_of::<usize>()],
+            RecvFlags::WAITALL,
+        ) {
+            Ok(_) => break,
             Err(e) => {
                 if e.kind() == std::io::ErrorKind::WouldBlock && tries < 5 {
                     std::thread::sleep(Duration::from_millis(1));
@@ -941,7 +957,7 @@ pub fn read_socket(stream: &UnixStream) -> Result<Vec<u8>, String> {
     buf.clear();
     buf.resize(len, 0);
 
-    if let Err(e) = reader.read_exact(&mut buf) {
+    if let Err(e) = net::recv(stream, &mut buf, RecvFlags::WAITALL) {
         return Err(format!("Failed to read request: {e}"));
     }
     Ok(buf)
@@ -1005,22 +1021,30 @@ pub fn get_cache_path() -> Result<PathBuf, String> {
 ///
 /// * `tries` -  how many times to attempt the connection
 /// * `interval` - how long to wait between attempts, in milliseconds
-pub fn connect_to_socket(addr: &PathBuf, tries: u8, interval: u64) -> Result<UnixStream, String> {
+pub fn connect_to_socket(addr: &PathBuf, tries: u8, interval: u64) -> Result<OwnedFd, String> {
+    let socket = rustix::net::socket_with(
+        rustix::net::AddressFamily::UNIX,
+        rustix::net::SocketType::STREAM,
+        rustix::net::SocketFlags::CLOEXEC,
+        None,
+    )
+    .expect("failed to create socket file descriptor");
+    let addr = net::SocketAddrUnix::new(addr).unwrap();
     //Make sure we try at least once
     let tries = if tries == 0 { 1 } else { tries };
     let mut error = None;
     for _ in 0..tries {
-        match UnixStream::connect(addr) {
-            Ok(socket) => {
-                if let Err(e) = socket.set_nonblocking(false) {
-                    return Err(format!("Failed to set blocking connection: {e}"));
-                }
+        match net::connect_unix(&socket, &addr) {
+            Ok(()) => {
                 #[cfg(debug_assertions)]
                 let timeout = Duration::from_secs(30); //Some operations take a while to respond in debug mode
                 #[cfg(not(debug_assertions))]
                 let timeout = Duration::from_secs(5);
-
-                if let Err(e) = socket.set_read_timeout(Some(timeout)) {
+                if let Err(e) = net::sockopt::set_socket_timeout(
+                    &socket,
+                    net::sockopt::Timeout::Recv,
+                    Some(timeout),
+                ) {
                     return Err(format!("failed to set read timeout for socket: {e}"));
                 }
 
