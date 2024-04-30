@@ -720,8 +720,7 @@ impl Request {
 
             let mmap = if !bytes.is_empty() {
                 socket_msg[8..].copy_from_slice(&(bytes.len() as u64).to_ne_bytes());
-                let shm_file = create_shm_fd().unwrap();
-                let mut mmap = Mmap::new(shm_file, bytes.len());
+                let mut mmap = Mmap::create(bytes.len());
                 mmap.as_mut().copy_from_slice(&bytes);
                 Some(mmap)
             } else {
@@ -924,8 +923,7 @@ impl Answer {
 
         let mmap = if !bytes.is_empty() {
             socket_msg[8..].copy_from_slice(&(bytes.len() as u64).to_ne_bytes());
-            let shm_file = create_shm_fd().unwrap();
-            let mut mmap = Mmap::new(shm_file, bytes.len());
+            let mut mmap = Mmap::create(bytes.len());
             mmap.as_mut().copy_from_slice(&bytes);
             Some(mmap)
         } else {
@@ -1024,7 +1022,7 @@ pub fn read_socket(stream: &OwnedFd) -> Result<SocketMsg, String> {
             net::RecvAncillaryMessage::ScmRights(mut iter) => iter.next().unwrap(),
             _ => panic!("malformed ancillary message"),
         };
-        Some(Mmap::new(shm_file, len))
+        Some(Mmap::from_fd(shm_file, len))
     };
     Ok(SocketMsg { code, shm })
 }
@@ -1139,7 +1137,9 @@ impl Mmap {
     const PROT: ProtFlags = ProtFlags::WRITE.union(ProtFlags::READ);
     const FLAGS: MapFlags = MapFlags::SHARED;
 
-    fn new(fd: OwnedFd, len: usize) -> Self {
+    fn create(len: usize) -> Self {
+        let fd = create_shm_fd().unwrap();
+
         loop {
             match rustix::fs::ftruncate(&fd, len as u64) {
                 Err(Errno::INTR) => continue,
@@ -1147,6 +1147,12 @@ impl Mmap {
             }
         }
 
+        let ptr =
+            unsafe { mmap(std::ptr::null_mut(), len, Self::PROT, Self::FLAGS, &fd, 0).unwrap() };
+        Self { fd, ptr, len }
+    }
+
+    fn from_fd(fd: OwnedFd, len: usize) -> Self {
         let ptr =
             unsafe { mmap(std::ptr::null_mut(), len, Self::PROT, Self::FLAGS, &fd, 0).unwrap() };
         Self { fd, ptr, len }
