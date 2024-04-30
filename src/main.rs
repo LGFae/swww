@@ -65,7 +65,7 @@ fn main() -> Result<(), String> {
         let socket = connect_to_socket(&get_socket_path(), 5, 100)?;
         Request::Ping.send(&socket)?;
         let bytes = read_socket(&socket)?;
-        let answer = Answer::receive(&bytes);
+        let answer = Answer::receive(bytes);
         if let Answer::Ping(configured) = answer {
             if configured {
                 break;
@@ -88,7 +88,7 @@ fn process_swww_args(args: &Swww) -> Result<(), String> {
     request.send(&socket)?;
     let bytes = read_socket(&socket)?;
     drop(socket);
-    match Answer::receive(&bytes) {
+    match Answer::receive(bytes) {
         Answer::Err(msg) => return Err(msg.to_string()),
         Answer::Info(info) => info.iter().for_each(|i| println!("{}", i)),
         Answer::Ok => {
@@ -149,7 +149,7 @@ fn make_request(args: &Swww) -> Result<Option<Request>, String> {
                     Request::Img(img_request).send(&socket)?;
                     let bytes = read_socket(&socket)?;
                     drop(socket);
-                    if let Answer::Err(e) = Answer::receive(&bytes) {
+                    if let Answer::Err(e) = Answer::receive(bytes) {
                         return Err(format!("daemon error when sending image: {e}"));
                     }
                     animations
@@ -224,7 +224,7 @@ fn get_format_dims_and_outputs(
     Request::Query.send(&socket)?;
     let bytes = read_socket(&socket)?;
     drop(socket);
-    let answer = Answer::receive(&bytes);
+    let answer = Answer::receive(bytes);
     match answer {
         Answer::Info(infos) => {
             let mut format = ipc::PixelFormat::Xrgb;
@@ -351,7 +351,7 @@ fn is_daemon_running() -> Result<bool, String> {
     };
 
     Request::Ping.send(&socket)?;
-    let answer = Answer::receive(&read_socket(&socket)?);
+    let answer = Answer::receive(read_socket(&socket)?);
     match answer {
         Answer::Ping(_) => Ok(true),
         _ => Err("Daemon did not return Answer::Ping, as expected".to_string()),

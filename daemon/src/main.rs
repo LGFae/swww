@@ -371,7 +371,7 @@ impl Daemon {
                 return;
             }
         };
-        let request = Request::receive(&bytes);
+        let request = Request::receive(bytes);
         log::error!("time to read request: {}us", now.elapsed().as_micros());
         let answer = match request {
             Request::Animation(AnimationRequest {
@@ -848,7 +848,7 @@ pub fn is_daemon_running(addr: &PathBuf) -> Result<bool, String> {
     };
 
     Request::Ping.send(&sock)?;
-    let answer = Answer::receive(&read_socket(&sock)?);
+    let answer = Answer::receive(read_socket(&sock)?);
     match answer {
         Answer::Ping(_) => Ok(true),
         _ => Err("Daemon did not return Answer::Ping, as expected".to_string()),

@@ -760,15 +760,17 @@ impl Request {
 
     #[must_use]
     #[inline]
-    pub fn receive(bytes: &[u8]) -> Self {
+    pub fn receive(socket_msg: SocketMsg) -> Self {
         let now = std::time::Instant::now();
-        let ret = match bytes[0] {
+        let ret = match socket_msg.code {
             0 => Self::Ping,
             1 => Self::Query,
             2 => {
-                let len = bytes[1] as usize;
+                let mut mmap = socket_msg.shm.unwrap();
+                let bytes = mmap.as_mut();
+                let len = bytes[0] as usize;
                 let mut outputs = Vec::with_capacity(len);
-                let mut i = 2;
+                let mut i = 1;
                 for _ in 0..len {
                     let str_size =
                         unsafe { bytes.as_ptr().add(i).cast::<u32>().read_unaligned() } as usize;
@@ -787,13 +789,15 @@ impl Request {
                 })
             }
             3 => {
-                let transition = Transition::deserialize(&bytes[1..]);
-                let len = bytes[52] as usize;
+                let mut mmap = socket_msg.shm.unwrap();
+                let bytes = mmap.as_mut();
+                let transition = Transition::deserialize(&bytes[0..]);
+                let len = bytes[51] as usize;
 
                 let mut imgs = Vec::with_capacity(len);
                 let mut outputs = Vec::with_capacity(len);
 
-                let mut i = 53;
+                let mut i = 52;
                 for _ in 0..len {
                     let path_size =
                         unsafe { bytes.as_ptr().add(i).cast::<u32>().read_unaligned() } as usize;
@@ -836,11 +840,13 @@ impl Request {
                 })
             }
             4 => {
-                let len = bytes[1] as usize;
+                let mut mmap = socket_msg.shm.unwrap();
+                let bytes = mmap.as_mut();
+                let len = bytes[0] as usize;
                 let mut animations = Vec::with_capacity(len);
                 let mut outputs = Vec::with_capacity(len);
 
-                let mut i = 2;
+                let mut i = 1;
                 for _ in 0..len {
                     let (animation, offset) = Animation::deserialize(&bytes[i..]);
                     i += offset;
@@ -947,16 +953,18 @@ impl Answer {
 
     #[must_use]
     #[inline]
-    pub fn receive(bytes: &[u8]) -> Self {
-        match bytes[0] {
+    pub fn receive(socket_msg: SocketMsg) -> Self {
+        match socket_msg.code {
             0 => Self::Ok,
             1 => Self::Ping(true),
             2 => Self::Ping(false),
             3 => {
-                let len = bytes[1] as usize;
+                let mut mmap = socket_msg.shm.unwrap();
+                let bytes = mmap.as_mut();
+                let len = bytes[0] as usize;
                 let mut bg_infos = Vec::with_capacity(len);
 
-                let mut i = 2;
+                let mut i = 1;
                 for _ in 0..len {
                     let (info, offset) = BgInfo::deserialize(&bytes[i..]);
                     i += offset;
@@ -966,9 +974,10 @@ impl Answer {
                 Self::Info(bg_infos.into())
             }
             4 => {
-                let err_size =
-                    unsafe { bytes.as_ptr().add(1).cast::<u32>().read_unaligned() } as usize;
-                let err = std::str::from_utf8(&bytes[5..5 + err_size])
+                let mut mmap = socket_msg.shm.unwrap();
+                let bytes = mmap.as_mut();
+                let err_size = unsafe { bytes.as_ptr().cast::<u32>().read_unaligned() } as usize;
+                let err = std::str::from_utf8(&bytes[4..4 + err_size])
                     .unwrap()
                     .to_string();
                 Self::Err(err)
@@ -978,7 +987,12 @@ impl Answer {
     }
 }
 
-pub fn read_socket(stream: &OwnedFd) -> Result<Vec<u8>, String> {
+pub struct SocketMsg {
+    code: u8,
+    shm: Option<Mmap>,
+}
+
+pub fn read_socket(stream: &OwnedFd) -> Result<SocketMsg, String> {
     let mut buf = [0; 16];
     let mut ancillary_buf = [0; 64];
 
@@ -1003,20 +1017,16 @@ pub fn read_socket(stream: &OwnedFd) -> Result<Vec<u8>, String> {
     let code = u64::from_ne_bytes(buf[0..8].try_into().unwrap()) as u8;
     let len = u64::from_ne_bytes(buf[8..16].try_into().unwrap()) as usize;
 
-    if len == 0 {
-        Ok(vec![code])
+    let shm = if len == 0 {
+        None
     } else {
-        let mut v = Vec::with_capacity(len + 1);
-        v.push(code);
         let shm_file = match control.drain().next().unwrap() {
             net::RecvAncillaryMessage::ScmRights(mut iter) => iter.next().unwrap(),
             _ => panic!("malformed ancillary message"),
         };
-
-        let mut mmap = Mmap::new(shm_file, len);
-        v.extend_from_slice(mmap.as_mut());
-        Ok(v)
-    }
+        Some(Mmap::new(shm_file, len))
+    };
+    Ok(SocketMsg { code, shm })
 }
 
 #[must_use]
