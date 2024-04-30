@@ -6,8 +6,11 @@ use std::{
 };
 
 use rustix::{
-    fd::OwnedFd,
+    fd::{AsFd, OwnedFd},
+    io::Errno,
+    mm::{mmap, munmap, MapFlags, ProtFlags},
     net::{self, RecvFlags},
+    shm::{Mode, ShmOFlags},
 };
 
 use crate::{cache, compression::BitPack};
@@ -623,12 +626,18 @@ pub enum Request {
 impl Request {
     pub fn send(&self, stream: &OwnedFd) -> Result<(), String> {
         let now = std::time::Instant::now();
+        let mut socket_msg = [0u8; 16];
+        socket_msg[0..8].copy_from_slice(&match self {
+            Request::Ping => 0u64.to_ne_bytes(),
+            Request::Query => 1u64.to_ne_bytes(),
+            Request::Clear(_) => 2u64.to_ne_bytes(),
+            Request::Img(_) => 3u64.to_ne_bytes(),
+            Request::Animation(_) => 4u64.to_ne_bytes(),
+            Request::Kill => 5u64.to_ne_bytes(),
+        });
         let bytes: Vec<u8> = match self {
-            Self::Ping => vec![0],
-            Self::Query => vec![1],
             Self::Clear(clear) => {
                 let mut buf = Vec::with_capacity(64);
-                buf.push(2);
                 buf.push(clear.outputs.len() as u8); // we assume someone does not have more than
                                                      // 255 monitors. Seems reasonable
                 for output in clear.outputs.iter() {
@@ -646,7 +655,6 @@ impl Request {
                 } = img;
 
                 let mut buf = Vec::with_capacity(imgs[0].img.len() + 1024);
-                buf.push(3);
                 transition.serialize(&mut buf);
                 buf.push(imgs.len() as u8); // we assume someone does not have more than 255
 
@@ -673,7 +681,6 @@ impl Request {
                     outputs,
                 } = anim;
                 let mut buf = Vec::with_capacity(1 << 20);
-                buf.push(4);
                 buf.push(animations.len() as u8);
 
                 for (animation, output) in animations.iter().zip(outputs.iter()) {
@@ -687,7 +694,7 @@ impl Request {
 
                 buf
             }
-            Self::Kill => vec![5],
+            _ => vec![],
         };
         println!(
             "Send encode time: {}us, size: {}",
@@ -707,19 +714,37 @@ impl Request {
                     }
                 });
             }
-            if let Err(e) = net::send(stream, &bytes.len().to_ne_bytes(), net::SendFlags::empty()) {
-                return Err(format!("failed to write serialized request's length: {e}"));
+
+            let mut ancillary_buf = [0u8; 64];
+            let mut ancillary = net::SendAncillaryBuffer::new(&mut ancillary_buf);
+
+            let mmap = if !bytes.is_empty() {
+                socket_msg[8..].copy_from_slice(&(bytes.len() as u64).to_ne_bytes());
+                let shm_file = create_shm_fd().unwrap();
+                let mut mmap = Mmap::new(shm_file, bytes.len());
+                mmap.as_mut().copy_from_slice(&bytes);
+                Some(mmap)
+            } else {
+                None
+            };
+
+            let msg_buf;
+            if let Some(mmap) = mmap.as_ref() {
+                msg_buf = [mmap.fd.as_fd()];
+                let msg = net::SendAncillaryMessage::ScmRights(&msg_buf);
+                ancillary.push(msg);
             }
-            loop {
-                let mut i = 0;
-                match net::send(stream, &bytes[i..], net::SendFlags::empty()) {
-                    Ok(written) => i += written,
-                    Err(e) => return Err(format!("failed to write serialized request: {e}")),
+
+            let iov = rustix::io::IoSlice::new(&socket_msg[..]);
+            match net::sendmsg(stream, &[iov], &mut ancillary, net::SendFlags::empty()) {
+                Ok(written) => {
+                    if written != 16 {
+                        return Err("failed to send full length of message in socket!".to_string());
+                    }
                 }
-                if i == bytes.len() {
-                    break;
-                }
+                Err(e) => return Err(format!("failed to write serialized request: {e}")),
             }
+
             if let Self::Img(ImageRequest { imgs, outputs, .. }) = self {
                 for (Img { path, .. }, outputs) in imgs.iter().zip(outputs.iter()) {
                     for output in outputs.iter() {
@@ -859,13 +884,18 @@ pub enum Answer {
 
 impl Answer {
     pub fn send(&self, stream: &OwnedFd) -> Result<(), String> {
+        let mut socket_msg = [0u8; 16];
+        socket_msg[0..8].copy_from_slice(&match self {
+            Self::Ok => 0u64.to_ne_bytes(),
+            Self::Ping(true) => 1u64.to_ne_bytes(),
+            Self::Ping(false) => 2u64.to_ne_bytes(),
+            Self::Info(_) => 3u64.to_ne_bytes(),
+            Self::Err(_) => 4u64.to_ne_bytes(),
+        });
+
         let bytes = match self {
-            Self::Ok => vec![0],
-            Self::Ping(true) => vec![1],
-            Self::Ping(false) => vec![2],
             Self::Info(infos) => {
                 let mut buf = Vec::with_capacity(1024);
-                buf.push(3);
 
                 buf.push(infos.len() as u8);
                 for info in infos.iter() {
@@ -876,25 +906,41 @@ impl Answer {
             }
             Self::Err(s) => {
                 let mut buf = Vec::with_capacity(128);
-                buf.push(4);
                 buf.extend((s.len() as u32).to_ne_bytes());
                 buf.extend(s.as_bytes());
                 buf
             }
+            _ => vec![],
         };
 
-        if let Err(e) = net::send(stream, &bytes.len().to_ne_bytes(), net::SendFlags::empty()) {
-            return Err(format!("failed to write serialized answer's length: {e}"));
+        let mut ancillary_buf = [0u8; 64];
+        let mut ancillary = net::SendAncillaryBuffer::new(&mut ancillary_buf);
+
+        let mmap = if !bytes.is_empty() {
+            socket_msg[8..].copy_from_slice(&(bytes.len() as u64).to_ne_bytes());
+            let shm_file = create_shm_fd().unwrap();
+            let mut mmap = Mmap::new(shm_file, bytes.len());
+            mmap.as_mut().copy_from_slice(&bytes);
+            Some(mmap)
+        } else {
+            None
+        };
+
+        let msg_buf;
+        if let Some(mmap) = mmap.as_ref() {
+            msg_buf = [mmap.fd.as_fd()];
+            let msg = net::SendAncillaryMessage::ScmRights(&msg_buf);
+            ancillary.push(msg);
         }
-        loop {
-            let mut i = 0;
-            match net::send(stream, &bytes[i..], net::SendFlags::empty()) {
-                Ok(written) => i += written,
-                Err(e) => return Err(format!("failed to write serialized answer: {e}")),
+
+        let iov = rustix::io::IoSlice::new(&socket_msg[..]);
+        match net::sendmsg(stream, &[iov], &mut ancillary, net::SendFlags::empty()) {
+            Ok(written) => {
+                if written != 16 {
+                    return Err("failed to send full length of message in socket!".to_string());
+                }
             }
-            if i == bytes.len() {
-                break;
-            }
+            Err(e) => return Err(format!("failed to write serialized request: {e}")),
         }
         Ok(())
     }
@@ -933,15 +979,15 @@ impl Answer {
 }
 
 pub fn read_socket(stream: &OwnedFd) -> Result<Vec<u8>, String> {
-    let mut buf = vec![0; 8];
+    let mut buf = [0; 16];
+    let mut ancillary_buf = [0; 64];
+
+    let mut control = net::RecvAncillaryBuffer::new(&mut ancillary_buf);
 
     let mut tries = 0;
     loop {
-        match net::recv(
-            stream,
-            &mut buf[0..std::mem::size_of::<usize>()],
-            RecvFlags::WAITALL,
-        ) {
+        let iov = rustix::io::IoSliceMut::new(&mut buf);
+        match net::recvmsg(stream, &mut [iov], &mut control, RecvFlags::WAITALL) {
             Ok(_) => break,
             Err(e) => {
                 if e.kind() == std::io::ErrorKind::WouldBlock && tries < 5 {
@@ -953,14 +999,24 @@ pub fn read_socket(stream: &OwnedFd) -> Result<Vec<u8>, String> {
         }
         tries += 1;
     }
-    let len = usize::from_ne_bytes(buf[0..std::mem::size_of::<usize>()].try_into().unwrap());
-    buf.clear();
-    buf.resize(len, 0);
 
-    if let Err(e) = net::recv(stream, &mut buf, RecvFlags::WAITALL) {
-        return Err(format!("Failed to read request: {e}"));
+    let code = u64::from_ne_bytes(buf[0..8].try_into().unwrap()) as u8;
+    let len = u64::from_ne_bytes(buf[8..16].try_into().unwrap()) as usize;
+
+    if len == 0 {
+        Ok(vec![code])
+    } else {
+        let mut v = Vec::with_capacity(len + 1);
+        v.push(code);
+        let shm_file = match control.drain().next().unwrap() {
+            net::RecvAncillaryMessage::ScmRights(mut iter) => iter.next().unwrap(),
+            _ => panic!("malformed ancillary message"),
+        };
+
+        let mut mmap = Mmap::new(shm_file, len);
+        v.extend_from_slice(mmap.as_mut());
+        Ok(v)
     }
-    Ok(buf)
 }
 
 #[must_use]
@@ -1060,4 +1116,111 @@ pub fn connect_to_socket(addr: &PathBuf, tries: u8, interval: u64) -> Result<Own
     }
 
     Err(format!("Failed to connect to socket: {error}"))
+}
+
+#[derive(Debug)]
+struct Mmap {
+    fd: OwnedFd,
+    ptr: *mut std::ffi::c_void,
+    len: usize,
+}
+
+impl Mmap {
+    const PROT: ProtFlags = ProtFlags::WRITE.union(ProtFlags::READ);
+    const FLAGS: MapFlags = MapFlags::SHARED;
+
+    fn new(fd: OwnedFd, len: usize) -> Self {
+        loop {
+            match rustix::fs::ftruncate(&fd, len as u64) {
+                Err(Errno::INTR) => continue,
+                otherwise => break otherwise.unwrap(),
+            }
+        }
+
+        let ptr =
+            unsafe { mmap(std::ptr::null_mut(), len, Self::PROT, Self::FLAGS, &fd, 0).unwrap() };
+        Self { fd, ptr, len }
+    }
+
+    fn as_mut(&mut self) -> &mut [u8] {
+        unsafe { std::slice::from_raw_parts_mut(self.ptr.cast(), self.len) }
+    }
+}
+
+impl Drop for Mmap {
+    fn drop(&mut self) {
+        if let Err(e) = unsafe { munmap(self.ptr, self.len) } {
+            eprintln!("ERROR WHEN UNMAPPING MEMORY: {e}");
+        }
+    }
+}
+
+fn create_shm_fd() -> std::io::Result<OwnedFd> {
+    #[cfg(target_os = "linux")]
+    {
+        match create_memfd() {
+            Ok(fd) => return Ok(fd),
+            // Not supported, use fallback.
+            Err(Errno::NOSYS) => (),
+            Err(err) => return Err(err.into()),
+        };
+    }
+
+    let time = std::time::SystemTime::now();
+    let mut mem_file_handle = format!(
+        "/swww-ipc-{}",
+        time.duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .subsec_nanos()
+    );
+
+    let flags = ShmOFlags::CREATE | ShmOFlags::EXCL | ShmOFlags::RDWR;
+    let mode = Mode::RUSR | Mode::WUSR;
+    loop {
+        match rustix::shm::shm_open(mem_file_handle.as_str(), flags, mode) {
+            Ok(fd) => match rustix::shm::shm_unlink(mem_file_handle.as_str()) {
+                Ok(_) => return Ok(fd),
+
+                Err(errno) => {
+                    return Err(errno.into());
+                }
+            },
+            Err(Errno::EXIST) => {
+                // Change the handle if we happen to be duplicate.
+                let time = std::time::SystemTime::now();
+
+                mem_file_handle = format!(
+                    "/swww-daemon-{}",
+                    time.duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .subsec_nanos()
+                );
+
+                continue;
+            }
+            Err(Errno::INTR) => continue,
+            Err(err) => return Err(err.into()),
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn create_memfd() -> rustix::io::Result<OwnedFd> {
+    use rustix::fs::{MemfdFlags, SealFlags};
+    use std::ffi::CStr;
+
+    let name = CStr::from_bytes_with_nul(b"swww-daemon\0").unwrap();
+    let flags = MemfdFlags::ALLOW_SEALING | MemfdFlags::CLOEXEC;
+
+    loop {
+        match rustix::fs::memfd_create(name, flags) {
+            Ok(fd) => {
+                // We only need to seal for the purposes of optimization, ignore the errors.
+                let _ = rustix::fs::fcntl_add_seals(&fd, SealFlags::SHRINK | SealFlags::SEAL);
+                return Ok(fd);
+            }
+            Err(Errno::INTR) => continue,
+            Err(err) => return Err(err),
+        }
+    }
 }
