@@ -6,8 +6,6 @@ edition = "2021"
 license-file = "../LICENSE"
 
 [dependencies]
-# use specific git version for Duration implementation. We will do this until the next bitcode release
-bitcode = { git = "https://github.com/SoftbearStudios/bitcode.git", rev = "5f25a59", default-features = false, features = [ "derive" ]}
 
 [build-dependencies]
 pkg-config = "0.3"

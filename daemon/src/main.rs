@@ -351,6 +351,7 @@ impl Daemon {
     }
 
     fn recv_socket_msg(&mut self, stream: UnixStream) {
+        let now = std::time::Instant::now();
         let bytes = match utils::ipc::read_socket(&stream) {
             Ok(bytes) => bytes,
             Err(e) => {
@@ -360,6 +361,7 @@ impl Daemon {
             }
         };
         let request = Request::receive(&bytes);
+        log::error!("time to read request: {}us", now.elapsed().as_micros());
         let answer = match request {
             Request::Animation(AnimationRequest {
                 animations,

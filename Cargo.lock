@@ -158,25 +158,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc827186963e592360843fb5ba4b973e145841266c1357f7180c43526f2e5b61"
 
 [[package]]
-name = "bitcode"
-version = "0.6.0"
-source = "git+https://github.com/SoftbearStudios/bitcode.git?rev=5f25a59#5f25a59be3e66deef721e7eb2369deb1aa32d263"
-dependencies = [
- "bitcode_derive",
- "bytemuck",
-]
-
-[[package]]
-name = "bitcode_derive"
-version = "0.6.0"
-source = "git+https://github.com/SoftbearStudios/bitcode.git?rev=5f25a59#5f25a59be3e66deef721e7eb2369deb1aa32d263"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
 name = "bitflags"
 version = "1.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1584,7 +1565,6 @@ checksum = "711b9620af191e0cdc7468a8d14e709c3dcdb115b36f838e601583af800a370a"
 name = "utils"
 version = "0.9.5-master"
 dependencies = [
- "bitcode",
  "criterion",
  "pkg-config",
  "rand",

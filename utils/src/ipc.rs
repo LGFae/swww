@@ -1,4 +1,3 @@
-use bitcode::{Decode, Encode};
 use std::{
     fmt,
     io::{BufReader, BufWriter, Read, Write},
@@ -71,7 +70,7 @@ impl Position {
     }
 }
 
-#[derive(Debug, PartialEq, Clone, Encode, Decode)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum BgImg {
     Color([u8; 3]),
     Img(String),
@@ -88,7 +87,7 @@ impl fmt::Display for BgImg {
     }
 }
 
-#[derive(Clone, Copy, Debug, Encode, Decode, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 #[repr(u8)]
 pub enum PixelFormat {
     /// No swap, can copy directly onto WlBuffer
@@ -136,7 +135,7 @@ impl PixelFormat {
     }
 }
 
-#[derive(Clone, Copy, Debug, Decode, Encode, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Scale {
     Whole(NonZeroI32),
     Fractional(NonZeroI32),
@@ -185,7 +184,7 @@ impl fmt::Display for Scale {
     }
 }
 
-#[derive(Clone, Decode, Encode)]
+#[derive(Clone)]
 pub struct BgInfo {
     pub name: String,
     pub dim: (u32, u32),
@@ -202,6 +201,111 @@ impl BgInfo {
             .scale_factor
             .mul_dim(self.dim.0 as i32, self.dim.1 as i32);
         (dim.0 as u32, dim.1 as u32)
+    }
+
+    fn serialize(&self, buf: &mut Vec<u8>) {
+        let Self {
+            name,
+            dim,
+            scale_factor,
+            img,
+            pixel_format,
+        } = self;
+
+        buf.extend((name.len() as u32).to_ne_bytes());
+        buf.extend(name.as_bytes());
+        buf.extend(dim.0.to_ne_bytes());
+        buf.extend(dim.1.to_ne_bytes());
+
+        match scale_factor {
+            Scale::Whole(value) => {
+                buf.push(0);
+                buf.extend(value.get().to_ne_bytes());
+            }
+            Scale::Fractional(value) => {
+                buf.push(1);
+                buf.extend(value.get().to_ne_bytes());
+            }
+        }
+
+        match img {
+            BgImg::Color(color) => {
+                buf.push(0);
+                buf.extend(color);
+            }
+            BgImg::Img(path) => {
+                buf.push(1);
+                buf.extend((path.len() as u32).to_ne_bytes());
+                buf.extend(path.as_bytes());
+            }
+        }
+
+        buf.push(*pixel_format as u8);
+    }
+
+    fn deserialize(bytes: &[u8]) -> (Self, usize) {
+        let mut i = 0;
+        let name_size = unsafe { bytes.as_ptr().add(i).cast::<u32>().read_unaligned() } as usize;
+        i += 4;
+        let name = std::str::from_utf8(&bytes[i..i + name_size])
+            .unwrap()
+            .to_string();
+        i += name_size;
+
+        let dim = (
+            unsafe { bytes.as_ptr().add(i).cast::<u32>().read_unaligned() },
+            unsafe { bytes.as_ptr().add(i + 4).cast::<u32>().read_unaligned() },
+        );
+        i += 8;
+
+        let scale_factor = if bytes[i] == 0 {
+            Scale::Whole(
+                unsafe { bytes.as_ptr().add(i + 1).cast::<i32>().read_unaligned() }
+                    .try_into()
+                    .unwrap(),
+            )
+        } else {
+            Scale::Fractional(
+                unsafe { bytes.as_ptr().add(i + 1).cast::<i32>().read_unaligned() }
+                    .try_into()
+                    .unwrap(),
+            )
+        };
+        i += 5;
+
+        let img = if bytes[i] == 0 {
+            i += 4;
+            BgImg::Color([bytes[i - 3], bytes[i - 2], bytes[i - 1]])
+        } else {
+            i += 1;
+            let path_size =
+                unsafe { bytes.as_ptr().add(i).cast::<u32>().read_unaligned() } as usize;
+            i += 4;
+            let path = std::str::from_utf8(&bytes[i..i + path_size])
+                .unwrap()
+                .to_string();
+            i += path_size;
+            BgImg::Img(path)
+        };
+
+        let pixel_format = match bytes[i] {
+            0 => PixelFormat::Bgr,
+            1 => PixelFormat::Rgb,
+            2 => PixelFormat::Xbgr,
+            _ => PixelFormat::Xrgb,
+        };
+        i += 1;
+
+        (
+            Self {
+                name,
+                dim,
+                scale_factor,
+                img,
+                pixel_format,
+            },
+            i,
+        )
     }
 }
 
@@ -582,7 +686,11 @@ impl Request {
             }
             Self::Kill => vec![5],
         };
-        println!("Send encode time: {}us, size: {}", now.elapsed().as_micros(), bytes.len());
+        println!(
+            "Send encode time: {}us, size: {}",
+            now.elapsed().as_micros(),
+            bytes.len()
+        );
         std::thread::scope(|s| {
             if let Self::Animation(AnimationRequest { animations, .. }) = self {
                 s.spawn(|| {
@@ -734,17 +842,39 @@ impl Request {
     }
 }
 
-#[derive(Decode, Encode)]
 pub enum Answer {
     Ok,
-    Err(String),
-    Info(Box<[BgInfo]>),
     Ping(bool),
+    Info(Box<[BgInfo]>),
+    Err(String),
 }
 
 impl Answer {
     pub fn send(&self, stream: &UnixStream) -> Result<(), String> {
-        let bytes = bitcode::encode(self);
+        let bytes = match self {
+            Self::Ok => vec![0],
+            Self::Ping(true) => vec![1],
+            Self::Ping(false) => vec![2],
+            Self::Info(infos) => {
+                let mut buf = Vec::with_capacity(1024);
+                buf.push(3);
+
+                buf.push(infos.len() as u8);
+                for info in infos.iter() {
+                    info.serialize(&mut buf);
+                }
+
+                buf
+            }
+            Self::Err(s) => {
+                let mut buf = Vec::with_capacity(128);
+                buf.push(4);
+                buf.extend((s.len() as u32).to_ne_bytes());
+                buf.extend(s.as_bytes());
+                buf
+            }
+        };
+
         let mut writer = BufWriter::new(stream);
         if let Err(e) = writer.write_all(&bytes.len().to_ne_bytes()) {
             return Err(format!("failed to write serialized answer's length: {e}"));
@@ -759,7 +889,33 @@ impl Answer {
     #[must_use]
     #[inline]
     pub fn receive(bytes: &[u8]) -> Self {
-        bitcode::decode(bytes).expect("failed to decode answer")
+        match bytes[0] {
+            0 => Self::Ok,
+            1 => Self::Ping(true),
+            2 => Self::Ping(false),
+            3 => {
+                let len = bytes[1] as usize;
+                let mut bg_infos = Vec::with_capacity(len);
+
+                let mut i = 2;
+                for _ in 0..len {
+                    let (info, offset) = BgInfo::deserialize(&bytes[i..]);
+                    i += offset;
+                    bg_infos.push(info);
+                }
+
+                Self::Info(bg_infos.into())
+            }
+            4 => {
+                let err_size =
+                    unsafe { bytes.as_ptr().add(1).cast::<u32>().read_unaligned() } as usize;
+                let err = std::str::from_utf8(&bytes[5..5 + err_size])
+                    .unwrap()
+                    .to_string();
+                Self::Err(err)
+            }
+            _ => panic!("Received malformed answer from daemon"),
+        }
     }
 }
 
