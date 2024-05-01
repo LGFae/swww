@@ -54,8 +54,10 @@ pub fn load_animation_frames(
             let mut buf = Vec::new();
             File::open(&filepath)?.read_to_end(&mut buf)?;
 
-            let (frames, _) = Animation::deserialize(&buf);
-            return Ok(Some(frames));
+            match std::panic::catch_unwind(|| Animation::deserialize(&buf)) {
+                Ok((frames, _)) => return Ok(Some(frames)),
+                Err(e) => eprintln!("Error loading animation frames: {e:?}"),
+            }
         }
     }
     Ok(None)
