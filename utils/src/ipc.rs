@@ -673,60 +673,33 @@ impl Request {
             }
             _ => vec![],
         };
-        std::thread::scope(|s| {
-            if let Self::Animation(AnimationRequest { animations, .. }) = self {
-                s.spawn(|| {
-                    for animation in animations.iter() {
-                        // only store the cache if we aren't reading from stdin
-                        if animation.path != "-" {
-                            if let Err(e) = cache::store_animation_frames(animation) {
-                                eprintln!("Error storing cache for {}: {e}", animation.path);
-                            }
-                        }
-                    }
-                });
-            }
 
-            let mut ancillary_buf = [0u8; rustix::cmsg_space!(ScmRights(1))];
-            let mut ancillary = net::SendAncillaryBuffer::new(&mut ancillary_buf);
+        match send_socket_msg(stream, &mut socket_msg, &bytes) {
+            Ok(true) => (),
+            Ok(false) => return Err("failed to send full length of message in socket!".to_string()),
+            Err(e) => return Err(format!("failed to write serialized request: {e}")),
+        }
 
-            let mmap = if !bytes.is_empty() {
-                socket_msg[8..].copy_from_slice(&(bytes.len() as u64).to_ne_bytes());
-                let mut mmap = Mmap::create(bytes.len());
-                mmap.slice_mut().copy_from_slice(&bytes);
-                Some(mmap)
-            } else {
-                None
-            };
-
-            let msg_buf;
-            if let Some(mmap) = mmap.as_ref() {
-                msg_buf = [mmap.fd.as_fd()];
-                let msg = net::SendAncillaryMessage::ScmRights(&msg_buf);
-                ancillary.push(msg);
-            }
-
-            let iov = rustix::io::IoSlice::new(&socket_msg[..]);
-            match net::sendmsg(stream, &[iov], &mut ancillary, net::SendFlags::empty()) {
-                Ok(written) => {
-                    if written != 16 {
-                        return Err("failed to send full length of message in socket!".to_string());
-                    }
-                }
-                Err(e) => return Err(format!("failed to write serialized request: {e}")),
-            }
-
-            if let Self::Img(ImageRequest { imgs, outputs, .. }) = self {
-                for (Img { path, .. }, outputs) in imgs.iter().zip(outputs.iter()) {
-                    for output in outputs.iter() {
-                        if let Err(e) = super::cache::store(output, path) {
-                            eprintln!("ERROR: failed to store cache: {e}");
-                        }
+        if let Self::Img(ImageRequest { imgs, outputs, .. }) = self {
+            for (Img { path, .. }, outputs) in imgs.iter().zip(outputs.iter()) {
+                for output in outputs.iter() {
+                    if let Err(e) = super::cache::store(output, path) {
+                        eprintln!("ERROR: failed to store cache: {e}");
                     }
                 }
             }
-            Ok(())
-        })
+        } else if let Self::Animation(AnimationRequest { animations, .. }) = self {
+            for animation in animations.iter() {
+                // only store the cache if we aren't reading from stdin
+                if animation.path != "-" {
+                    if let Err(e) = cache::store_animation_frames(animation) {
+                        eprintln!("Error storing cache for {}: {e}", animation.path);
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 
     #[must_use]
@@ -859,35 +832,11 @@ impl Answer {
             _ => vec![],
         };
 
-        let mut ancillary_buf = [0u8; rustix::cmsg_space!(ScmRights(1))];
-        let mut ancillary = net::SendAncillaryBuffer::new(&mut ancillary_buf);
-
-        let mmap = if !bytes.is_empty() {
-            socket_msg[8..].copy_from_slice(&(bytes.len() as u64).to_ne_bytes());
-            let mut mmap = Mmap::create(bytes.len());
-            mmap.slice_mut().copy_from_slice(&bytes);
-            Some(mmap)
-        } else {
-            None
-        };
-
-        let msg_buf;
-        if let Some(mmap) = mmap.as_ref() {
-            msg_buf = [mmap.fd.as_fd()];
-            let msg = net::SendAncillaryMessage::ScmRights(&msg_buf);
-            ancillary.push(msg);
+        match send_socket_msg(stream, &mut socket_msg, &bytes) {
+            Ok(true) => Ok(()),
+            Ok(false) => Err("failed to send full length of message in socket!".to_string()),
+            Err(e) => Err(format!("failed to write serialized request: {e}")),
         }
-
-        let iov = rustix::io::IoSlice::new(&socket_msg[..]);
-        match net::sendmsg(stream, &[iov], &mut ancillary, net::SendFlags::empty()) {
-            Ok(written) => {
-                if written != 16 {
-                    return Err("failed to send full length of message in socket!".to_string());
-                }
-            }
-            Err(e) => return Err(format!("failed to write serialized request: {e}")),
-        }
-        Ok(())
     }
 
     #[must_use]
@@ -920,6 +869,35 @@ impl Answer {
             _ => panic!("Received malformed answer from daemon"),
         }
     }
+}
+
+fn send_socket_msg(
+    stream: &OwnedFd,
+    socket_msg: &mut [u8; 16],
+    bytes: &[u8],
+) -> rustix::io::Result<bool> {
+    let mut ancillary_buf = [0u8; rustix::cmsg_space!(ScmRights(1))];
+    let mut ancillary = net::SendAncillaryBuffer::new(&mut ancillary_buf);
+
+    let mmap = if !bytes.is_empty() {
+        socket_msg[8..].copy_from_slice(&(bytes.len() as u64).to_ne_bytes());
+        let mut mmap = Mmap::create(bytes.len());
+        mmap.slice_mut().copy_from_slice(bytes);
+        Some(mmap)
+    } else {
+        None
+    };
+
+    let msg_buf;
+    if let Some(mmap) = mmap.as_ref() {
+        msg_buf = [mmap.fd.as_fd()];
+        let msg = net::SendAncillaryMessage::ScmRights(&msg_buf);
+        ancillary.push(msg);
+    }
+
+    let iov = rustix::io::IoSlice::new(&socket_msg[..]);
+    net::sendmsg(stream, &[iov], &mut ancillary, net::SendFlags::empty())
+        .map(|written| written == socket_msg.len())
 }
 
 pub struct SocketMsg {
