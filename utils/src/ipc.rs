@@ -625,7 +625,6 @@ pub enum Request {
 
 impl Request {
     pub fn send(&self, stream: &OwnedFd) -> Result<(), String> {
-        let now = std::time::Instant::now();
         let mut socket_msg = [0u8; 16];
         socket_msg[0..8].copy_from_slice(&match self {
             Request::Ping => 0u64.to_ne_bytes(),
@@ -696,11 +695,6 @@ impl Request {
             }
             _ => vec![],
         };
-        println!(
-            "Send encode time: {}us, size: {}",
-            now.elapsed().as_micros(),
-            bytes.len()
-        );
         std::thread::scope(|s| {
             if let Self::Animation(AnimationRequest { animations, .. }) = self {
                 s.spawn(|| {
@@ -760,7 +754,6 @@ impl Request {
     #[must_use]
     #[inline]
     pub fn receive(socket_msg: SocketMsg) -> Self {
-        let now = std::time::Instant::now();
         let ret = match socket_msg.code {
             0 => Self::Ping,
             1 => Self::Query,
@@ -875,7 +868,6 @@ impl Request {
             }
             _ => Self::Kill,
         };
-        println!("Receive decode time: {}us", now.elapsed().as_micros());
         ret
     }
 }
