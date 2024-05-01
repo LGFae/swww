@@ -33,19 +33,6 @@ struct AnimationState {
 #[derive(Debug)]
 pub(super) struct AnimationToken {
     id: usize,
-    transition_done: Arc<AtomicBool>,
-}
-
-impl AnimationToken {
-    pub(super) fn is_transition_done(&self) -> bool {
-        self.transition_done.load(Ordering::Acquire)
-    }
-
-    pub(super) fn set_transition_done(&self, wallpaper: &Wallpaper) {
-        if wallpaper.has_animation_id(self) {
-            self.transition_done.store(true, Ordering::Release);
-        }
-    }
 }
 
 struct FrameCallbackHandler {
@@ -381,10 +368,7 @@ impl Wallpaper {
     #[inline]
     pub(super) fn create_animation_token(&self) -> AnimationToken {
         let id = self.animation_state.id.load(Ordering::Acquire);
-        AnimationToken {
-            id,
-            transition_done: Arc::clone(&self.animation_state.transition_finished),
-        }
+        AnimationToken { id }
     }
 
     #[inline]

@@ -14,9 +14,9 @@ use keyframe::{
     functions::BezierCurve, keyframes, mint::Vector2, num_traits::Pow, AnimationSequence,
 };
 
-pub(super) struct Transition {
+pub(super) struct Transition<'a> {
     animation_tokens: Vec<AnimationToken>,
-    wallpapers: Vec<Arc<Wallpaper>>,
+    wallpapers: &'a mut Vec<Arc<Wallpaper>>,
     dimensions: (u32, u32),
     transition_type: TransitionType,
     duration: f32,
@@ -30,9 +30,9 @@ pub(super) struct Transition {
 }
 
 /// All transitions return whether or not they completed
-impl Transition {
+impl<'a> Transition<'a> {
     pub(super) fn new(
-        wallpapers: Vec<Arc<Wallpaper>>,
+        wallpapers: &'a mut Vec<Arc<Wallpaper>>,
         dimensions: (u32, u32),
         transition: &utils::ipc::Transition,
     ) -> Self {
@@ -76,9 +76,6 @@ impl Transition {
             TransitionType::Fade => self.fade(new_img),
         };
         debug!("Transitions finished");
-        for (wallpaper, token) in self.wallpapers.iter().zip(self.animation_tokens) {
-            token.set_transition_done(wallpaper);
-        }
     }
 
     fn updt_wallpapers(&mut self, now: &mut Instant) {

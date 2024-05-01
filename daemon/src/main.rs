@@ -47,8 +47,8 @@ use wayland_client::{
 };
 
 use utils::ipc::{
-    connect_to_socket, get_socket_path, read_socket, AnimationRequest, Answer, BgInfo,
-    ImageRequest, PixelFormat, Request, Scale,
+    connect_to_socket, get_socket_path, read_socket, Answer, BgInfo, ImageRequest, PixelFormat,
+    Request, Scale,
 };
 
 use animations::Animator;
@@ -371,16 +371,6 @@ impl Daemon {
         };
         let request = Request::receive(bytes);
         let answer = match request {
-            Request::Animation(AnimationRequest {
-                animations,
-                outputs,
-            }) => {
-                let mut wallpapers = Vec::new();
-                for names in outputs.iter() {
-                    wallpapers.push(self.find_wallpapers_by_names(names));
-                }
-                self.animator.animate(animations, wallpapers)
-            }
             Request::Clear(clear) => {
                 let wallpapers = self.find_wallpapers_by_names(&clear.outputs);
                 let color = clear.color;
@@ -415,6 +405,7 @@ impl Daemon {
                 transition,
                 imgs,
                 outputs,
+                animations,
             }) => {
                 let mut used_wallpapers = Vec::new();
                 for names in outputs.iter() {
@@ -424,7 +415,7 @@ impl Daemon {
                     }
                     used_wallpapers.push(wallpapers);
                 }
-                self.animator.transition(transition, imgs, used_wallpapers)
+                self.animator.transition(transition, imgs, animations, used_wallpapers)
             }
         };
         if let Err(e) = answer.send(&stream) {

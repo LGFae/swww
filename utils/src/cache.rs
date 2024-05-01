@@ -12,18 +12,19 @@ use std::{
 
 use crate::ipc::{Animation, PixelFormat};
 
-pub fn store(output_name: &str, img_path: &str) -> io::Result<()> {
+pub(crate) fn store(output_name: &str, img_path: &str) -> io::Result<()> {
     let mut filepath = cache_dir()?;
     filepath.push(output_name);
     File::create(filepath)?.write_all(img_path.as_bytes())
 }
 
-pub fn store_animation_frames(animation: &Animation) -> io::Result<()> {
-    let filename = animation_filename(
-        &PathBuf::from(&animation.path),
-        animation.dimensions,
-        animation.pixel_format,
-    );
+pub(crate) fn store_animation_frames(
+    animation: &Animation,
+    path: &Path,
+    dimensions: (u32, u32),
+    pixel_format: PixelFormat,
+) -> io::Result<()> {
+    let filename = animation_filename(path, dimensions, pixel_format);
     let mut filepath = cache_dir()?;
     filepath.push(&filename);
 

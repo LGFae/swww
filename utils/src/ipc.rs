@@ -451,35 +451,24 @@ pub struct Clear {
 
 pub struct Img {
     pub path: String,
+    pub dim: (u32, u32),
+    pub format: PixelFormat,
     pub img: Box<[u8]>,
 }
 
 pub struct Animation {
     pub animation: Box<[(BitPack, Duration)]>,
-    pub path: String,
-    pub dimensions: (u32, u32),
-    pub pixel_format: PixelFormat,
 }
 
 impl Animation {
     pub(crate) fn serialize(&self, buf: &mut Vec<u8>) {
-        let Self {
-            animation,
-            path,
-            dimensions,
-            pixel_format,
-        } = self;
+        let Self { animation } = self;
 
         buf.extend((animation.len() as u32).to_ne_bytes());
         for (bitpack, duration) in animation.iter() {
             bitpack.serialize(buf);
             buf.extend(duration.as_secs_f64().to_ne_bytes())
         }
-        serialize_bytes(path.as_bytes(), buf);
-
-        buf.extend(dimensions.0.to_ne_bytes());
-        buf.extend(dimensions.1.to_ne_bytes());
-        buf.push(*pixel_format as u8);
     }
 
     pub(crate) fn deserialize(bytes: &[u8]) -> (Self, usize) {
@@ -496,66 +485,12 @@ impl Animation {
             animation.push((anim, duration));
         }
 
-        let path = deserialize_string(&bytes[i..]);
-        i += 4 + path.len();
-
-        let dimensions = (
-            u32::from_ne_bytes(bytes[i..i + 4].try_into().unwrap()),
-            u32::from_ne_bytes(bytes[i + 4..i + 8].try_into().unwrap()),
-        );
-        i += 8;
-        let pixel_format = match bytes[i] {
-            0 => PixelFormat::Bgr,
-            1 => PixelFormat::Rgb,
-            2 => PixelFormat::Xbgr,
-            _ => PixelFormat::Xrgb,
-        };
-        i += 1;
-
         (
             Self {
                 animation: animation.into(),
-                path,
-                dimensions,
-                pixel_format,
             },
             i,
         )
-    }
-}
-
-pub struct AnimationRequest {
-    pub animations: Box<[Animation]>,
-    pub outputs: Box<[Box<[String]>]>,
-}
-
-pub struct AnimationRequestBuilder {
-    animations: Vec<Animation>,
-    outputs: Vec<Box<[String]>>,
-}
-
-impl AnimationRequestBuilder {
-    #[inline]
-    #[allow(clippy::new_without_default)]
-    pub fn new() -> Self {
-        Self {
-            animations: Vec::new(),
-            outputs: Vec::new(),
-        }
-    }
-
-    #[inline]
-    pub fn push(&mut self, animation: Animation, outputs: Box<[String]>) {
-        self.animations.push(animation);
-        self.outputs.push(outputs);
-    }
-
-    #[inline]
-    pub fn build(self) -> AnimationRequest {
-        AnimationRequest {
-            animations: self.animations.into_boxed_slice(),
-            outputs: self.outputs.into_boxed_slice(),
-        }
     }
 }
 
@@ -563,12 +498,14 @@ pub struct ImageRequest {
     pub transition: Transition,
     pub imgs: Box<[Img]>,
     pub outputs: Box<[Box<[String]>]>,
+    pub animations: Option<Box<[Animation]>>,
 }
 
 pub struct ImageRequestBuilder {
-    pub transition: Transition,
-    pub imgs: Vec<Img>,
-    pub outputs: Vec<Box<[String]>>,
+    transition: Transition,
+    imgs: Vec<Img>,
+    outputs: Vec<Box<[String]>>,
+    animations: Vec<Animation>,
 }
 
 impl ImageRequestBuilder {
@@ -578,21 +515,32 @@ impl ImageRequestBuilder {
             transition,
             imgs: Vec::new(),
             outputs: Vec::new(),
+            animations: Vec::new(),
         }
     }
 
     #[inline]
-    pub fn push(&mut self, img: Img, outputs: Box<[String]>) {
+    pub fn push(&mut self, img: Img, outputs: Box<[String]>, animation: Option<Animation>) {
         self.imgs.push(img);
         self.outputs.push(outputs);
+        if let Some(animation) = animation {
+            self.animations.push(animation);
+        }
     }
 
     #[inline]
     pub fn build(self) -> ImageRequest {
+        let animations = if self.animations.is_empty() {
+            None
+        } else {
+            assert_eq!(self.animations.len(), self.imgs.len());
+            Some(self.animations.into_boxed_slice())
+        };
         ImageRequest {
             transition: self.transition,
             imgs: self.imgs.into_boxed_slice(),
             outputs: self.outputs.into_boxed_slice(),
+            animations,
         }
     }
 }
@@ -602,7 +550,6 @@ pub enum Request {
     Query,
     Clear(Clear),
     Img(ImageRequest),
-    Animation(AnimationRequest),
     Kill,
 }
 
@@ -614,8 +561,7 @@ impl Request {
             Request::Query => 1u64.to_ne_bytes(),
             Request::Clear(_) => 2u64.to_ne_bytes(),
             Request::Img(_) => 3u64.to_ne_bytes(),
-            Request::Animation(_) => 4u64.to_ne_bytes(),
-            Request::Kill => 5u64.to_ne_bytes(),
+            Request::Kill => 4u64.to_ne_bytes(),
         });
         let bytes: Vec<u8> = match self {
             Self::Clear(clear) => {
@@ -633,6 +579,7 @@ impl Request {
                     transition,
                     imgs,
                     outputs,
+                    animations,
                 } = img;
 
                 let mut buf = Vec::with_capacity(imgs[0].img.len() + 1024);
@@ -640,32 +587,30 @@ impl Request {
                 buf.push(imgs.len() as u8); // we assume someone does not have more than 255
                                             // monitors
 
-                for (img, output) in imgs.iter().zip(outputs.iter()) {
-                    let Img { path, img } = img;
+                for i in 0..outputs.len() {
+                    let Img {
+                        path,
+                        img,
+                        dim: dims,
+                        format,
+                    } = &imgs[i];
                     serialize_bytes(path.as_bytes(), &mut buf);
                     serialize_bytes(img, &mut buf);
+                    buf.extend(dims.0.to_ne_bytes());
+                    buf.extend(dims.1.to_ne_bytes());
+                    buf.push(*format as u8);
 
+                    let output = &outputs[i];
                     buf.push(output.len() as u8);
                     for output in output.iter() {
                         serialize_bytes(output.as_bytes(), &mut buf);
                     }
-                }
 
-                buf
-            }
-            Self::Animation(anim) => {
-                let AnimationRequest {
-                    animations,
-                    outputs,
-                } = anim;
-                let mut buf = Vec::with_capacity(1 << 20);
-                buf.push(animations.len() as u8);
-
-                for (animation, output) in animations.iter().zip(outputs.iter()) {
-                    animation.serialize(&mut buf);
-                    buf.push(output.len() as u8);
-                    for output in output.iter() {
-                        serialize_bytes(output.as_bytes(), &mut buf);
+                    if let Some(animation) = animations {
+                        buf.push(1);
+                        animation[i].serialize(&mut buf);
+                    } else {
+                        buf.push(0);
                     }
                 }
 
@@ -680,20 +625,33 @@ impl Request {
             Err(e) => return Err(format!("failed to write serialized request: {e}")),
         }
 
-        if let Self::Img(ImageRequest { imgs, outputs, .. }) = self {
-            for (Img { path, .. }, outputs) in imgs.iter().zip(outputs.iter()) {
-                for output in outputs.iter() {
+        if let Self::Img(ImageRequest {
+            imgs,
+            outputs,
+            animations,
+            ..
+        }) = self
+        {
+            for i in 0..outputs.len() {
+                let Img {
+                    path, dim: dims, format, ..
+                } = &imgs[i];
+                for output in outputs[i].iter() {
                     if let Err(e) = super::cache::store(output, path) {
                         eprintln!("ERROR: failed to store cache: {e}");
                     }
                 }
-            }
-        } else if let Self::Animation(AnimationRequest { animations, .. }) = self {
-            for animation in animations.iter() {
-                // only store the cache if we aren't reading from stdin
-                if animation.path != "-" {
-                    if let Err(e) = cache::store_animation_frames(animation) {
-                        eprintln!("Error storing cache for {}: {e}", animation.path);
+                if let Some(animations) = animations.as_ref() {
+                    for animation in animations.iter() {
+                        // only store the cache if we aren't reading from stdin
+                        if path != "-" {
+                            let p = PathBuf::from(&path);
+                            if let Err(e) =
+                                cache::store_animation_frames(animation, &p, *dims, *format)
+                            {
+                                eprintln!("Error storing cache for {}: {e}", path);
+                            }
+                        }
                     }
                 }
             }
@@ -733,6 +691,7 @@ impl Request {
 
                 let mut imgs = Vec::with_capacity(len);
                 let mut outputs = Vec::with_capacity(len);
+                let mut animations = Vec::with_capacity(len);
 
                 let mut i = 52;
                 for _ in 0..len {
@@ -742,7 +701,26 @@ impl Request {
                     let img = deserialize_bytes(&bytes[i..]);
                     i += 4 + img.len();
 
-                    imgs.push(Img { path, img });
+                    let dims = (
+                        u32::from_ne_bytes(bytes[i..i + 4].try_into().unwrap()),
+                        u32::from_ne_bytes(bytes[i + 4..i + 8].try_into().unwrap()),
+                    );
+                    i += 8;
+
+                    let format = match bytes[i] {
+                        0 => PixelFormat::Bgr,
+                        1 => PixelFormat::Rgb,
+                        2 => PixelFormat::Xbgr,
+                        _ => PixelFormat::Xrgb,
+                    };
+                    i += 1;
+
+                    imgs.push(Img {
+                        path,
+                        img,
+                        dim: dims,
+                        format,
+                    });
 
                     let n_outputs = bytes[i] as usize;
                     i += 1;
@@ -753,40 +731,24 @@ impl Request {
                         out.push(output);
                     }
                     outputs.push(out.into());
+
+                    if bytes[i] == 1 {
+                        i += 1;
+                        let (animation, offset) = Animation::deserialize(&bytes[i..]);
+                        i += offset;
+                        animations.push(animation);
+                    }
                 }
 
                 Self::Img(ImageRequest {
                     transition,
                     imgs: imgs.into(),
                     outputs: outputs.into(),
-                })
-            }
-            4 => {
-                let mut mmap = socket_msg.shm.unwrap();
-                let bytes = mmap.slice_mut();
-                let len = bytes[0] as usize;
-                let mut animations = Vec::with_capacity(len);
-                let mut outputs = Vec::with_capacity(len);
-
-                let mut i = 1;
-                for _ in 0..len {
-                    let (animation, offset) = Animation::deserialize(&bytes[i..]);
-                    i += offset;
-                    animations.push(animation);
-                    let n_outputs = bytes[i] as usize;
-                    i += 1;
-                    let mut out = Vec::with_capacity(n_outputs);
-                    for _ in 0..n_outputs {
-                        let output = deserialize_string(&bytes[i..]);
-                        i += 4 + output.len();
-                        out.push(output);
-                    }
-                    outputs.push(out.into());
-                }
-
-                Self::Animation(AnimationRequest {
-                    animations: animations.into(),
-                    outputs: outputs.into(),
+                    animations: if animations.is_empty() {
+                        None
+                    } else {
+                        Some(animations.into())
+                    },
                 })
             }
             _ => Self::Kill,

@@ -3,9 +3,7 @@ use std::{path::PathBuf, process::Stdio, time::Duration};
 
 use utils::{
     cache,
-    ipc::{
-        self, connect_to_socket, get_socket_path, read_socket, AnimationRequest, Answer, Request,
-    },
+    ipc::{self, connect_to_socket, get_socket_path, read_socket, Answer, Request},
 };
 
 mod imgproc;
@@ -139,30 +137,9 @@ fn make_request(args: &Swww) -> Result<Option<Request>, String> {
             let requested_outputs = split_cmdline_outputs(&img.outputs);
             let (format, dims, outputs) = get_format_dims_and_outputs(&requested_outputs)?;
             let imgbuf = ImgBuf::new(&img.path)?;
-            if imgbuf.is_animated() {
-                let animations = {
-                    let first_frame = imgbuf.decode(format)?;
-                    let img_request = make_img_request(img, first_frame, &dims, &outputs)?;
-                    let animations = make_animation_request(img, &imgbuf, &dims, format, &outputs);
-
-                    let socket = connect_to_socket(&get_socket_path(), 5, 100)?;
-                    Request::Img(img_request).send(&socket)?;
-                    let bytes = read_socket(&socket)?;
-                    drop(socket);
-                    if let Answer::Err(e) = Answer::receive(bytes) {
-                        return Err(format!("daemon error when sending image: {e}"));
-                    }
-                    animations
-                }
-                .map_err(|e| format!("failed to create animated request: {e}"))?;
-
-                Ok(Some(Request::Animation(animations)))
-            } else {
-                let img_raw = imgbuf.decode(format)?;
-                Ok(Some(Request::Img(make_img_request(
-                    img, img_raw, &dims, &outputs,
-                )?)))
-            }
+            Ok(Some(Request::Img(make_img_request(
+                img, &imgbuf, &dims, format, &outputs,
+            )?)))
         }
         Swww::Init { no_cache, .. } => {
             if !*no_cache {
@@ -177,13 +154,15 @@ fn make_request(args: &Swww) -> Result<Option<Request>, String> {
 
 fn make_img_request(
     img: &cli::Img,
-    img_raw: Image,
+    imgbuf: &ImgBuf,
     dims: &[(u32, u32)],
+    pixel_format: ipc::PixelFormat,
     outputs: &[Vec<String>],
 ) -> Result<ipc::ImageRequest, String> {
+    let img_raw = imgbuf.decode(pixel_format)?;
     let transition = make_transition(img);
     let mut img_req_builder = ipc::ImageRequestBuilder::new(transition);
-    for (dim, outputs) in dims.iter().zip(outputs) {
+    for (&dim, outputs) in dims.iter().zip(outputs) {
         let path = match img.path.canonicalize() {
             Ok(p) => p.to_string_lossy().to_string(),
             Err(e) => {
@@ -195,17 +174,52 @@ fn make_img_request(
             }
         };
 
+        let animation = if !imgbuf.is_animated() {
+            None
+        } else if img.resize == ResizeStrategy::Crop {
+            match cache::load_animation_frames(&img.path, dim, pixel_format) {
+                Ok(Some(animation)) => Some(animation),
+                otherwise => {
+                    if let Err(e) = otherwise {
+                        eprintln!("Error loading cache for {:?}: {e}", img.path);
+                    }
+
+                    Some({
+                        ipc::Animation {
+                            animation: compress_frames(
+                                imgbuf.as_frames()?,
+                                dim,
+                                pixel_format,
+                                make_filter(&img.filter),
+                                img.resize,
+                                &img.fill_color,
+                            )?
+                            .into_boxed_slice(),
+                        }
+                    })
+                }
+            }
+        } else {
+            None
+        };
+
         let img = match img.resize {
-            ResizeStrategy::No => img_pad(&img_raw, *dim, &img.fill_color)?,
-            ResizeStrategy::Crop => img_resize_crop(&img_raw, *dim, make_filter(&img.filter))?,
+            ResizeStrategy::No => img_pad(&img_raw, dim, &img.fill_color)?,
+            ResizeStrategy::Crop => img_resize_crop(&img_raw, dim, make_filter(&img.filter))?,
             ResizeStrategy::Fit => {
-                img_resize_fit(&img_raw, *dim, make_filter(&img.filter), &img.fill_color)?
+                img_resize_fit(&img_raw, dim, make_filter(&img.filter), &img.fill_color)?
             }
         };
 
         img_req_builder.push(
-            ipc::Img { img, path },
+            ipc::Img {
+                img,
+                path,
+                dim,
+                format: pixel_format,
+            },
             outputs.to_owned().into_boxed_slice(),
+            animation,
         );
     }
 
@@ -258,50 +272,6 @@ fn get_format_dims_and_outputs(
         Answer::Err(e) => Err(format!("daemon error when sending query: {e}")),
         _ => unreachable!(),
     }
-}
-
-fn make_animation_request(
-    img: &cli::Img,
-    imgbuf: &ImgBuf,
-    dims: &[(u32, u32)],
-    pixel_format: ipc::PixelFormat,
-    outputs: &[Vec<String>],
-) -> Result<AnimationRequest, String> {
-    let mut anim_req_builder = ipc::AnimationRequestBuilder::new();
-
-    let filter = make_filter(&img.filter);
-    for (dim, outputs) in dims.iter().zip(outputs) {
-        //TODO: make cache work for all resize strategies
-        if img.resize == ResizeStrategy::Crop {
-            match cache::load_animation_frames(&img.path, *dim, pixel_format) {
-                Ok(Some(animation)) => {
-                    anim_req_builder.push(animation, outputs.to_owned().into_boxed_slice());
-                    continue;
-                }
-                Ok(None) => (),
-                Err(e) => eprintln!("Error loading cache for {:?}: {e}", img.path),
-            }
-        }
-
-        let animation = ipc::Animation {
-            path: img.path.to_string_lossy().to_string(),
-            dimensions: *dim,
-            animation: compress_frames(
-                imgbuf.as_frames()?,
-                *dim,
-                pixel_format,
-                filter,
-                img.resize,
-                &img.fill_color,
-            )?
-            .into_boxed_slice(),
-            pixel_format,
-        };
-
-        anim_req_builder.push(animation, outputs.to_owned().into_boxed_slice());
-    }
-
-    Ok(anim_req_builder.build())
 }
 
 fn split_cmdline_outputs(outputs: &str) -> Box<[String]> {
