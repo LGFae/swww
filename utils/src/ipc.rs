@@ -6,7 +6,7 @@ use std::{
 };
 
 use rustix::{
-    fd::{AsFd, OwnedFd},
+    fd::{AsFd, BorrowedFd, OwnedFd},
     io::Errno,
     mm::{mmap, munmap, MapFlags, ProtFlags},
     net::{self, RecvFlags},
@@ -709,13 +709,13 @@ impl Request {
                 });
             }
 
-            let mut ancillary_buf = [0u8; 64];
+            let mut ancillary_buf = [0u8; rustix::cmsg_space!(ScmRights(1))];
             let mut ancillary = net::SendAncillaryBuffer::new(&mut ancillary_buf);
 
             let mmap = if !bytes.is_empty() {
                 socket_msg[8..].copy_from_slice(&(bytes.len() as u64).to_ne_bytes());
                 let mut mmap = Mmap::create(bytes.len());
-                mmap.as_mut().copy_from_slice(&bytes);
+                mmap.slice_mut().copy_from_slice(&bytes);
                 Some(mmap)
             } else {
                 None
@@ -759,7 +759,7 @@ impl Request {
             1 => Self::Query,
             2 => {
                 let mut mmap = socket_msg.shm.unwrap();
-                let bytes = mmap.as_mut();
+                let bytes = mmap.slice_mut();
                 let len = bytes[0] as usize;
                 let mut outputs = Vec::with_capacity(len);
                 let mut i = 1;
@@ -782,7 +782,7 @@ impl Request {
             }
             3 => {
                 let mut mmap = socket_msg.shm.unwrap();
-                let bytes = mmap.as_mut();
+                let bytes = mmap.slice_mut();
                 let transition = Transition::deserialize(&bytes[0..]);
                 let len = bytes[51] as usize;
 
@@ -833,7 +833,7 @@ impl Request {
             }
             4 => {
                 let mut mmap = socket_msg.shm.unwrap();
-                let bytes = mmap.as_mut();
+                let bytes = mmap.slice_mut();
                 let len = bytes[0] as usize;
                 let mut animations = Vec::with_capacity(len);
                 let mut outputs = Vec::with_capacity(len);
@@ -910,13 +910,13 @@ impl Answer {
             _ => vec![],
         };
 
-        let mut ancillary_buf = [0u8; 64];
+        let mut ancillary_buf = [0u8; rustix::cmsg_space!(ScmRights(1))];
         let mut ancillary = net::SendAncillaryBuffer::new(&mut ancillary_buf);
 
         let mmap = if !bytes.is_empty() {
             socket_msg[8..].copy_from_slice(&(bytes.len() as u64).to_ne_bytes());
             let mut mmap = Mmap::create(bytes.len());
-            mmap.as_mut().copy_from_slice(&bytes);
+            mmap.slice_mut().copy_from_slice(&bytes);
             Some(mmap)
         } else {
             None
@@ -950,7 +950,7 @@ impl Answer {
             2 => Self::Ping(false),
             3 => {
                 let mut mmap = socket_msg.shm.unwrap();
-                let bytes = mmap.as_mut();
+                let bytes = mmap.slice_mut();
                 let len = bytes[0] as usize;
                 let mut bg_infos = Vec::with_capacity(len);
 
@@ -965,7 +965,7 @@ impl Answer {
             }
             4 => {
                 let mut mmap = socket_msg.shm.unwrap();
-                let bytes = mmap.as_mut();
+                let bytes = mmap.slice_mut();
                 let err_size = unsafe { bytes.as_ptr().cast::<u32>().read_unaligned() } as usize;
                 let err = std::str::from_utf8(&bytes[4..4 + err_size])
                     .unwrap()
@@ -984,7 +984,7 @@ pub struct SocketMsg {
 
 pub fn read_socket(stream: &OwnedFd) -> Result<SocketMsg, String> {
     let mut buf = [0; 16];
-    let mut ancillary_buf = [0; 64];
+    let mut ancillary_buf = [0u8; rustix::cmsg_space!(ScmRights(1))];
 
     let mut control = net::RecvAncillaryBuffer::new(&mut ancillary_buf);
 
@@ -1119,7 +1119,7 @@ pub fn connect_to_socket(addr: &PathBuf, tries: u8, interval: u64) -> Result<Own
 }
 
 #[derive(Debug)]
-struct Mmap {
+pub struct Mmap {
     fd: OwnedFd,
     ptr: *mut std::ffi::c_void,
     len: usize,
@@ -1129,19 +1129,55 @@ impl Mmap {
     const PROT: ProtFlags = ProtFlags::WRITE.union(ProtFlags::READ);
     const FLAGS: MapFlags = MapFlags::SHARED;
 
-    fn create(len: usize) -> Self {
+    #[inline]
+    #[must_use]
+    pub fn create(len: usize) -> Self {
         let fd = create_shm_fd().unwrap();
-
-        loop {
-            match rustix::fs::ftruncate(&fd, len as u64) {
-                Err(Errno::INTR) => continue,
-                otherwise => break otherwise.unwrap(),
-            }
-        }
+        rustix::io::retry_on_intr(|| rustix::fs::ftruncate(&fd, len as u64)).unwrap();
 
         let ptr =
             unsafe { mmap(std::ptr::null_mut(), len, Self::PROT, Self::FLAGS, &fd, 0).unwrap() };
         Self { fd, ptr, len }
+    }
+
+    #[inline]
+    pub fn remap(&mut self, new_len: usize) {
+        rustix::io::retry_on_intr(|| rustix::fs::ftruncate(&self.fd, new_len as u64)).unwrap();
+
+        #[cfg(target_os = "linux")]
+        {
+            let result = unsafe {
+                rustix::mm::mremap(
+                    self.ptr,
+                    self.len,
+                    new_len,
+                    rustix::mm::MremapFlags::MAYMOVE,
+                )
+            };
+
+            if let Ok(ptr) = result {
+                self.ptr = ptr;
+                self.len = new_len;
+                return;
+            }
+        }
+
+        if let Err(e) = unsafe { munmap(self.ptr, self.len) } {
+            eprintln!("ERROR WHEN UNMAPPING MEMORY: {e}");
+        }
+
+        self.len = new_len;
+        self.ptr = unsafe {
+            mmap(
+                std::ptr::null_mut(),
+                self.len,
+                Self::PROT,
+                Self::FLAGS,
+                &self.fd,
+                0,
+            )
+            .unwrap()
+        };
     }
 
     fn from_fd(fd: OwnedFd, len: usize) -> Self {
@@ -1150,12 +1186,28 @@ impl Mmap {
         Self { fd, ptr, len }
     }
 
-    fn as_mut(&mut self) -> &mut [u8] {
+    #[inline]
+    #[must_use]
+    pub fn slice_mut(&mut self) -> &mut [u8] {
         unsafe { std::slice::from_raw_parts_mut(self.ptr.cast(), self.len) }
+    }
+
+    #[inline]
+    #[must_use]
+    #[allow(clippy::len_without_is_empty)]
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn fd(&self) -> BorrowedFd {
+        self.fd.as_fd()
     }
 }
 
 impl Drop for Mmap {
+    #[inline]
     fn drop(&mut self) {
         if let Err(e) = unsafe { munmap(self.ptr, self.len) } {
             eprintln!("ERROR WHEN UNMAPPING MEMORY: {e}");
@@ -1198,7 +1250,7 @@ fn create_shm_fd() -> std::io::Result<OwnedFd> {
                 let time = std::time::SystemTime::now();
 
                 mem_file_handle = format!(
-                    "/swww-daemon-{}",
+                    "/swww-ipc-{}",
                     time.duration_since(std::time::UNIX_EPOCH)
                         .unwrap()
                         .subsec_nanos()

@@ -10,7 +10,6 @@ use log::{debug, error, info, warn, LevelFilter};
 use rustix::{
     event::{poll, PollFd, PollFlags},
     fd::OwnedFd,
-    path::Arg,
 };
 use simplelog::{ColorChoice, TermLogger, TerminalMode, ThreadLogMode};
 use wallpaper::Wallpaper;
