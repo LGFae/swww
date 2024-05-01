@@ -218,8 +218,7 @@ impl BgInfo {
             pixel_format,
         } = self;
 
-        buf.extend((name.len() as u32).to_ne_bytes());
-        buf.extend(name.as_bytes());
+        serialize_bytes(name.as_bytes(), buf);
         buf.extend(dim.0.to_ne_bytes());
         buf.extend(dim.1.to_ne_bytes());
 
@@ -241,8 +240,7 @@ impl BgInfo {
             }
             BgImg::Img(path) => {
                 buf.push(1);
-                buf.extend((path.len() as u32).to_ne_bytes());
-                buf.extend(path.as_bytes());
+                serialize_bytes(path.as_bytes(), buf);
             }
         }
 
@@ -250,29 +248,26 @@ impl BgInfo {
     }
 
     fn deserialize(bytes: &[u8]) -> (Self, usize) {
-        let mut i = 0;
-        let name_size = unsafe { bytes.as_ptr().add(i).cast::<u32>().read_unaligned() } as usize;
-        i += 4;
-        let name = std::str::from_utf8(&bytes[i..i + name_size])
-            .unwrap()
-            .to_string();
-        i += name_size;
+        let name = deserialize_string(bytes);
+        let mut i = name.len() + 4;
+
+        assert!(bytes.len() > i + 17);
 
         let dim = (
-            unsafe { bytes.as_ptr().add(i).cast::<u32>().read_unaligned() },
-            unsafe { bytes.as_ptr().add(i + 4).cast::<u32>().read_unaligned() },
+            u32::from_ne_bytes(bytes[i..i + 4].try_into().unwrap()),
+            u32::from_ne_bytes(bytes[i + 4..i + 8].try_into().unwrap()),
         );
         i += 8;
 
         let scale_factor = if bytes[i] == 0 {
             Scale::Whole(
-                unsafe { bytes.as_ptr().add(i + 1).cast::<i32>().read_unaligned() }
+                i32::from_ne_bytes(bytes[i + 1..i + 5].try_into().unwrap())
                     .try_into()
                     .unwrap(),
             )
         } else {
             Scale::Fractional(
-                unsafe { bytes.as_ptr().add(i + 1).cast::<i32>().read_unaligned() }
+                i32::from_ne_bytes(bytes[i + 1..i + 5].try_into().unwrap())
                     .try_into()
                     .unwrap(),
             )
@@ -284,13 +279,8 @@ impl BgInfo {
             BgImg::Color([bytes[i - 3], bytes[i - 2], bytes[i - 1]])
         } else {
             i += 1;
-            let path_size =
-                unsafe { bytes.as_ptr().add(i).cast::<u32>().read_unaligned() } as usize;
-            i += 4;
-            let path = std::str::from_utf8(&bytes[i..i + path_size])
-                .unwrap()
-                .to_string();
-            i += path_size;
+            let path = deserialize_string(&bytes[i..]);
+            i += 4 + path.len();
             BgImg::Img(path)
         };
 
@@ -408,34 +398,34 @@ impl Transition {
             5 => TransitionType::Wave,
             _ => TransitionType::None,
         };
-        let duration = unsafe { bytes.as_ptr().add(1).cast::<f32>().read_unaligned() };
+        let duration = f32::from_ne_bytes(bytes[1..5].try_into().unwrap());
         let step = NonZeroU8::new(bytes[5]).expect("received step of 0");
-        let fps = unsafe { bytes.as_ptr().add(6).cast::<u16>().read_unaligned() };
-        let angle = unsafe { bytes.as_ptr().add(8).cast::<f64>().read_unaligned() };
+        let fps = u16::from_ne_bytes(bytes[6..8].try_into().unwrap());
+        let angle = f64::from_ne_bytes(bytes[8..16].try_into().unwrap());
         let pos = {
             let x = if bytes[16] == 0 {
-                Coord::Pixel(unsafe { bytes.as_ptr().add(17).cast::<f32>().read_unaligned() })
+                Coord::Pixel(f32::from_ne_bytes(bytes[17..21].try_into().unwrap()))
             } else {
-                Coord::Percent(unsafe { bytes.as_ptr().add(17).cast::<f32>().read_unaligned() })
+                Coord::Percent(f32::from_ne_bytes(bytes[17..21].try_into().unwrap()))
             };
             let y = if bytes[21] == 0 {
-                Coord::Pixel(unsafe { bytes.as_ptr().add(22).cast::<f32>().read_unaligned() })
+                Coord::Pixel(f32::from_ne_bytes(bytes[22..26].try_into().unwrap()))
             } else {
-                Coord::Percent(unsafe { bytes.as_ptr().add(22).cast::<f32>().read_unaligned() })
+                Coord::Percent(f32::from_ne_bytes(bytes[22..26].try_into().unwrap()))
             };
             Position { x, y }
         };
 
         let bezier = (
-            unsafe { bytes.as_ptr().add(26).cast::<f32>().read_unaligned() },
-            unsafe { bytes.as_ptr().add(30).cast::<f32>().read_unaligned() },
-            unsafe { bytes.as_ptr().add(34).cast::<f32>().read_unaligned() },
-            unsafe { bytes.as_ptr().add(38).cast::<f32>().read_unaligned() },
+            f32::from_ne_bytes(bytes[26..30].try_into().unwrap()),
+            f32::from_ne_bytes(bytes[30..34].try_into().unwrap()),
+            f32::from_ne_bytes(bytes[34..38].try_into().unwrap()),
+            f32::from_ne_bytes(bytes[38..42].try_into().unwrap()),
         );
 
         let wave = (
-            unsafe { bytes.as_ptr().add(42).cast::<f32>().read_unaligned() },
-            unsafe { bytes.as_ptr().add(46).cast::<f32>().read_unaligned() },
+            f32::from_ne_bytes(bytes[42..46].try_into().unwrap()),
+            f32::from_ne_bytes(bytes[46..50].try_into().unwrap()),
         );
 
         let invert_y = bytes[50] != 0;
@@ -485,8 +475,7 @@ impl Animation {
             bitpack.serialize(buf);
             buf.extend(duration.as_secs_f64().to_ne_bytes())
         }
-        buf.extend((path.len() as u32).to_ne_bytes());
-        buf.extend(path.as_bytes());
+        serialize_bytes(path.as_bytes(), buf);
 
         buf.extend(dimensions.0.to_ne_bytes());
         buf.extend(dimensions.1.to_ne_bytes());
@@ -495,30 +484,24 @@ impl Animation {
 
     pub(crate) fn deserialize(bytes: &[u8]) -> (Self, usize) {
         let mut i = 0;
-        let animation_len =
-            unsafe { bytes.as_ptr().add(i).cast::<u32>().read_unaligned() } as usize;
+        let animation_len = u32::from_ne_bytes(bytes[i..i + 4].try_into().unwrap()) as usize;
         i += 4;
         let mut animation = Vec::with_capacity(animation_len);
         for _ in 0..animation_len {
             let (anim, offset) = BitPack::deserialize(&bytes[i..]);
             i += offset;
-            let duration = Duration::from_secs_f64(unsafe {
-                bytes.as_ptr().add(i).cast::<f64>().read_unaligned()
-            });
+            let duration =
+                Duration::from_secs_f64(f64::from_ne_bytes(bytes[i..i + 8].try_into().unwrap()));
             i += 8;
             animation.push((anim, duration));
         }
 
-        let path_size = unsafe { bytes.as_ptr().add(i).cast::<u32>().read_unaligned() } as usize;
-        i += 4;
-        let path = std::str::from_utf8(&bytes[i..i + path_size])
-            .unwrap()
-            .to_string();
-        i += path_size;
+        let path = deserialize_string(&bytes[i..]);
+        i += 4 + path.len();
 
         let dimensions = (
-            unsafe { bytes.as_ptr().add(i).cast::<u32>().read_unaligned() },
-            unsafe { bytes.as_ptr().add(i + 4).cast::<u32>().read_unaligned() },
+            u32::from_ne_bytes(bytes[i..i + 4].try_into().unwrap()),
+            u32::from_ne_bytes(bytes[i + 4..i + 8].try_into().unwrap()),
         );
         i += 8;
         let pixel_format = match bytes[i] {
@@ -640,8 +623,7 @@ impl Request {
                 buf.push(clear.outputs.len() as u8); // we assume someone does not have more than
                                                      // 255 monitors. Seems reasonable
                 for output in clear.outputs.iter() {
-                    buf.extend((output.len() as u32).to_ne_bytes());
-                    buf.extend(output.as_bytes());
+                    serialize_bytes(output.as_bytes(), &mut buf);
                 }
                 buf.extend(clear.color);
                 buf
@@ -656,19 +638,16 @@ impl Request {
                 let mut buf = Vec::with_capacity(imgs[0].img.len() + 1024);
                 transition.serialize(&mut buf);
                 buf.push(imgs.len() as u8); // we assume someone does not have more than 255
+                                            // monitors
 
                 for (img, output) in imgs.iter().zip(outputs.iter()) {
                     let Img { path, img } = img;
-                    buf.extend((path.len() as u32).to_ne_bytes());
-                    buf.extend(path.as_bytes());
-
-                    buf.extend((img.len() as u32).to_ne_bytes());
-                    buf.extend(img.iter());
+                    serialize_bytes(path.as_bytes(), &mut buf);
+                    serialize_bytes(img, &mut buf);
 
                     buf.push(output.len() as u8);
                     for output in output.iter() {
-                        buf.extend((output.len() as u32).to_ne_bytes());
-                        buf.extend(output.as_bytes());
+                        serialize_bytes(output.as_bytes(), &mut buf);
                     }
                 }
 
@@ -686,8 +665,7 @@ impl Request {
                     animation.serialize(&mut buf);
                     buf.push(output.len() as u8);
                     for output in output.iter() {
-                        buf.extend((output.len() as u32).to_ne_bytes());
-                        buf.extend(output.as_bytes());
+                        serialize_bytes(output.as_bytes(), &mut buf);
                     }
                 }
 
@@ -764,15 +742,9 @@ impl Request {
                 let mut outputs = Vec::with_capacity(len);
                 let mut i = 1;
                 for _ in 0..len {
-                    let str_size =
-                        unsafe { bytes.as_ptr().add(i).cast::<u32>().read_unaligned() } as usize;
-                    i += 4;
-                    outputs.push(
-                        std::str::from_utf8(&bytes[i..i + str_size])
-                            .unwrap()
-                            .to_string(),
-                    );
-                    i += str_size;
+                    let output = deserialize_string(&bytes[i..]);
+                    i += 4 + output.len();
+                    outputs.push(output);
                 }
                 let color = [bytes[i], bytes[i + 1], bytes[i + 2]];
                 Self::Clear(Clear {
@@ -791,19 +763,11 @@ impl Request {
 
                 let mut i = 52;
                 for _ in 0..len {
-                    let path_size =
-                        unsafe { bytes.as_ptr().add(i).cast::<u32>().read_unaligned() } as usize;
-                    i += 4;
-                    let path = std::str::from_utf8(&bytes[i..i + path_size])
-                        .unwrap()
-                        .to_string();
-                    i += path_size;
+                    let path = deserialize_string(&bytes[i..]);
+                    i += 4 + path.len();
 
-                    let img_size =
-                        unsafe { bytes.as_ptr().add(i).cast::<u32>().read_unaligned() } as usize;
-                    i += 4;
-                    let img = bytes[i..i + img_size].into();
-                    i += img_size;
+                    let img = deserialize_bytes(&bytes[i..]);
+                    i += 4 + img.len();
 
                     imgs.push(Img { path, img });
 
@@ -811,16 +775,9 @@ impl Request {
                     i += 1;
                     let mut out = Vec::with_capacity(n_outputs);
                     for _ in 0..n_outputs {
-                        let str_size =
-                            unsafe { bytes.as_ptr().add(i).cast::<u32>().read_unaligned() }
-                                as usize;
-                        i += 4;
-                        out.push(
-                            std::str::from_utf8(&bytes[i..i + str_size])
-                                .unwrap()
-                                .to_string(),
-                        );
-                        i += str_size;
+                        let output = deserialize_string(&bytes[i..]);
+                        i += 4 + output.len();
+                        out.push(output);
                     }
                     outputs.push(out.into());
                 }
@@ -847,16 +804,9 @@ impl Request {
                     i += 1;
                     let mut out = Vec::with_capacity(n_outputs);
                     for _ in 0..n_outputs {
-                        let str_size =
-                            unsafe { bytes.as_ptr().add(i).cast::<u32>().read_unaligned() }
-                                as usize;
-                        i += 4;
-                        out.push(
-                            std::str::from_utf8(&bytes[i..i + str_size])
-                                .unwrap()
-                                .to_string(),
-                        );
-                        i += str_size;
+                        let output = deserialize_string(&bytes[i..]);
+                        i += 4 + output.len();
+                        out.push(output);
                     }
                     outputs.push(out.into());
                 }
@@ -903,8 +853,7 @@ impl Answer {
             }
             Self::Err(s) => {
                 let mut buf = Vec::with_capacity(128);
-                buf.extend((s.len() as u32).to_ne_bytes());
-                buf.extend(s.as_bytes());
+                serialize_bytes(s.as_bytes(), &mut buf);
                 buf
             }
             _ => vec![],
@@ -966,11 +915,7 @@ impl Answer {
             4 => {
                 let mut mmap = socket_msg.shm.unwrap();
                 let bytes = mmap.slice_mut();
-                let err_size = unsafe { bytes.as_ptr().cast::<u32>().read_unaligned() } as usize;
-                let err = std::str::from_utf8(&bytes[4..4 + err_size])
-                    .unwrap()
-                    .to_string();
-                Self::Err(err)
+                Self::Err(deserialize_string(bytes))
             }
             _ => panic!("Received malformed answer from daemon"),
         }
@@ -1283,4 +1228,21 @@ fn create_memfd() -> rustix::io::Result<OwnedFd> {
             Err(err) => return Err(err),
         }
     }
+}
+
+fn serialize_bytes(bytes: &[u8], buf: &mut Vec<u8>) {
+    buf.extend((bytes.len() as u32).to_ne_bytes());
+    buf.extend(bytes);
+}
+
+fn deserialize_bytes(bytes: &[u8]) -> Box<[u8]> {
+    let size = u32::from_ne_bytes(bytes[0..4].try_into().unwrap()) as usize;
+    bytes[4..4 + size].into()
+}
+
+fn deserialize_string(bytes: &[u8]) -> String {
+    let size = u32::from_ne_bytes(bytes[0..4].try_into().unwrap()) as usize;
+    std::str::from_utf8(&bytes[4..4 + size])
+        .expect("received a non utf8 string from socket")
+        .to_string()
 }

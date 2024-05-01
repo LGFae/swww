@@ -60,28 +60,24 @@ impl BitPack {
             compressed_size,
         } = self;
         buf.extend((inner.len() as u32).to_ne_bytes());
-        buf.extend(inner.iter());
         buf.extend((expected_buf_size).to_ne_bytes());
         buf.extend((compressed_size).to_ne_bytes());
+        buf.extend(inner.iter());
     }
 
     pub(crate) fn deserialize(bytes: &[u8]) -> (Self, usize) {
-        let mut i = 0;
-        let len = unsafe { bytes.as_ptr().add(i).cast::<u32>().read_unaligned() } as usize;
-        i += 4;
-        let inner = bytes[i..i + len].into();
-        i += len;
-        let expected_buf_size = unsafe { bytes.as_ptr().add(i).cast::<u32>().read_unaligned() };
-        i += 4;
-        let compressed_size = unsafe { bytes.as_ptr().add(i).cast::<i32>().read_unaligned() };
-        i += 4;
+        assert!(bytes.len() > 12);
+        let len = u32::from_ne_bytes(bytes[0..4].try_into().unwrap()) as usize;
+        let expected_buf_size = u32::from_ne_bytes(bytes[4..8].try_into().unwrap());
+        let compressed_size = i32::from_ne_bytes(bytes[8..12].try_into().unwrap());
+        let inner = bytes[12..12 + len].into();
         (
             Self {
                 inner,
                 expected_buf_size,
                 compressed_size,
             },
-            i,
+            12 + len,
         )
     }
 }
