@@ -634,7 +634,10 @@ impl Request {
         {
             for i in 0..outputs.len() {
                 let Img {
-                    path, dim: dims, format, ..
+                    path,
+                    dim: dims,
+                    format,
+                    ..
                 } = &imgs[i];
                 for output in outputs[i].iter() {
                     if let Err(e) = super::cache::store(output, path) {
@@ -1125,7 +1128,7 @@ fn create_memfd() -> rustix::io::Result<OwnedFd> {
     use rustix::fs::{MemfdFlags, SealFlags};
     use std::ffi::CStr;
 
-    let name = CStr::from_bytes_with_nul(b"swww-daemon\0").unwrap();
+    let name = CStr::from_bytes_with_nul(b"swww-ipc\0").unwrap();
     let flags = MemfdFlags::ALLOW_SEALING | MemfdFlags::CLOEXEC;
 
     loop {

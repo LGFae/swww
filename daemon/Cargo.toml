@@ -14,7 +14,7 @@ wayland-client = { version = "0.31", default-features = false, features = [ "log
 wayland-protocols = { version = "0.31", default-features = false, features = [ "client", "staging" ]}
 wayland-protocols-wlr = { version = "0.2", default-features = false, features = [ "client" ]}
 
-rustix = { version = "0.38", default-features = false, features = [ "event", "shm", "mm", "net" ] }
+rustix = { version = "0.38", default-features = false, features = [ "event" ] }
 libc = "0.2"
 
 keyframe = "1.1"

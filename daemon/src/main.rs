@@ -374,7 +374,7 @@ impl Daemon {
             Request::Clear(clear) => {
                 let wallpapers = self.find_wallpapers_by_names(&clear.outputs);
                 let color = clear.color;
-                match std::thread::Builder::new()
+                let spawn_result = std::thread::Builder::new()
                     .stack_size(1 << 15)
                     .name("clear".to_string())
                     .spawn(move || {
@@ -386,7 +386,8 @@ impl Daemon {
                             wallpaper.clear(color);
                             wallpaper.draw();
                         }
-                    }) {
+                    });
+                match spawn_result {
                     Ok(_) => Answer::Ok,
                     Err(e) => Answer::Err(format!("failed to spawn `clear` thread: {e}")),
                 }
@@ -415,7 +416,8 @@ impl Daemon {
                     }
                     used_wallpapers.push(wallpapers);
                 }
-                self.animator.transition(transition, imgs, animations, used_wallpapers)
+                self.animator
+                    .transition(transition, imgs, animations, used_wallpapers)
             }
         };
         if let Err(e) = answer.send(&stream) {

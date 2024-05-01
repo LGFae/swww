@@ -9,7 +9,7 @@ use std::{
     num::NonZeroI32,
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
-        Arc, Condvar, Mutex, RwLock,
+        Condvar, Mutex, RwLock,
     },
 };
 
@@ -27,7 +27,6 @@ use crate::{bump_pool::BumpPool, Daemon, LayerSurface};
 #[derive(Debug)]
 struct AnimationState {
     id: AtomicUsize,
-    transition_finished: Arc<AtomicBool>,
 }
 
 #[derive(Debug)]
@@ -132,7 +131,6 @@ impl Wallpaper {
             inner_staging,
             animation_state: AnimationState {
                 id: AtomicUsize::new(0),
-                transition_finished: Arc::new(AtomicBool::new(false)),
             },
             configured: AtomicBool::new(false),
             qh: qh.clone(),
@@ -381,9 +379,6 @@ impl Wallpaper {
     #[inline]
     pub(super) fn stop_animations(&self) {
         self.animation_state.id.fetch_add(1, Ordering::AcqRel);
-        self.animation_state
-            .transition_finished
-            .store(false, Ordering::Release);
     }
 
     pub(super) fn clear(&self, color: [u8; 3]) {
