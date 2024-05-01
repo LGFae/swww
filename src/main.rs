@@ -58,7 +58,7 @@ fn main() -> Result<(), String> {
     }
 
     if let Swww::ClearCache = &swww {
-        return cache::clean();
+        return cache::clean().map_err(|e| format!("failed to clean the cache: {e}"));
     }
 
     loop {
@@ -362,7 +362,8 @@ fn restore_from_cache(requested_outputs: &[String]) -> Result<(), String> {
     let (_, _, outputs) = get_format_dims_and_outputs(requested_outputs)?;
 
     for output in outputs.iter().flatten() {
-        let img_path = utils::cache::get_previous_image_path(output)?;
+        let img_path = utils::cache::get_previous_image_path(output)
+            .map_err(|e| format!("failed to get previous image path: {e}"))?;
         #[allow(deprecated)]
         if let Err(e) = process_swww_args(&Swww::Img(cli::Img {
             path: PathBuf::from(img_path),

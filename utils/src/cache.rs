@@ -6,24 +6,19 @@
 
 use std::{
     fs::File,
-    io::{BufReader, BufWriter, Read, Write},
+    io::{self, Read, Write},
     path::{Path, PathBuf},
 };
 
 use crate::ipc::{Animation, PixelFormat};
 
-pub fn store(output_name: &str, img_path: &str) -> Result<(), String> {
+pub fn store(output_name: &str, img_path: &str) -> io::Result<()> {
     let mut filepath = cache_dir()?;
     filepath.push(output_name);
-    let file = File::create(filepath).map_err(|e| e.to_string())?;
-
-    let mut writer = BufWriter::new(file);
-    writer
-        .write_all(img_path.as_bytes())
-        .map_err(|e| format!("failed to write cache: {e}"))
+    File::create(filepath)?.write_all(img_path.as_bytes())
 }
 
-pub fn store_animation_frames(animation: &Animation) -> Result<(), String> {
+pub fn store_animation_frames(animation: &Animation) -> io::Result<()> {
     let filename = animation_filename(
         &PathBuf::from(&animation.path),
         animation.dimensions,
@@ -36,9 +31,7 @@ pub fn store_animation_frames(animation: &Animation) -> Result<(), String> {
     animation.serialize(&mut bytes);
 
     if !filepath.is_file() {
-        let mut file = File::create(filepath).map_err(|e| e.to_string())?;
-        file.write_all(&bytes)
-            .map_err(|e| format!("failed to write cache: {e}"))
+        File::create(filepath)?.write_all(&bytes)
     } else {
         Ok(())
     }
@@ -48,22 +41,18 @@ pub fn load_animation_frames(
     path: &Path,
     dimensions: (u32, u32),
     pixel_format: PixelFormat,
-) -> Result<Option<Animation>, String> {
+) -> io::Result<Option<Animation>> {
     let filename = animation_filename(path, dimensions, pixel_format);
     let cache_dir = cache_dir()?;
     let mut filepath = cache_dir.clone();
     filepath.push(filename);
 
-    let read_dir = cache_dir
-        .read_dir()
-        .map_err(|e| format!("failed to read cache directory ({cache_dir:?}): {e}"))?;
+    let read_dir = cache_dir.read_dir()?;
 
     for entry in read_dir.into_iter().flatten() {
         if entry.path() == filepath {
-            let mut file = File::open(&filepath).map_err(|e| e.to_string())?;
             let mut buf = Vec::new();
-            file.read_to_end(&mut buf)
-                .map_err(|e| format!("failed to read file `{filepath:?}`: {e}"))?;
+            File::open(&filepath)?.read_to_end(&mut buf)?;
 
             let (frames, _) = Animation::deserialize(&buf);
             return Ok(Some(frames));
@@ -72,7 +61,7 @@ pub fn load_animation_frames(
     Ok(None)
 }
 
-pub fn get_previous_image_path(output_name: &str) -> Result<String, String> {
+pub fn get_previous_image_path(output_name: &str) -> io::Result<String> {
     let mut filepath = cache_dir()?;
     clean_previous_verions(&filepath);
 
@@ -80,17 +69,19 @@ pub fn get_previous_image_path(output_name: &str) -> Result<String, String> {
     if !filepath.is_file() {
         return Ok("".to_string());
     }
-    let file = std::fs::File::open(filepath).map_err(|e| format!("failed to open file: {e}"))?;
-    let mut reader = BufReader::new(file);
-    let mut buf = Vec::with_capacity(64);
-    reader
-        .read_to_end(&mut buf)
-        .map_err(|e| format!("failed to read file: {e}"))?;
 
-    String::from_utf8(buf).map_err(|e| format!("failed to decode bytes: {e}"))
+    let mut buf = Vec::with_capacity(64);
+    File::open(filepath)?.read_to_end(&mut buf)?;
+
+    String::from_utf8(buf).map_err(|e| {
+        std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!("failed to decode bytes: {e}"),
+        )
+    })
 }
 
-pub fn load(output_name: &str) -> Result<(), String> {
+pub fn load(output_name: &str) -> io::Result<()> {
     let img_path = get_previous_image_path(output_name)?;
     if img_path.is_empty() {
         return Ok(());
@@ -99,31 +90,28 @@ pub fn load(output_name: &str) -> Result<(), String> {
     if let Ok(mut child) = std::process::Command::new("pidof").arg("swww").spawn() {
         if let Ok(status) = child.wait() {
             if status.success() {
-                return Err("there is already another swww process running".to_string());
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "there is already another swww process running".to_string(),
+                ));
             }
         }
     }
 
-    match std::process::Command::new("swww")
+    std::process::Command::new("swww")
         .arg("img")
         .args([
             &format!("--outputs={output_name}"),
             "--transition-type=none",
             &img_path,
         ])
-        .spawn()
-    {
-        Ok(mut child) => match child.wait() {
-            Ok(_) => Ok(()),
-            Err(e) => Err(format!("child process failed: {e}")),
-        },
-        Err(e) => Err(format!("failed to spawn child process: {e}")),
-    }
+        .spawn()?
+        .wait()?;
+    Ok(())
 }
 
-pub fn clean() -> Result<(), String> {
+pub fn clean() -> io::Result<()> {
     std::fs::remove_dir_all(cache_dir()?)
-        .map_err(|e| format!("failed to remove cache directory: {e}"))
 }
 
 fn clean_previous_verions(cache_dir: &Path) {
@@ -161,16 +149,15 @@ fn clean_previous_verions(cache_dir: &Path) {
     }
 }
 
-fn create_dir(p: &Path) -> Result<(), String> {
+fn create_dir(p: &Path) -> io::Result<()> {
     if !p.is_dir() {
-        if let Err(e) = std::fs::create_dir(p) {
-            return Err(format!("failed to create directory({p:#?}): {e}"));
-        }
+        std::fs::create_dir(p)
+    } else {
+        Ok(())
     }
-    Ok(())
 }
 
-fn cache_dir() -> Result<PathBuf, String> {
+fn cache_dir() -> io::Result<PathBuf> {
     if let Ok(path) = std::env::var("XDG_CACHE_HOME") {
         let mut path: PathBuf = path.into();
         path.push("swww");
@@ -183,7 +170,10 @@ fn cache_dir() -> Result<PathBuf, String> {
         create_dir(&path)?;
         Ok(path)
     } else {
-        Err("failed to read both $XDG_CACHE_HOME and $HOME environment variables".to_string())
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "failed to read both $XDG_CACHE_HOME and $HOME environment variables".to_string(),
+        ))
     }
 }
 

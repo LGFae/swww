@@ -906,7 +906,7 @@ pub struct SocketMsg {
 }
 
 pub fn read_socket(stream: &OwnedFd) -> Result<SocketMsg, String> {
-    let mut buf = [0; 16];
+    let mut buf = [0u8; 16];
     let mut ancillary_buf = [0u8; rustix::cmsg_space!(ScmRights(1))];
 
     let mut control = net::RecvAncillaryBuffer::new(&mut ancillary_buf);
@@ -965,35 +965,6 @@ pub fn get_socket_path() -> PathBuf {
     socket_path.push(socket_name);
 
     socket_path
-}
-
-pub fn get_cache_path() -> Result<PathBuf, String> {
-    let cache_path = match std::env::var("XDG_CACHE_HOME") {
-        Ok(dir) => {
-            let mut cache = PathBuf::from(dir);
-            cache.push("swww");
-            cache
-        }
-        Err(_) => match std::env::var("HOME") {
-            Ok(dir) => {
-                let mut cache = PathBuf::from(dir);
-                cache.push(".cache/swww");
-                cache
-            }
-            Err(_) => return Err("failed to read both XDG_CACHE_HOME and HOME env vars".to_owned()),
-        },
-    };
-
-    if !cache_path.is_dir() {
-        if let Err(e) = std::fs::create_dir(&cache_path) {
-            return Err(format!(
-                "failed to create cache_path \"{}\": {e}",
-                cache_path.display()
-            ));
-        }
-    }
-
-    Ok(cache_path)
 }
 
 /// We make sure the Stream is always set to blocking mode
