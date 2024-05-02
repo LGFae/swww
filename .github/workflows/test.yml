@@ -15,26 +15,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: mozilla-actions/sccache-action@v0.0.3
       - uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: llvm-tools-preview
       - uses: taiki-e/install-action@cargo-nextest
-      - uses: taiki-e/install-action@cargo-llvm-cov
-      - name: Run tests
-        run: cargo llvm-cov --workspace --locked nextest --html
-      - name: Upload test report
-        uses: actions/upload-artifact@v3
-        if: always()
-        with:
-          name: report
-          path: target/nextest/default/report.xml
-          retention-days: 30
-      - name: Upload coverage results
-        uses: actions/upload-artifact@v3
-        if: always()
-        with:
-          name: coverage
-          path: target/llvm-cov/
-          retention-days: 30
+      - run: cargo build --workspace --locked --verbose
+      - run: cargo nextest run --workspace --locked
 
   stable:
     runs-on: ubuntu-latest
