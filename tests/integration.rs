@@ -48,7 +48,9 @@ fn cmd() -> Command {
 }
 
 fn start_daemon() -> Command {
-    Command::cargo_bin("swww-daemon").unwrap()
+    let mut cmd = Command::cargo_bin("swww-daemon").unwrap();
+    cmd.arg("--no-cache");
+    cmd
 }
 
 #[test]
@@ -87,7 +89,7 @@ fn init_daemon() {
     // have implemented some proper syncronization. And, in here, it is *very*
     // unlikely that this will ever be a problem, (and, if it is, it is not a
     // very big deal, it will merely cause init_daemon_twice to false-fail)
-    std::thread::sleep(std::time::Duration::from_millis(100));
+    std::thread::sleep(std::time::Duration::from_millis(1));
 }
 
 /// Should fail since we already have an instance running

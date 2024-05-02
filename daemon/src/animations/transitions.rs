@@ -389,7 +389,7 @@ impl Transition {
 #[inline(always)]
 fn change_byte(channels: usize, step: u8, old: &mut [u8], new: &[u8]) {
     // this check improves the assembly generation slightly, by making the compiler not assume
-    // channels can be arbitrarly large
+    // channels can be arbitrarily large
     if channels != 3 && channels != 4 {
         log::error!("weird channel size of: {channels}");
         return;

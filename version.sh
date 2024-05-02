@@ -14,6 +14,7 @@ set -e
 
 # don't forget updating dependencies and testing everything
 cargo update
+cargo build
 cargo test --workspace -- --include-ignored
 ./doc/gen.sh # make sure the docs "compile"
 

@@ -513,7 +513,7 @@ impl Dispatch<wl_output::WlOutput, ()> for Daemon {
                                 e => warn!("unprocessed transform: {e:?}"),
                             },
                             wayland_client::WEnum::Unknown(u) => {
-                                error!("received unknown transfrom from compositor: {u}")
+                                error!("received unknown transform from compositor: {u}")
                             }
                         }
                     }

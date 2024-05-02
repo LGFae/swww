@@ -1,6 +1,28 @@
 ### Unreleased
 
 
+### 0.9.5
+
+This is mostly just fixes and small improvements.
+
+#### Fixes
+
+  * fixed wallpaper never setting `configured` to 'true'
+  * fixed fractional scaling rounding incorrectly 
+  * fixed scaling for vertical monitors (thanks, @AhJi26)
+  * fixed the annoying black screen on login issue (finally)
+
+#### Additions
+
+  * add --no-cache option to `swww-daemon`, by @lucasreis1
+
+#### Internal improvements
+
+  * specialized transition for `--transition-type none` (previously it was an alias
+  to `simple` with special values)
+  * remove an extra call to `thread::sleep` when loading the cache
+  * no longer using an `event_fd` to wake up the main thread
+
 ### 0.9.4
 
 Fractional Scaling is finally implemented! Woooo!!
@@ -16,9 +38,11 @@ will be the last one for a while.
 Quick release to fix a scaling error that might affect a lot of people.
 
 #### Fixes
+
   * fix wrong scale calculation
 
 #### Internal Improvements
+
   * deleted leftover `/proc` traversal code in the client
   * no longer setting nonblocking mode for daemon socket, since we are already
   polling it
