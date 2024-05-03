@@ -7,8 +7,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-log = { version = "0.4", features = ["max_level_debug", "release_max_level_info"] }
-simplelog = "0.12"
+log = { version = "0.4", default_features = false, features = ["max_level_debug", "release_max_level_info", "std"] }
 
 wayland-client = { version = "0.31", default-features = false, features = [ "log" ]}
 wayland-protocols = { version = "0.31", default-features = false, features = [ "client", "staging" ]}

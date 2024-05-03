@@ -11,7 +11,6 @@ use rustix::{
     event::{poll, PollFd, PollFlags},
     fd::OwnedFd,
 };
-use simplelog::{ColorChoice, TermLogger, TerminalMode, ThreadLogMode};
 use wallpaper::Wallpaper;
 use wayland_protocols::wp::{
     fractional_scale::v1::client::{
@@ -23,6 +22,7 @@ use wayland_protocols::wp::{
 
 use std::{
     fs,
+    io::{IsTerminal, Write},
     num::NonZeroI32,
     path::PathBuf,
     sync::{
@@ -810,23 +810,66 @@ impl Dispatch<LayerSurface, ()> for Daemon {
     }
 }
 
-fn make_logger(quiet: bool) {
-    let config = simplelog::ConfigBuilder::new()
-        .set_thread_level(LevelFilter::Error) // let me see where the processing is happening
-        .set_thread_mode(ThreadLogMode::Both)
-        .build();
+struct Logger {
+    level_filter: LevelFilter,
+    start: std::time::Instant,
+    is_term: bool,
+}
 
-    TermLogger::init(
-        if quiet {
-            LevelFilter::Error
-        } else {
-            LevelFilter::Debug
-        },
-        config,
-        TerminalMode::Stderr,
-        ColorChoice::AlwaysAnsi,
-    )
-    .expect("Failed to initialize logger. Cancelling...");
+impl log::Log for Logger {
+    fn enabled(&self, metadata: &log::Metadata) -> bool {
+        metadata.level() <= self.level_filter
+    }
+
+    fn log(&self, record: &log::Record) {
+        if self.enabled(record.metadata()) {
+            let time = self.start.elapsed().as_millis();
+
+            let level = if self.is_term {
+                match record.level() {
+                    log::Level::Error => "\x1b[31m[ERROR]\x1b[0m",
+                    log::Level::Warn => "\x1b[33m[WARN]\x1b[0m ",
+                    log::Level::Info => "\x1b[32m[INFO]\x1b[0m ",
+                    log::Level::Debug | log::Level::Trace => "\x1b[36m[DEBUG]\x1b[0m",
+                }
+            } else {
+                match record.level() {
+                    log::Level::Error => "[ERROR]",
+                    log::Level::Warn => "[WARN] ",
+                    log::Level::Info => "[INFO] ",
+                    log::Level::Debug | log::Level::Trace => "[DEBUG]",
+                }
+            };
+
+            let thread = std::thread::current();
+            let thread_name = thread.name().unwrap_or("???");
+            let msg = record.args();
+
+            let _ = std::io::stderr()
+                .lock()
+                .write_fmt(format_args!("{time:>8}ms {level} ({thread_name}) {msg}\n"));
+        }
+    }
+
+    fn flush(&self) {
+        //no op (we do not buffer anything)
+    }
+}
+
+fn make_logger(quiet: bool) {
+    let level_filter = if quiet {
+        LevelFilter::Error
+    } else {
+        LevelFilter::Debug
+    };
+
+    log::set_boxed_logger(Box::new(Logger {
+        level_filter,
+        start: std::time::Instant::now(),
+        is_term: std::io::stderr().is_terminal(),
+    }))
+    .map(|()| log::set_max_level(level_filter))
+    .unwrap();
 }
 
 pub fn is_daemon_running(addr: &PathBuf) -> Result<bool, String> {
