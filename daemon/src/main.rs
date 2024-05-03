@@ -381,11 +381,14 @@ impl Daemon {
                         for wallpaper in &wallpapers {
                             wallpaper.stop_animations();
                         }
-                        for wallpaper in wallpapers {
+                        for wallpaper in &wallpapers {
                             wallpaper.set_img_info(utils::ipc::BgImg::Color(color));
                             wallpaper.clear(color);
+                        }
+                        for wallpaper in &wallpapers {
                             wallpaper.draw();
                         }
+                        flush_wayland();
                     });
                 match spawn_result {
                     Ok(_) => Answer::Ok,
