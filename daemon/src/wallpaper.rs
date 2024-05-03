@@ -14,7 +14,11 @@ use std::{
 };
 
 use wayland_client::{
-    protocol::{wl_output::WlOutput, wl_shm::WlShm, wl_surface::WlSurface},
+    protocol::{
+        wl_output::{Transform, WlOutput},
+        wl_shm::WlShm,
+        wl_surface::WlSurface,
+    },
     Proxy, QueueHandle,
 };
 
@@ -49,7 +53,7 @@ struct WallpaperInner {
     width: NonZeroI32,
     height: NonZeroI32,
     scale_factor: Scale,
-    is_vertical: bool,
+    transform: Transform,
 }
 
 impl Default for WallpaperInner {
@@ -60,7 +64,7 @@ impl Default for WallpaperInner {
             width: unsafe { NonZeroI32::new_unchecked(4) },
             height: unsafe { NonZeroI32::new_unchecked(4) },
             scale_factor: Scale::Whole(unsafe { NonZeroI32::new_unchecked(1) }),
-            is_vertical: false,
+            transform: Transform::Normal,
         }
     }
 }
@@ -188,30 +192,11 @@ impl Wallpaper {
                 )
             }
         }
-
-        if lock.is_vertical {
-            if lock.width > lock.height {
-                let t = lock.width;
-                lock.width = lock.height;
-                lock.height = t;
-            }
-        } else if lock.width < lock.height {
-            let t = lock.width;
-            lock.width = lock.height;
-            lock.height = t;
-        }
     }
 
     #[inline]
-    pub fn set_vertical(&self) {
-        let mut lock = self.inner_staging.lock().unwrap();
-        lock.is_vertical = true;
-    }
-
-    #[inline]
-    pub fn set_horizontal(&self) {
-        let mut lock = self.inner_staging.lock().unwrap();
-        lock.is_vertical = false;
+    pub fn set_transform(&self, transform: Transform) {
+        self.inner_staging.lock().unwrap().transform = transform;
     }
 
     #[inline]
@@ -268,7 +253,16 @@ impl Wallpaper {
             }
         }
 
-        if staging.scale_factor != inner.scale_factor {
+        let (width, height) = if matches!(
+            staging.transform,
+            Transform::_90 | Transform::_270 | Transform::Flipped90 | Transform::Flipped270
+        ) {
+            (staging.height, staging.width)
+        } else {
+            (staging.width, staging.height)
+        };
+
+        if staging.scale_factor != inner.scale_factor || staging.transform != inner.transform {
             match staging.scale_factor {
                 Scale::Whole(i) => {
                     // unset destination
@@ -277,26 +271,25 @@ impl Wallpaper {
                 }
                 Scale::Fractional(_) => {
                     self.wl_surface.set_buffer_scale(1);
-                    self.wp_viewport
-                        .set_destination(staging.width.get(), staging.height.get());
+                    self.wp_viewport.set_destination(width.get(), height.get());
                 }
             }
         }
 
-        if (inner.width, inner.height) == (staging.width, staging.height) {
-            inner.scale_factor = staging.scale_factor;
-            inner.name = staging.name.clone();
-            inner.desc = staging.desc.clone();
+        inner.scale_factor = staging.scale_factor;
+        inner.transform = staging.transform;
+        inner.name.clone_from(&staging.name);
+        inner.desc.clone_from(&staging.desc);
+        if (inner.width, inner.height) == (width, height) {
             return;
         }
-        //otherwise, everything changed
-        *inner = staging.clone();
+        self.stop_animations();
+        inner.width = width;
+        inner.height = height;
 
-        let (width, height, scale_factor) = (staging.width, staging.height, staging.scale_factor);
+        let scale_factor = staging.scale_factor;
         drop(inner);
         drop(staging);
-
-        self.stop_animations();
 
         self.layer_surface
             .set_size(width.get() as u32, height.get() as u32);
