@@ -130,12 +130,11 @@ impl<'a> Transition<'a> {
                             *old = *new;
                         } else if *old > *new {
                             *old -= step;
-                            done = false;
                         } else {
                             *old += step;
-                            done = false;
                         }
                     }
+                    done = canvas == new_img;
                 });
             }
             self.updt_wallpapers(&mut now);
@@ -143,21 +142,22 @@ impl<'a> Transition<'a> {
     }
 
     fn fade(&mut self, new_img: &[u8]) {
-        let mut step = 0.0;
+        let mut step = 0;
         let (mut seq, start) = self.bezier_seq(0.0, 1.0);
 
-        let channels = crate::pixel_format().channels() as usize;
         let mut now = Instant::now();
         while start.elapsed().as_secs_f64() < seq.duration() {
-            self.parallel_draw_all(channels, new_img, |_, old, new| {
-                for i in 0..channels {
-                    let old = unsafe { old.get_unchecked_mut(i) };
-                    let new = unsafe { new.get_unchecked(i) };
-                    *old = (*old as f64 * (1.0 - step) + *new as f64 * step) as u8;
-                }
-            });
+            for wallpaper in self.wallpapers.iter() {
+                wallpaper.canvas_change(|canvas| {
+                    for (old, new) in canvas.iter_mut().zip(new_img) {
+                        let x = *old as u16 * (256 - step);
+                        let y = *new as u16 * step;
+                        *old = ((x + y) >> 8) as u8;
+                    }
+                });
+            }
             self.updt_wallpapers(&mut now);
-            step = seq.now() as f64;
+            step = (256.0 * seq.now() as f64).trunc() as u16;
             seq.advance_to(start.elapsed().as_secs_f64());
         }
         self.step = 4 + self.step / 4;
