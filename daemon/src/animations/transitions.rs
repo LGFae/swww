@@ -300,20 +300,35 @@ impl<'a> Transition<'a> {
 
         let step = self.step;
         let channels = crate::pixel_format().channels() as usize;
+        let stride = width * channels;
         let (mut seq, start) = self.bezier_seq(0.0, dist_end);
         let mut now = Instant::now();
         while start.elapsed().as_secs_f64() < seq.duration() {
-            self.parallel_draw_all(channels, new_img, |i, old, new| {
-                let pix_x = i % width;
-                let pix_y = height - i / width;
-                let diff_x = pix_x.abs_diff(center_x);
-                let diff_y = pix_y.abs_diff(center_y);
-                let pix_center_dist = f32::sqrt((diff_x.pow(2) + diff_y.pow(2)) as f32);
-                if pix_center_dist <= dist_center {
-                    let step = step.saturating_add((dist_center - pix_center_dist).log2() as u8);
-                    change_byte(channels, step, old, new);
-                }
-            });
+            for wallpaper in self.wallpapers.iter() {
+                wallpaper.canvas_change(|canvas| {
+                    let line_begin = center_y.saturating_sub(dist_center as usize);
+                    let line_end = height.min(center_y + dist_center as usize);
+
+                    // to plot half a circle with radius r, we do sqrt(r^2 - x^2)
+                    for line in line_begin..line_end {
+                        let offset = (dist_center.powi(2) - (center_y as f32 - line as f32).powi(2))
+                            .sqrt() as usize;
+                        let col_begin = center_x.saturating_sub(offset) * channels;
+                        let col_end = width.min(center_x + offset) * channels;
+                        for col in col_begin..col_end {
+                            let old = unsafe { canvas.get_unchecked_mut(line * stride + col) };
+                            let new = unsafe { new_img.get_unchecked(line * stride + col) };
+                            if old.abs_diff(*new) < step {
+                                *old = *new;
+                            } else if *old > *new {
+                                *old -= step;
+                            } else {
+                                *old += step;
+                            }
+                        }
+                    }
+                });
+            }
             self.updt_wallpapers(&mut now);
 
             dist_center = seq.now();
@@ -342,20 +357,43 @@ impl<'a> Transition<'a> {
 
         let step = self.step;
         let channels = crate::pixel_format().channels() as usize;
+        let stride = width * channels;
         let (mut seq, start) = self.bezier_seq(dist_center, 0.0);
         let mut now = Instant::now();
         while start.elapsed().as_secs_f64() < seq.duration() {
-            self.parallel_draw_all(channels, new_img, |i, old, new| {
-                let pix_x = i % width;
-                let pix_y = height - i / width;
-                let diff_x = pix_x.abs_diff(center_x);
-                let diff_y = pix_y.abs_diff(center_y);
-                let pix_center_dist = f32::sqrt((diff_x.pow(2) + diff_y.pow(2)) as f32);
-                if pix_center_dist >= dist_center {
-                    let step = step.saturating_add((pix_center_dist - dist_center).log2() as u8);
-                    change_byte(channels, step, old, new);
-                }
-            });
+            for wallpaper in self.wallpapers.iter() {
+                wallpaper.canvas_change(|canvas| {
+                    // to plot half a circle with radius r, we do sqrt(r^2 - x^2)
+                    for line in 0..height {
+                        let offset = (dist_center.powi(2) - (center_y as f32 - line as f32).powi(2))
+                            .sqrt() as usize;
+                        let col_begin = center_x.saturating_sub(offset) * channels;
+                        let col_end = width.min(center_x + offset) * channels;
+                        for col in 0..col_begin {
+                            let old = unsafe { canvas.get_unchecked_mut(line * stride + col) };
+                            let new = unsafe { new_img.get_unchecked(line * stride + col) };
+                            if old.abs_diff(*new) < step {
+                                *old = *new;
+                            } else if *old > *new {
+                                *old -= step;
+                            } else {
+                                *old += step;
+                            }
+                        }
+                        for col in col_end..stride {
+                            let old = unsafe { canvas.get_unchecked_mut(line * stride + col) };
+                            let new = unsafe { new_img.get_unchecked(line * stride + col) };
+                            if old.abs_diff(*new) < step {
+                                *old = *new;
+                            } else if *old > *new {
+                                *old -= step;
+                            } else {
+                                *old += step;
+                            }
+                        }
+                    }
+                });
+            }
             self.updt_wallpapers(&mut now);
 
             dist_center = seq.now();
