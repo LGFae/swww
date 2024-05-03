@@ -9,7 +9,7 @@ use std::{
     num::NonZeroI32,
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
-        Arc, Condvar, Mutex, RwLock,
+        Condvar, Mutex, RwLock,
     },
 };
 
@@ -27,25 +27,11 @@ use crate::{bump_pool::BumpPool, Daemon, LayerSurface};
 #[derive(Debug)]
 struct AnimationState {
     id: AtomicUsize,
-    transition_finished: Arc<AtomicBool>,
 }
 
 #[derive(Debug)]
 pub(super) struct AnimationToken {
     id: usize,
-    transition_done: Arc<AtomicBool>,
-}
-
-impl AnimationToken {
-    pub(super) fn is_transition_done(&self) -> bool {
-        self.transition_done.load(Ordering::Acquire)
-    }
-
-    pub(super) fn set_transition_done(&self, wallpaper: &Wallpaper) {
-        if wallpaper.has_animation_id(self) {
-            self.transition_done.store(true, Ordering::Release);
-        }
-    }
 }
 
 struct FrameCallbackHandler {
@@ -145,7 +131,6 @@ impl Wallpaper {
             inner_staging,
             animation_state: AnimationState {
                 id: AtomicUsize::new(0),
-                transition_finished: Arc::new(AtomicBool::new(false)),
             },
             configured: AtomicBool::new(false),
             qh: qh.clone(),
@@ -381,10 +366,7 @@ impl Wallpaper {
     #[inline]
     pub(super) fn create_animation_token(&self) -> AnimationToken {
         let id = self.animation_state.id.load(Ordering::Acquire);
-        AnimationToken {
-            id,
-            transition_done: Arc::clone(&self.animation_state.transition_finished),
-        }
+        AnimationToken { id }
     }
 
     #[inline]
@@ -397,9 +379,6 @@ impl Wallpaper {
     #[inline]
     pub(super) fn stop_animations(&self) {
         self.animation_state.id.fetch_add(1, Ordering::AcqRel);
-        self.animation_state
-            .transition_finished
-            .store(false, Ordering::Release);
     }
 
     pub(super) fn clear(&self, color: [u8; 3]) {

@@ -6,8 +6,6 @@ use comp::pack_bytes;
 use decomp::{unpack_bytes_3channels, unpack_bytes_4channels};
 use std::ffi::{c_char, c_int};
 
-use bitcode::{Decode, Encode};
-
 use crate::ipc::PixelFormat;
 mod comp;
 mod cpu;
@@ -45,14 +43,43 @@ extern "C" {
 }
 
 /// This struct represents the cached difference between the previous frame and the next
-#[derive(Encode, Decode)]
 pub struct BitPack {
     inner: Box<[u8]>,
     /// This field will ensure we won't ever try to unpack the images on a buffer of the wrong size,
     /// which ultimately is what allows us to use unsafe in the unpack_bytes function
-    expected_buf_size: usize,
+    expected_buf_size: u32,
 
     compressed_size: i32,
+}
+
+impl BitPack {
+    pub(crate) fn serialize(&self, buf: &mut Vec<u8>) {
+        let Self {
+            inner,
+            expected_buf_size,
+            compressed_size,
+        } = self;
+        buf.extend((inner.len() as u32).to_ne_bytes());
+        buf.extend((expected_buf_size).to_ne_bytes());
+        buf.extend((compressed_size).to_ne_bytes());
+        buf.extend(inner.iter());
+    }
+
+    pub(crate) fn deserialize(bytes: &[u8]) -> (Self, usize) {
+        assert!(bytes.len() > 12);
+        let len = u32::from_ne_bytes(bytes[0..4].try_into().unwrap()) as usize;
+        let expected_buf_size = u32::from_ne_bytes(bytes[4..8].try_into().unwrap());
+        let compressed_size = i32::from_ne_bytes(bytes[8..12].try_into().unwrap());
+        let inner = bytes[12..12 + len].into();
+        (
+            Self {
+                inner,
+                expected_buf_size,
+                compressed_size,
+            },
+            12 + len,
+        )
+    }
 }
 
 /// Struct responsible for compressing our data. We use it to cache vector extensions that might
@@ -123,9 +150,9 @@ impl Compressor {
         v.truncate(n);
 
         let expected_buf_size = if pixel_format.channels() == 3 {
-            cur.len()
+            cur.len() as u32
         } else {
-            (cur.len() / 3) * 4
+            ((cur.len() / 3) * 4) as u32
         };
 
         Some(BitPack {
@@ -200,7 +227,7 @@ impl Decompressor {
         buf: &mut [u8],
         pixel_format: PixelFormat,
     ) -> Result<(), String> {
-        if buf.len() != bitpack.expected_buf_size {
+        if buf.len() != bitpack.expected_buf_size as usize {
             return Err(format!(
                 "buf has len {}, but expected len is {}",
                 buf.len(),

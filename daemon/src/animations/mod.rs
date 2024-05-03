@@ -3,7 +3,6 @@ use log::error;
 use std::{
     sync::Arc,
     thread::{self, Scope},
-    time::Duration,
 };
 
 use utils::{
@@ -38,7 +37,8 @@ impl Animator {
         transition: &'b ipc::Transition,
         img: &'b [u8],
         path: &'b String,
-        mut wallpapers: Vec<Arc<Wallpaper>>,
+        dim: (u32, u32),
+        wallpapers: &'b mut Vec<Arc<Wallpaper>>,
     ) where
         'a: 'b,
     {
@@ -52,19 +52,15 @@ impl Animator {
                 for w in wallpapers.iter_mut() {
                     w.set_img_info(BgImg::Img(path.to_string()));
                 }
-                let dimensions = wallpapers[0].get_dimensions();
-                let expected_len = dimensions.0 as usize
-                    * dimensions.1 as usize
-                    * crate::pixel_format().channels() as usize;
 
-                if img.len() == expected_len {
-                    Transition::new(wallpapers, dimensions, transition).execute(img);
-                } else {
-                    error!(
-                        "image is of wrong size! Image len: {}, expected len: {expected_len}",
-                        img.len(),
-                    );
+                let expect = wallpapers[0].get_dimensions();
+                if dim != expect {
+                    wallpapers.clear();
+                    error!("image has wrong dimensions! Expect {expect:?}, actual {dim:?}");
+                    return;
                 }
+
+                Transition::new(wallpapers, dim, transition).execute(img);
             })
         {
             error!("failed to spawn 'transition' thread: {}", e);
@@ -75,18 +71,34 @@ impl Animator {
         &mut self,
         transition: ipc::Transition,
         imgs: Box<[Img]>,
-        wallpapers: Vec<Vec<Arc<Wallpaper>>>,
+        animations: Option<Box<[Animation]>>,
+        mut wallpapers: Vec<Vec<Arc<Wallpaper>>>,
     ) -> Answer {
-        match thread::Builder::new()
+        let barrier = self.anim_barrier.clone();
+        let spawn_result = thread::Builder::new()
             .stack_size(1 << 15)
-            .name("transition spawner".to_string())
+            .name("animation spawner".to_string())
             .spawn(move || {
                 thread::scope(|s| {
-                    for (Img { img, path }, wallpapers) in imgs.iter().zip(wallpapers) {
-                        Self::spawn_transition_thread(s, &transition, img, path, wallpapers);
+                    for (Img { img, path, dim, .. }, wallpapers) in
+                        imgs.iter().zip(wallpapers.iter_mut())
+                    {
+                        Self::spawn_transition_thread(s, &transition, img, path, *dim, wallpapers);
                     }
                 });
-            }) {
+                drop(imgs);
+                #[allow(clippy::drop_non_drop)]
+                drop(transition);
+                if let Some(animations) = animations {
+                    thread::scope(|s| {
+                        for (animation, wallpapers) in animations.iter().zip(wallpapers) {
+                            let barrier = barrier.clone();
+                            Self::spawn_animation_thread(s, animation, wallpapers, barrier);
+                        }
+                    });
+                }
+            });
+        match spawn_result {
             Ok(_) => Answer::Ok,
             Err(e) => Answer::Err(e.to_string()),
         }
@@ -105,7 +117,7 @@ impl Animator {
             .stack_size(STACK_SIZE) //the default of 2MB is way too overkill for this
             .spawn_scoped(scope, move || {
                 /* We only need to animate if we have > 1 frame */
-                if animation.animation.len() <= 1 {
+                if animation.animation.len() <= 1 || wallpapers.is_empty() {
                     return;
                 }
                 log::debug!("Starting animation");
@@ -114,16 +126,6 @@ impl Animator {
                     .iter()
                     .map(|w| w.create_animation_token())
                     .collect();
-
-                for (wallpaper, token) in wallpapers.iter().zip(&tokens) {
-                    loop {
-                        if !wallpaper.has_animation_id(token) || token.is_transition_done() {
-                            break;
-                        }
-                        let duration: Duration = animation.animation[0].1;
-                        std::thread::sleep(duration / 2);
-                    }
-                }
 
                 let mut now = std::time::Instant::now();
 
@@ -170,28 +172,6 @@ impl Animator {
             })
         {
             error!("failed to spawn 'animation' thread: {}", e);
-        }
-    }
-
-    pub(super) fn animate(
-        &mut self,
-        animations: Box<[Animation]>,
-        wallpapers: Vec<Vec<Arc<Wallpaper>>>,
-    ) -> Answer {
-        let barrier = self.anim_barrier.clone();
-        match thread::Builder::new()
-            .stack_size(1 << 15)
-            .name("animation spawner".to_string())
-            .spawn(move || {
-                thread::scope(|s| {
-                    for (animation, wallpapers) in animations.iter().zip(wallpapers) {
-                        let barrier = barrier.clone();
-                        Self::spawn_animation_thread(s, animation, wallpapers, barrier);
-                    }
-                });
-            }) {
-            Ok(_) => Answer::Ok,
-            Err(e) => Answer::Err(e.to_string()),
         }
     }
 }

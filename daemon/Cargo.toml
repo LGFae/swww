@@ -1,6 +1,6 @@
 [package]
 name = "swww-daemon"
-version = "0.9.5"
+version = "0.9.5-master"
 authors = ["Leonardo Gibrowski Faé <leonardo.fae44@gmail.com>"]
 edition = "2021"
 
@@ -14,9 +14,7 @@ wayland-client = { version = "0.31", default-features = false, features = [ "log
 wayland-protocols = { version = "0.31", default-features = false, features = [ "client", "staging" ]}
 wayland-protocols-wlr = { version = "0.2", default-features = false, features = [ "client" ]}
 
-# use specific git version for Duration implementation. We will do this until the next bitcode release
-bitcode = { git = "https://github.com/SoftbearStudios/bitcode.git", rev = "5f25a59", default-features = false }
-rustix = { version = "0.38", default-features = false, features = [ "event", "shm", "mm" ] }
+rustix = { version = "0.38", default-features = false, features = [ "event" ] }
 libc = "0.2"
 
 keyframe = "1.1"
@@ -25,6 +23,6 @@ spin_sleep = "1.2"
 
 sd-notify = { version = "0.4.1" }
 
-utils = { version = "0.9.5", path = "../utils" }
+utils = { version = "0.9.5-master", path = "../utils" }
 [dev-dependencies]
 rand = "0.8"

@@ -9,7 +9,7 @@ mod wallpaper;
 use log::{debug, error, info, warn, LevelFilter};
 use rustix::{
     event::{poll, PollFd, PollFlags},
-    path::Arg,
+    fd::OwnedFd,
 };
 use simplelog::{ColorChoice, TermLogger, TerminalMode, ThreadLogMode};
 use wallpaper::Wallpaper;
@@ -24,7 +24,6 @@ use wayland_protocols::wp::{
 use std::{
     fs,
     num::NonZeroI32,
-    os::unix::net::{UnixListener, UnixStream},
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -48,8 +47,8 @@ use wayland_client::{
 };
 
 use utils::ipc::{
-    connect_to_socket, get_socket_path, read_socket, AnimationRequest, Answer, BgInfo,
-    ImageRequest, PixelFormat, Request, Scale,
+    connect_to_socket, get_socket_path, read_socket, Answer, BgInfo, ImageRequest, PixelFormat,
+    Request, Scale,
 };
 
 use animations::Animator;
@@ -200,8 +199,8 @@ fn main() -> Result<(), String> {
         }
 
         if !events[1].is_empty() {
-            match listener.0.accept() {
-                Ok((stream, _adr)) => daemon.recv_socket_msg(stream),
+            match rustix::net::accept(&listener.0) {
+                Ok(stream) => daemon.recv_socket_msg(stream),
                 Err(e) => match e.kind() {
                     std::io::ErrorKind::WouldBlock => (),
                     _ => return Err(format!("failed to accept incoming connection: {e}")),
@@ -238,7 +237,7 @@ fn setup_signals() {
 }
 
 /// This is a wrapper that makes sure to delete the socket when it is dropped
-struct SocketWrapper(UnixListener);
+struct SocketWrapper(OwnedFd);
 impl SocketWrapper {
     fn new() -> Result<Self, String> {
         let socket_addr = get_socket_path();
@@ -271,17 +270,28 @@ impl SocketWrapper {
             }
         }
 
-        let listener = match UnixListener::bind(socket_addr.clone()) {
-            Ok(address) => address,
-            Err(e) => return Err(format!("couldn't bind socket: {e}")),
-        };
+        let socket = rustix::net::socket_with(
+            rustix::net::AddressFamily::UNIX,
+            rustix::net::SocketType::STREAM,
+            rustix::net::SocketFlags::CLOEXEC.union(rustix::net::SocketFlags::NONBLOCK),
+            None,
+        )
+        .expect("failed to create socket file descriptor");
+
+        rustix::net::bind_unix(
+            &socket,
+            &rustix::net::SocketAddrUnix::new(&socket_addr).unwrap(),
+        )
+        .unwrap();
+
+        rustix::net::listen(&socket, 0).unwrap();
 
         debug!(
             "Made socket in {:?} and initialized logger. Starting daemon...",
-            listener.local_addr().unwrap() //this should always work if the socket connected correctly
+            socket_addr
         );
 
-        Ok(Self(listener))
+        Ok(Self(socket))
     }
 }
 
@@ -350,7 +360,7 @@ impl Daemon {
         }
     }
 
-    fn recv_socket_msg(&mut self, stream: UnixStream) {
+    fn recv_socket_msg(&mut self, stream: OwnedFd) {
         let bytes = match utils::ipc::read_socket(&stream) {
             Ok(bytes) => bytes,
             Err(e) => {
@@ -359,22 +369,12 @@ impl Daemon {
                 return;
             }
         };
-        let request = Request::receive(&bytes);
+        let request = Request::receive(bytes);
         let answer = match request {
-            Request::Animation(AnimationRequest {
-                animations,
-                outputs,
-            }) => {
-                let mut wallpapers = Vec::new();
-                for names in outputs.iter() {
-                    wallpapers.push(self.find_wallpapers_by_names(names));
-                }
-                self.animator.animate(animations, wallpapers)
-            }
             Request::Clear(clear) => {
                 let wallpapers = self.find_wallpapers_by_names(&clear.outputs);
                 let color = clear.color;
-                match std::thread::Builder::new()
+                let spawn_result = std::thread::Builder::new()
                     .stack_size(1 << 15)
                     .name("clear".to_string())
                     .spawn(move || {
@@ -386,7 +386,8 @@ impl Daemon {
                             wallpaper.clear(color);
                             wallpaper.draw();
                         }
-                    }) {
+                    });
+                match spawn_result {
                     Ok(_) => Answer::Ok,
                     Err(e) => Answer::Err(format!("failed to spawn `clear` thread: {e}")),
                 }
@@ -405,6 +406,7 @@ impl Daemon {
                 transition,
                 imgs,
                 outputs,
+                animations,
             }) => {
                 let mut used_wallpapers = Vec::new();
                 for names in outputs.iter() {
@@ -414,7 +416,8 @@ impl Daemon {
                     }
                     used_wallpapers.push(wallpapers);
                 }
-                self.animator.transition(transition, imgs, used_wallpapers)
+                self.animator
+                    .transition(transition, imgs, animations, used_wallpapers)
             }
         };
         if let Err(e) = answer.send(&stream) {
@@ -835,7 +838,7 @@ pub fn is_daemon_running(addr: &PathBuf) -> Result<bool, String> {
     };
 
     Request::Ping.send(&sock)?;
-    let answer = Answer::receive(&read_socket(&sock)?);
+    let answer = Answer::receive(read_socket(&sock)?);
     match answer {
         Answer::Ping(_) => Ok(true),
         _ => Err("Daemon did not return Answer::Ping, as expected".to_string()),
