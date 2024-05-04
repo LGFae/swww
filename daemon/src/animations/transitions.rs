@@ -172,6 +172,7 @@ impl<'a> Transition<'a> {
         let screen_diag = ((width.pow(2) + height.pow(2)) as f64).sqrt();
 
         let angle = self.angle.to_radians();
+        let (sin, cos) = angle.sin_cos();
         let (scale_x, scale_y) = (self.wave.0 as f64, self.wave.1 as f64);
 
         let circle_radius = screen_diag / 2.0;
@@ -185,8 +186,8 @@ impl<'a> Transition<'a> {
             let x = x - center.0 as f64;
             let y = y - center.1 as f64;
 
-            let lhs = y * angle.cos() - x * angle.sin();
-            let rhs = f(x * angle.cos() + y * angle.sin()) + circle_radius - offset;
+            let lhs = y * cos - x * sin;
+            let rhs = f(x * cos + y * sin) + circle_radius - offset;
             lhs >= rhs
         };
 
@@ -218,6 +219,7 @@ impl<'a> Transition<'a> {
                     change_byte(channels, step, old, new);
                 }
             });
+
             self.updt_wallpapers(&mut now);
 
             offset = seq.now() as f64;
@@ -244,32 +246,43 @@ impl<'a> Transition<'a> {
             (x.abs() * width as f64 / 2.0 + y.abs() * height as f64 / 2.0).abs()
         };
 
-        // line formula: (x-h)*a + (y-k)*b + C = r^2
-        // https://www.desmos.com/calculator/vpvzk12yar
-        //
-        // checks if a pixel is to the left or right of the line
-        let is_low = |pix_x: f64, pix_y: f64, offset: f64, radius: f64| {
-            let a = radius * angle.cos();
-            let b = radius * angle.sin();
-            let x = pix_x - center.0 as f64;
-            let y = pix_y - center.1 as f64;
-            let res = x * a + y * b + offset;
-            res >= radius.pow(2)
-        };
+        let a = circle_radius * angle.cos();
+        let b = circle_radius * angle.sin();
 
         let (width, height) = (width as usize, height as usize);
         let (mut seq, start) = self.bezier_seq(0.0, max_offset as f32);
 
         let step = self.step;
         let channels = crate::pixel_format().channels() as usize;
+        let stride = width * channels;
         while start.elapsed().as_secs_f64() < seq.duration() {
-            self.parallel_draw_all(channels, new_img, |i, old, new| {
-                let pix_x = i % width;
-                let pix_y = height - i / width;
-                if is_low(pix_x as f64, pix_y as f64, offset, circle_radius) {
-                    change_byte(channels, step, old, new);
-                }
-            });
+            for wallpaper in self.wallpapers.iter() {
+                wallpaper.canvas_change(|canvas| {
+                    // line formula: (x-h)*a + (y-k)*b + C = r^2
+                    // https://www.desmos.com/calculator/vpvzk12yar
+                    for line in 0..height {
+                        let y = ((height - line) as f64 - center.1 as f64) * b;
+                        let x = (circle_radius.powi(2) - y - offset) / a + center.0 as f64;
+                        let x = x.min(width as f64);
+                        let (col_begin, col_end) = if a.is_sign_negative() {
+                            (0usize, x as usize * channels)
+                        } else {
+                            (x as usize * channels, stride)
+                        };
+                        for col in col_begin..col_end {
+                            let old = unsafe { canvas.get_unchecked_mut(line * stride + col) };
+                            let new = unsafe { new_img.get_unchecked(line * stride + col) };
+                            if old.abs_diff(*new) < step {
+                                *old = *new;
+                            } else if *old > *new {
+                                *old -= step;
+                            } else {
+                                *old += step;
+                            }
+                        }
+                    }
+                });
+            }
             self.updt_wallpapers(&mut now);
 
             offset = seq.now() as f64;
