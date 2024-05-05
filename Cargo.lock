@@ -1334,7 +1334,6 @@ dependencies = [
  "libc",
  "log",
  "rand",
- "rayon",
  "rustix",
  "sd-notify",
  "spin_sleep",

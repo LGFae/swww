@@ -109,12 +109,6 @@ fn main() -> Result<(), String> {
         info!("Forced usage of wl_shm format: {:?}", wl_shm_format());
     }
 
-    rayon::ThreadPoolBuilder::default()
-        .thread_name(|i| format!("rayon thread {i}"))
-        .stack_size(1 << 19) // 512KiB; we do not need a large stack
-        .build_global()
-        .expect("failed to configure rayon global thread pool");
-
     let listener = SocketWrapper::new()?;
     setup_signals();
 
