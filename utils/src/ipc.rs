@@ -483,13 +483,7 @@ impl Animation {
             buf.extend(duration.as_secs_f64().to_ne_bytes())
         }
     }
-}
 
-pub struct AnimationRecv {
-    pub animation: Box<[(BitPack, Duration)]>,
-}
-
-impl AnimationRecv {
     pub(crate) fn deserialize(mmap: &Mmap, bytes: &[u8]) -> (Self, usize) {
         let mut i = 0;
         let animation_len = u32::from_ne_bytes(bytes[i..i + 4].try_into().unwrap()) as usize;
@@ -497,6 +491,28 @@ impl AnimationRecv {
         let mut animation = Vec::with_capacity(animation_len);
         for _ in 0..animation_len {
             let (anim, offset) = BitPack::deserialize(mmap, &bytes[i..]);
+            i += offset;
+            let duration =
+                Duration::from_secs_f64(f64::from_ne_bytes(bytes[i..i + 8].try_into().unwrap()));
+            i += 8;
+            animation.push((anim, duration));
+        }
+
+        (
+            Self {
+                animation: animation.into(),
+            },
+            i,
+        )
+    }
+
+    pub(crate) fn deserialize_copy(bytes: &[u8]) -> (Self, usize) {
+        let mut i = 0;
+        let animation_len = u32::from_ne_bytes(bytes[i..i + 4].try_into().unwrap()) as usize;
+        i += 4;
+        let mut animation = Vec::with_capacity(animation_len);
+        for _ in 0..animation_len {
+            let (anim, offset) = BitPack::deserialize_copy(&bytes[i..]);
             i += offset;
             let duration =
                 Duration::from_secs_f64(f64::from_ne_bytes(bytes[i..i + 8].try_into().unwrap()));
@@ -524,7 +540,7 @@ pub struct ImageRecv {
     pub transition: Transition,
     pub imgs: Box<[ImgRecv]>,
     pub outputs: Box<[Box<[MmappedStr]>]>,
-    pub animations: Option<Box<[AnimationRecv]>>,
+    pub animations: Option<Box<[Animation]>>,
 }
 
 pub struct ImageRequestBuilder {
@@ -773,7 +789,7 @@ impl RequestRecv {
 
                     if bytes[i] == 1 {
                         i += 1;
-                        let (animation, offset) = AnimationRecv::deserialize(&mmap, &bytes[i..]);
+                        let (animation, offset) = Animation::deserialize(&mmap, &bytes[i..]);
                         i += offset;
                         animations.push(animation);
                     } else {
@@ -1028,44 +1044,50 @@ impl MmappedBytes {
     pub(crate) fn new(map: &Mmap, bytes: &[u8]) -> Self {
         let len = u32::from_ne_bytes(bytes[0..4].try_into().unwrap()) as usize;
         let offset = 4 + bytes.as_ptr() as usize - map.ptr.as_ptr() as usize;
+        let page_size = rustix::param::page_size();
+        let page_offset = offset - offset % page_size;
 
         let base_ptr = unsafe {
             let ptr = mmap(
                 std::ptr::null_mut(),
-                map.len,
+                len + (offset - page_offset),
                 Self::PROT,
                 Self::FLAGS,
                 &map.fd,
-                0,
+                page_offset as u64,
             )
             .unwrap();
             // SAFETY: the function above will never return a null pointer if it succeeds
             // POSIX says that the implementation will never select an address at 0
             NonNull::new_unchecked(ptr)
         };
-        let ptr = unsafe { NonNull::new_unchecked(base_ptr.as_ptr().byte_add(offset)) };
+        let ptr =
+            unsafe { NonNull::new_unchecked(base_ptr.as_ptr().byte_add(offset - page_offset)) };
 
         Self { base_ptr, ptr, len }
     }
 
     pub(crate) fn new_with_len(map: &Mmap, bytes: &[u8], len: usize) -> Self {
         let offset = bytes.as_ptr() as usize - map.ptr.as_ptr() as usize;
+        let page_size = rustix::param::page_size();
+        let page_offset = offset - offset % page_size;
 
         let base_ptr = unsafe {
             let ptr = mmap(
                 std::ptr::null_mut(),
-                map.len,
+                len + (offset - page_offset),
                 Self::PROT,
                 Self::FLAGS,
                 &map.fd,
-                0,
+                page_offset as u64,
             )
             .unwrap();
             // SAFETY: the function above will never return a null pointer if it succeeds
             // POSIX says that the implementation will never select an address at 0
             NonNull::new_unchecked(ptr)
         };
-        let ptr = unsafe { NonNull::new_unchecked(base_ptr.as_ptr().byte_add(offset)) };
+        let ptr =
+            unsafe { NonNull::new_unchecked(base_ptr.as_ptr().byte_add(offset - page_offset)) };
 
         Self { base_ptr, ptr, len }
     }
@@ -1103,22 +1125,25 @@ impl MmappedStr {
     fn new(map: &Mmap, bytes: &[u8]) -> Self {
         let len = u32::from_ne_bytes(bytes[0..4].try_into().unwrap()) as usize;
         let offset = 4 + bytes.as_ptr() as usize - map.ptr.as_ptr() as usize;
+        let page_size = rustix::param::page_size();
+        let page_offset = offset - offset % page_size;
 
         let base_ptr = unsafe {
             let ptr = mmap(
                 std::ptr::null_mut(),
-                map.len,
+                len + (offset - page_offset),
                 Self::PROT,
                 Self::FLAGS,
                 &map.fd,
-                0,
+                page_offset as u64,
             )
             .unwrap();
             // SAFETY: the function above will never return a null pointer if it succeeds
             // POSIX says that the implementation will never select an address at 0
             NonNull::new_unchecked(ptr)
         };
-        let ptr = unsafe { NonNull::new_unchecked(base_ptr.as_ptr().byte_add(offset)) };
+        let ptr =
+            unsafe { NonNull::new_unchecked(base_ptr.as_ptr().byte_add(offset - page_offset)) };
 
         // try to parse, panicking if we fail
         let s = unsafe { std::slice::from_raw_parts(ptr.as_ptr().cast(), len) };

@@ -7,7 +7,7 @@ use std::{
 
 use utils::{
     compression::Decompressor,
-    ipc::{self, AnimationRecv, Answer, BgImg, ImgRecv},
+    ipc::{self, Animation, Answer, BgImg, ImgRecv},
 };
 
 use crate::wallpaper::{AnimationToken, Wallpaper};
@@ -69,7 +69,7 @@ impl Animator {
         &mut self,
         transition: ipc::Transition,
         imgs: Box<[ImgRecv]>,
-        animations: Option<Box<[AnimationRecv]>>,
+        animations: Option<Box<[Animation]>>,
         mut wallpapers: Vec<Vec<Arc<Wallpaper>>>,
     ) -> Answer {
         let barrier = self.anim_barrier.clone();
@@ -109,7 +109,7 @@ impl Animator {
 
     fn spawn_animation_thread<'a, 'b>(
         scope: &'a Scope<'b, '_>,
-        animation: &'b AnimationRecv,
+        animation: &'b Animation,
         mut wallpapers: Vec<Arc<Wallpaper>>,
         barrier: ArcAnimBarrier,
     ) where

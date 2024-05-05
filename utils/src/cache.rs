@@ -43,24 +43,24 @@ pub fn load_animation_frames(
     dimensions: (u32, u32),
     pixel_format: PixelFormat,
 ) -> io::Result<Option<Animation>> {
-    //let filename = animation_filename(path, dimensions, pixel_format);
-    //let cache_dir = cache_dir()?;
-    //let mut filepath = cache_dir.clone();
-    //filepath.push(filename);
+    let filename = animation_filename(path, dimensions, pixel_format);
+    let cache_dir = cache_dir()?;
+    let mut filepath = cache_dir.clone();
+    filepath.push(filename);
 
-    //let read_dir = cache_dir.read_dir()?;
+    let read_dir = cache_dir.read_dir()?;
 
-    //for entry in read_dir.into_iter().flatten() {
-    //    if entry.path() == filepath {
-    //        let mut buf = Vec::new();
-    //        File::open(&filepath)?.read_to_end(&mut buf)?;
+    for entry in read_dir.into_iter().flatten() {
+        if entry.path() == filepath {
+            let mut buf = Vec::new();
+            File::open(&filepath)?.read_to_end(&mut buf)?;
 
-    //        match std::panic::catch_unwind(|| Animation::deserialize(&buf)) {
-    //            Ok((frames, _)) => return Ok(Some(frames)),
-    //            Err(e) => eprintln!("Error loading animation frames: {e:?}"),
-    //        }
-    //    }
-    //}
+            match std::panic::catch_unwind(|| Animation::deserialize_copy(&buf)) {
+                Ok((frames, _)) => return Ok(Some(frames)),
+                Err(e) => eprintln!("Error loading animation frames: {e:?}"),
+            }
+        }
+    }
     Ok(None)
 }
 
