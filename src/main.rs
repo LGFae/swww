@@ -122,10 +122,11 @@ fn make_request(args: &Swww) -> Result<Option<Request>, String> {
             if format.must_swap_r_and_b_channels() {
                 color.swap(0, 2);
             }
-            Ok(Some(Request::Clear(ipc::Clear {
+            let clear = ipc::Clear {
                 color,
                 outputs: split_cmdline_outputs(&c.outputs),
-            })))
+            };
+            Ok(Some(Request::Clear(clear.create_request())))
         }
         Swww::Restore(restore) => {
             let requested_outputs = split_cmdline_outputs(&restore.outputs);
@@ -137,9 +138,8 @@ fn make_request(args: &Swww) -> Result<Option<Request>, String> {
             let requested_outputs = split_cmdline_outputs(&img.outputs);
             let (format, dims, outputs) = get_format_dims_and_outputs(&requested_outputs)?;
             let imgbuf = ImgBuf::new(&img.path)?;
-            Ok(Some(Request::Img(make_img_request(
-                img, &imgbuf, &dims, format, &outputs,
-            )?)))
+            let img_request = make_img_request(img, &imgbuf, &dims, format, &outputs)?;
+            Ok(Some(Request::Img(img_request)))
         }
         Swww::Init { no_cache, .. } => {
             if !*no_cache {
@@ -158,7 +158,7 @@ fn make_img_request(
     dims: &[(u32, u32)],
     pixel_format: ipc::PixelFormat,
     outputs: &[Vec<String>],
-) -> Result<ipc::ImageRequest, String> {
+) -> Result<ipc::Mmap, String> {
     let img_raw = imgbuf.decode(pixel_format)?;
     let transition = make_transition(img);
     let mut img_req_builder = ipc::ImageRequestBuilder::new(transition);
@@ -218,7 +218,7 @@ fn make_img_request(
                 dim,
                 format: pixel_format,
             },
-            outputs.to_owned().into_boxed_slice(),
+            outputs,
             animation,
         );
     }

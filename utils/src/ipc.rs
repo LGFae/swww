@@ -83,6 +83,16 @@ pub enum BgImg {
     Img(String),
 }
 
+impl BgImg {
+    fn serialized_size(&self) -> usize {
+        1 //discriminant
+        + match self {
+            Self::Color(_) => 3,
+            Self::Img(s) => 4 + s.len()
+        }
+    }
+}
+
 impl fmt::Display for BgImg {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -210,7 +220,16 @@ impl BgInfo {
         (dim.0 as u32, dim.1 as u32)
     }
 
-    fn serialize(&self, buf: &mut Vec<u8>) {
+    fn serialized_size(&self) -> usize {
+        4 // name len
+            + self.name.len()
+            + 8 //dim
+            + 5 //scale_factor (discriminant + value)
+            + self.img.serialized_size()
+            + 1 //pixel_format
+    }
+
+    fn serialize(&self, buf: &mut [u8]) -> usize {
         let Self {
             name,
             dim,
@@ -219,33 +238,44 @@ impl BgInfo {
             pixel_format,
         } = self;
 
-        serialize_bytes(name.as_bytes(), buf);
-        buf.extend(dim.0.to_ne_bytes());
-        buf.extend(dim.1.to_ne_bytes());
+        let len = name.as_bytes().len();
+        buf[0..4].copy_from_slice(&(len as u32).to_ne_bytes());
+        buf[4..4 + len].copy_from_slice(name.as_bytes());
+        let mut i = 4 + len;
+        buf[i..i + 4].copy_from_slice(&dim.0.to_ne_bytes());
+        buf[i + 4..i + 8].copy_from_slice(&dim.1.to_ne_bytes());
+        i += 8;
 
         match scale_factor {
             Scale::Whole(value) => {
-                buf.push(0);
-                buf.extend(value.get().to_ne_bytes());
+                buf[i] = 0;
+                buf[i + 1..i + 5].copy_from_slice(&value.get().to_ne_bytes());
             }
             Scale::Fractional(value) => {
-                buf.push(1);
-                buf.extend(value.get().to_ne_bytes());
+                buf[i] = 1;
+                buf[i + 1..i + 5].copy_from_slice(&value.get().to_ne_bytes());
             }
         }
+        i += 5;
 
         match img {
             BgImg::Color(color) => {
-                buf.push(0);
-                buf.extend(color);
+                buf[i] = 0;
+                buf[i + 1..i + 4].copy_from_slice(color);
+                i += 4;
             }
             BgImg::Img(path) => {
-                buf.push(1);
-                serialize_bytes(path.as_bytes(), buf);
+                buf[i] = 1;
+                i += 1;
+                let len = path.as_bytes().len();
+                buf[i..i + 4].copy_from_slice(&(len as u32).to_ne_bytes());
+                buf[i + 4..i + 4 + len].copy_from_slice(path.as_bytes());
+                i += 4 + len;
             }
         }
 
-        buf.push(*pixel_format as u8);
+        buf[i] = *pixel_format as u8;
+        i + 1
     }
 
     fn deserialize(bytes: &[u8]) -> (Self, usize) {
@@ -341,7 +371,7 @@ pub struct Transition {
 }
 
 impl Transition {
-    fn serialize(&self, buf: &mut Vec<u8>) {
+    fn serialize(&self, buf: &mut ImageRequestBuilder) {
         let Self {
             transition_type,
             duration,
@@ -354,38 +384,38 @@ impl Transition {
             invert_y,
         } = self;
 
-        buf.push(*transition_type as u8);
-        buf.extend(duration.to_ne_bytes());
-        buf.push(step.get());
-        buf.extend(fps.to_ne_bytes());
-        buf.extend(angle.to_ne_bytes());
+        buf.push_byte(*transition_type as u8);
+        buf.extend(&duration.to_ne_bytes());
+        buf.push_byte(step.get());
+        buf.extend(&fps.to_ne_bytes());
+        buf.extend(&angle.to_ne_bytes());
         match pos.x {
             Coord::Pixel(f) => {
-                buf.push(0);
-                buf.extend(f.to_ne_bytes());
+                buf.push_byte(0);
+                buf.extend(&f.to_ne_bytes());
             }
             Coord::Percent(f) => {
-                buf.push(1);
-                buf.extend(f.to_ne_bytes());
+                buf.push_byte(1);
+                buf.extend(&f.to_ne_bytes());
             }
         }
         match pos.y {
             Coord::Pixel(f) => {
-                buf.push(0);
-                buf.extend(f.to_ne_bytes());
+                buf.push_byte(0);
+                buf.extend(&f.to_ne_bytes());
             }
             Coord::Percent(f) => {
-                buf.push(1);
-                buf.extend(f.to_ne_bytes());
+                buf.push_byte(1);
+                buf.extend(&f.to_ne_bytes());
             }
         }
-        buf.extend(bezier.0.to_ne_bytes());
-        buf.extend(bezier.1.to_ne_bytes());
-        buf.extend(bezier.2.to_ne_bytes());
-        buf.extend(bezier.3.to_ne_bytes());
-        buf.extend(wave.0.to_ne_bytes());
-        buf.extend(wave.1.to_ne_bytes());
-        buf.push(*invert_y as u8);
+        buf.extend(&bezier.0.to_ne_bytes());
+        buf.extend(&bezier.1.to_ne_bytes());
+        buf.extend(&bezier.2.to_ne_bytes());
+        buf.extend(&bezier.3.to_ne_bytes());
+        buf.extend(&wave.0.to_ne_bytes());
+        buf.extend(&wave.1.to_ne_bytes());
+        buf.push_byte(*invert_y as u8);
     }
 
     fn deserialize(bytes: &[u8]) -> Self {
@@ -450,6 +480,28 @@ pub struct Clear {
     pub outputs: Box<[String]>,
 }
 
+impl Clear {
+    pub fn create_request(self) -> Mmap {
+        // 1 - output length
+        // 3 - color bytes
+        // 4 + output.len() - output len + bytes
+        let len = 4 + self.outputs.iter().map(|o| 4 + o.len()).sum::<usize>();
+        let mut mmap = Mmap::create(len);
+        let bytes = mmap.slice_mut();
+        bytes[0] = self.outputs.len() as u8; // we assume someone does not have more than
+                                             // 255 monitors. Seems reasonable
+        let mut i = 1;
+        for output in self.outputs.iter() {
+            let len = output.len() as u32;
+            bytes[i..i + 4].copy_from_slice(&len.to_ne_bytes());
+            bytes[i + 4..i + 4 + len as usize].copy_from_slice(output.as_bytes());
+            i += 4 + len as usize;
+        }
+        bytes[i..i + 3].copy_from_slice(&self.color);
+        mmap
+    }
+}
+
 pub struct ClearRecv {
     pub color: [u8; 3],
     pub outputs: Box<[MmappedStr]>,
@@ -474,13 +526,13 @@ pub struct Animation {
 }
 
 impl Animation {
-    pub(crate) fn serialize(&self, buf: &mut Vec<u8>) {
+    pub(crate) fn serialize(&self, buf: &mut ImageRequestBuilder) {
         let Self { animation } = self;
 
-        buf.extend((animation.len() as u32).to_ne_bytes());
+        buf.extend(&(animation.len() as u32).to_ne_bytes());
         for (bitpack, duration) in animation.iter() {
             bitpack.serialize(buf);
-            buf.extend(duration.as_secs_f64().to_ne_bytes())
+            buf.extend(&duration.as_secs_f64().to_ne_bytes())
         }
     }
 
@@ -522,54 +574,111 @@ pub struct ImageRecv {
 }
 
 pub struct ImageRequestBuilder {
-    transition: Transition,
-    imgs: Vec<Img>,
-    outputs: Vec<Box<[String]>>,
-    animations: Vec<Animation>,
+    memory: Mmap,
+    len: usize,
+    img_count: u8,
+    img_count_index: usize,
 }
 
 impl ImageRequestBuilder {
     #[inline]
     pub fn new(transition: Transition) -> Self {
-        Self {
-            transition,
-            imgs: Vec::new(),
-            outputs: Vec::new(),
-            animations: Vec::new(),
-        }
-    }
-
-    #[inline]
-    pub fn push(&mut self, img: Img, outputs: Box<[String]>, animation: Option<Animation>) {
-        self.imgs.push(img);
-        self.outputs.push(outputs);
-        if let Some(animation) = animation {
-            self.animations.push(animation);
-        }
-    }
-
-    #[inline]
-    pub fn build(self) -> ImageRequest {
-        let animations = if self.animations.is_empty() {
-            None
-        } else {
-            assert_eq!(self.animations.len(), self.imgs.len());
-            Some(self.animations.into_boxed_slice())
+        let memory = Mmap::create(1 << (20 + 3)); // start with 8 MB
+        let len = 0;
+        let mut builder = Self {
+            memory,
+            len,
+            img_count: 0,
+            img_count_index: 0,
         };
-        ImageRequest {
-            transition: self.transition,
-            imgs: self.imgs.into_boxed_slice(),
-            outputs: self.outputs.into_boxed_slice(),
-            animations,
+        transition.serialize(&mut builder);
+        builder.img_count_index = builder.len;
+        builder.len += 1;
+        assert_eq!(builder.len, 52);
+        builder
+    }
+
+    fn push_byte(&mut self, byte: u8) {
+        if self.len >= self.memory.len {
+            self.grow();
         }
+        self.memory.slice_mut()[self.len] = byte;
+        self.len += 1;
+    }
+
+    pub(crate) fn extend(&mut self, bytes: &[u8]) {
+        if self.len + bytes.len() >= self.memory.len {
+            self.memory.remap(self.memory.len + bytes.len() * 2);
+        }
+        self.memory.slice_mut()[self.len..self.len + bytes.len()].copy_from_slice(bytes);
+        self.len += bytes.len()
+    }
+
+    fn grow(&mut self) {
+        self.memory.remap((self.memory.len * 3) / 2);
+    }
+
+    #[inline]
+    pub fn push(&mut self, img: Img, outputs: &[String], animation: Option<Animation>) {
+        self.img_count += 1;
+
+        let Img {
+            path,
+            img,
+            dim: dims,
+            format,
+        } = &img;
+        serialize_bytes(path.as_bytes(), self);
+        serialize_bytes(img, self);
+        self.extend(&dims.0.to_ne_bytes());
+        self.extend(&dims.1.to_ne_bytes());
+        self.push_byte(*format as u8);
+
+        self.push_byte(outputs.len() as u8);
+        for output in outputs.iter() {
+            serialize_bytes(output.as_bytes(), self);
+        }
+
+        let animation_start = self.len;
+        if let Some(animation) = animation.as_ref() {
+            self.push_byte(1);
+            animation.serialize(self);
+        } else {
+            self.push_byte(0);
+        }
+
+        // cache the request
+        for output in outputs.iter() {
+            if let Err(e) = super::cache::store(output, path) {
+                eprintln!("ERROR: failed to store cache: {e}");
+            }
+        }
+
+        if animation.is_some() && path != "-" {
+            let p = PathBuf::from(&path);
+            if let Err(e) = cache::store_animation_frames(
+                &self.memory.slice()[animation_start..],
+                &p,
+                *dims,
+                *format,
+            ) {
+                eprintln!("Error storing cache for {}: {e}", path);
+            }
+        }
+    }
+
+    #[inline]
+    pub fn build(mut self) -> Mmap {
+        self.memory.slice_mut()[self.img_count_index] = self.img_count;
+        self.memory
     }
 }
 
 pub enum Request {
     Ping,
     Query,
-    Clear(Clear),
-    Img(ImageRequest),
+    Clear(Mmap),
+    Img(Mmap),
     Kill,
 }
 
@@ -585,107 +694,23 @@ impl Request {
     pub fn send(&self, stream: &OwnedFd) -> Result<(), String> {
         let mut socket_msg = [0u8; 16];
         socket_msg[0..8].copy_from_slice(&match self {
-            Request::Ping => 0u64.to_ne_bytes(),
-            Request::Query => 1u64.to_ne_bytes(),
-            Request::Clear(_) => 2u64.to_ne_bytes(),
-            Request::Img(_) => 3u64.to_ne_bytes(),
-            Request::Kill => 4u64.to_ne_bytes(),
+            Self::Ping => 0u64.to_ne_bytes(),
+            Self::Query => 1u64.to_ne_bytes(),
+            Self::Clear(_) => 2u64.to_ne_bytes(),
+            Self::Img(_) => 3u64.to_ne_bytes(),
+            Self::Kill => 4u64.to_ne_bytes(),
         });
-        let bytes: Vec<u8> = match self {
-            Self::Clear(clear) => {
-                let mut buf = Vec::with_capacity(64);
-                buf.push(clear.outputs.len() as u8); // we assume someone does not have more than
-                                                     // 255 monitors. Seems reasonable
-                for output in clear.outputs.iter() {
-                    serialize_bytes(output.as_bytes(), &mut buf);
-                }
-                buf.extend(clear.color);
-                buf
-            }
-            Self::Img(img) => {
-                let ImageRequest {
-                    transition,
-                    imgs,
-                    outputs,
-                    animations,
-                } = img;
 
-                let mut buf = Vec::with_capacity(imgs[0].img.len() + 1024);
-                transition.serialize(&mut buf);
-                buf.push(imgs.len() as u8); // we assume someone does not have more than 255
-                                            // monitors
-
-                for i in 0..outputs.len() {
-                    let Img {
-                        path,
-                        img,
-                        dim: dims,
-                        format,
-                    } = &imgs[i];
-                    serialize_bytes(path.as_bytes(), &mut buf);
-                    serialize_bytes(img, &mut buf);
-                    buf.extend(dims.0.to_ne_bytes());
-                    buf.extend(dims.1.to_ne_bytes());
-                    buf.push(*format as u8);
-
-                    let output = &outputs[i];
-                    buf.push(output.len() as u8);
-                    for output in output.iter() {
-                        serialize_bytes(output.as_bytes(), &mut buf);
-                    }
-
-                    if let Some(animation) = animations {
-                        buf.push(1);
-                        animation[i].serialize(&mut buf);
-                    } else {
-                        buf.push(0);
-                    }
-                }
-
-                buf
-            }
-            _ => vec![],
+        let mmap = match self {
+            Self::Clear(clear) => Some(clear),
+            Self::Img(img) => Some(img),
+            _ => None,
         };
 
-        match send_socket_msg(stream, &mut socket_msg, &bytes) {
+        match send_socket_msg(stream, &mut socket_msg, mmap) {
             Ok(true) => (),
             Ok(false) => return Err("failed to send full length of message in socket!".to_string()),
             Err(e) => return Err(format!("failed to write serialized request: {e}")),
-        }
-
-        if let Self::Img(ImageRequest {
-            imgs,
-            outputs,
-            animations,
-            ..
-        }) = self
-        {
-            for i in 0..outputs.len() {
-                let Img {
-                    path,
-                    dim: dims,
-                    format,
-                    ..
-                } = &imgs[i];
-                for output in outputs[i].iter() {
-                    if let Err(e) = super::cache::store(output, path) {
-                        eprintln!("ERROR: failed to store cache: {e}");
-                    }
-                }
-                if let Some(animations) = animations.as_ref() {
-                    for animation in animations.iter() {
-                        // only store the cache if we aren't reading from stdin
-                        if path != "-" {
-                            let p = PathBuf::from(&path);
-                            if let Err(e) =
-                                cache::store_animation_frames(animation, &p, *dims, *format)
-                            {
-                                eprintln!("Error storing cache for {}: {e}", path);
-                            }
-                        }
-                    }
-                }
-            }
         }
 
         Ok(())
@@ -810,26 +835,33 @@ impl Answer {
             Self::Err(_) => 4u64.to_ne_bytes(),
         });
 
-        let bytes = match self {
+        let mmap = match self {
             Self::Info(infos) => {
-                let mut buf = Vec::with_capacity(1024);
+                let len = 1 + infos.iter().map(|i| i.serialized_size()).sum::<usize>();
+                let mut mmap = Mmap::create(len);
+                let bytes = mmap.slice_mut();
 
-                buf.push(infos.len() as u8);
+                bytes[0] = infos.len() as u8;
+                let mut i = 1;
+
                 for info in infos.iter() {
-                    info.serialize(&mut buf);
+                    i += info.serialize(&mut bytes[i..]);
                 }
 
-                buf
+                Some(mmap)
             }
             Self::Err(s) => {
-                let mut buf = Vec::with_capacity(128);
-                serialize_bytes(s.as_bytes(), &mut buf);
-                buf
+                let len = 4 + s.len();
+                let mut mmap = Mmap::create(len);
+                let bytes = mmap.slice_mut();
+                bytes[0..4].copy_from_slice(&(s.as_bytes().len() as u32).to_ne_bytes());
+                bytes[4..len].copy_from_slice(s.as_bytes());
+                Some(mmap)
             }
-            _ => vec![],
+            _ => None,
         };
 
-        match send_socket_msg(stream, &mut socket_msg, &bytes) {
+        match send_socket_msg(stream, &mut socket_msg, mmap.as_ref()) {
             Ok(true) => Ok(()),
             Ok(false) => Err("failed to send full length of message in socket!".to_string()),
             Err(e) => Err(format!("failed to write serialized request: {e}")),
@@ -871,22 +903,14 @@ impl Answer {
 fn send_socket_msg(
     stream: &OwnedFd,
     socket_msg: &mut [u8; 16],
-    bytes: &[u8],
+    mmap: Option<&Mmap>,
 ) -> rustix::io::Result<bool> {
     let mut ancillary_buf = [0u8; rustix::cmsg_space!(ScmRights(1))];
     let mut ancillary = net::SendAncillaryBuffer::new(&mut ancillary_buf);
 
-    let mmap = if !bytes.is_empty() {
-        socket_msg[8..].copy_from_slice(&(bytes.len() as u64).to_ne_bytes());
-        let mut mmap = Mmap::create(bytes.len());
-        mmap.slice_mut().copy_from_slice(bytes);
-        Some(mmap)
-    } else {
-        None
-    };
-
     let msg_buf;
     if let Some(mmap) = mmap.as_ref() {
+        socket_msg[8..].copy_from_slice(&(mmap.len as u64).to_ne_bytes());
         msg_buf = [mmap.fd.as_fd()];
         let msg = net::SendAncillaryMessage::ScmRights(&msg_buf);
         ancillary.push(msg);
@@ -1225,7 +1249,7 @@ impl Mmap {
     #[must_use]
     pub(crate) fn from_fd(fd: OwnedFd, len: usize) -> Self {
         let ptr = unsafe {
-            let ptr = mmap(std::ptr::null_mut(), len, Self::PROT, Self::FLAGS, &fd, 0).unwrap();
+            let ptr = mmap(std::ptr::null_mut(), len, ProtFlags::READ, Self::FLAGS, &fd, 0).unwrap();
             // SAFETY: the function above will never return a null pointer if it succeeds
             // POSIX says that the implementation will never select an address at 0
             NonNull::new_unchecked(ptr)
@@ -1338,8 +1362,8 @@ fn create_memfd() -> rustix::io::Result<OwnedFd> {
     }
 }
 
-fn serialize_bytes(bytes: &[u8], buf: &mut Vec<u8>) {
-    buf.extend((bytes.len() as u32).to_ne_bytes());
+fn serialize_bytes(bytes: &[u8], buf: &mut ImageRequestBuilder) {
+    buf.extend(&(bytes.len() as u32).to_ne_bytes());
     buf.extend(bytes);
 }
 

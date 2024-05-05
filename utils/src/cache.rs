@@ -19,7 +19,7 @@ pub(crate) fn store(output_name: &str, img_path: &str) -> io::Result<()> {
 }
 
 pub(crate) fn store_animation_frames(
-    animation: &Animation,
+    animation: &[u8],
     path: &Path,
     dimensions: (u32, u32),
     pixel_format: PixelFormat,
@@ -28,11 +28,8 @@ pub(crate) fn store_animation_frames(
     let mut filepath = cache_dir()?;
     filepath.push(&filename);
 
-    let mut bytes = Vec::new();
-    animation.serialize(&mut bytes);
-
     if !filepath.is_file() {
-        File::create(filepath)?.write_all(&bytes)
+        File::create(filepath)?.write_all(animation)
     } else {
         Ok(())
     }

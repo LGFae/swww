@@ -6,7 +6,7 @@ use comp::pack_bytes;
 use decomp::{unpack_bytes_3channels, unpack_bytes_4channels};
 use std::ffi::{c_char, c_int};
 
-use crate::ipc::{Mmap, MmappedBytes, PixelFormat};
+use crate::ipc::{ImageRequestBuilder, Mmap, MmappedBytes, PixelFormat};
 mod comp;
 mod cpu;
 mod decomp;
@@ -58,16 +58,16 @@ pub struct BitPack {
 }
 
 impl BitPack {
-    pub(crate) fn serialize(&self, buf: &mut Vec<u8>) {
+    pub(crate) fn serialize(&self, buf: &mut ImageRequestBuilder) {
         let Self {
             expected_buf_size,
             compressed_size,
             ..
         } = self;
-        buf.extend((self.bytes().len() as u32).to_ne_bytes());
-        buf.extend((expected_buf_size).to_ne_bytes());
-        buf.extend((compressed_size).to_ne_bytes());
-        buf.extend(self.bytes().iter());
+        buf.extend(&(self.bytes().len() as u32).to_ne_bytes());
+        buf.extend(&(expected_buf_size).to_ne_bytes());
+        buf.extend(&(compressed_size).to_ne_bytes());
+        buf.extend(self.bytes());
     }
 
     #[must_use]
