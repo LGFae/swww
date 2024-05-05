@@ -2,6 +2,7 @@ use std::{
     fmt,
     num::{NonZeroI32, NonZeroU8},
     path::PathBuf,
+    ptr::NonNull,
     time::Duration,
 };
 
@@ -449,11 +450,23 @@ pub struct Clear {
     pub outputs: Box<[String]>,
 }
 
+pub struct ClearRecv {
+    pub color: [u8; 3],
+    pub outputs: Box<[MmappedStr]>,
+}
+
 pub struct Img {
     pub path: String,
     pub dim: (u32, u32),
     pub format: PixelFormat,
     pub img: Box<[u8]>,
+}
+
+pub struct ImgRecv {
+    pub path: MmappedStr,
+    pub dim: (u32, u32),
+    pub format: PixelFormat,
+    pub img: MmappedBytes,
 }
 
 pub struct Animation {
@@ -470,14 +483,20 @@ impl Animation {
             buf.extend(duration.as_secs_f64().to_ne_bytes())
         }
     }
+}
 
-    pub(crate) fn deserialize(bytes: &[u8]) -> (Self, usize) {
+pub struct AnimationRecv {
+    pub animation: Box<[(BitPack, Duration)]>,
+}
+
+impl AnimationRecv {
+    pub(crate) fn deserialize(mmap: &Mmap, bytes: &[u8]) -> (Self, usize) {
         let mut i = 0;
         let animation_len = u32::from_ne_bytes(bytes[i..i + 4].try_into().unwrap()) as usize;
         i += 4;
         let mut animation = Vec::with_capacity(animation_len);
         for _ in 0..animation_len {
-            let (anim, offset) = BitPack::deserialize(&bytes[i..]);
+            let (anim, offset) = BitPack::deserialize(mmap, &bytes[i..]);
             i += offset;
             let duration =
                 Duration::from_secs_f64(f64::from_ne_bytes(bytes[i..i + 8].try_into().unwrap()));
@@ -499,6 +518,13 @@ pub struct ImageRequest {
     pub imgs: Box<[Img]>,
     pub outputs: Box<[Box<[String]>]>,
     pub animations: Option<Box<[Animation]>>,
+}
+
+pub struct ImageRecv {
+    pub transition: Transition,
+    pub imgs: Box<[ImgRecv]>,
+    pub outputs: Box<[Box<[MmappedStr]>]>,
+    pub animations: Option<Box<[AnimationRecv]>>,
 }
 
 pub struct ImageRequestBuilder {
@@ -550,6 +576,14 @@ pub enum Request {
     Query,
     Clear(Clear),
     Img(ImageRequest),
+    Kill,
+}
+
+pub enum RequestRecv {
+    Ping,
+    Query,
+    Clear(ClearRecv),
+    Img(ImageRecv),
     Kill,
 }
 
@@ -662,7 +696,9 @@ impl Request {
 
         Ok(())
     }
+}
 
+impl RequestRecv {
     #[must_use]
     #[inline]
     pub fn receive(socket_msg: SocketMsg) -> Self {
@@ -670,25 +706,25 @@ impl Request {
             0 => Self::Ping,
             1 => Self::Query,
             2 => {
-                let mut mmap = socket_msg.shm.unwrap();
-                let bytes = mmap.slice_mut();
+                let mmap = socket_msg.shm.unwrap();
+                let bytes = mmap.slice();
                 let len = bytes[0] as usize;
                 let mut outputs = Vec::with_capacity(len);
                 let mut i = 1;
                 for _ in 0..len {
-                    let output = deserialize_string(&bytes[i..]);
-                    i += 4 + output.len();
+                    let output = MmappedStr::new(&mmap, &bytes[i..]);
+                    i += 4 + output.str().len();
                     outputs.push(output);
                 }
                 let color = [bytes[i], bytes[i + 1], bytes[i + 2]];
-                Self::Clear(Clear {
+                Self::Clear(ClearRecv {
                     color,
                     outputs: outputs.into(),
                 })
             }
             3 => {
-                let mut mmap = socket_msg.shm.unwrap();
-                let bytes = mmap.slice_mut();
+                let mmap = socket_msg.shm.unwrap();
+                let bytes = mmap.slice();
                 let transition = Transition::deserialize(&bytes[0..]);
                 let len = bytes[51] as usize;
 
@@ -698,11 +734,11 @@ impl Request {
 
                 let mut i = 52;
                 for _ in 0..len {
-                    let path = deserialize_string(&bytes[i..]);
-                    i += 4 + path.len();
+                    let path = MmappedStr::new(&mmap, &bytes[i..]);
+                    i += 4 + path.str().len();
 
-                    let img = deserialize_bytes(&bytes[i..]);
-                    i += 4 + img.len();
+                    let img = MmappedBytes::new(&mmap, &bytes[i..]);
+                    i += 4 + img.bytes().len();
 
                     let dims = (
                         u32::from_ne_bytes(bytes[i..i + 4].try_into().unwrap()),
@@ -718,7 +754,7 @@ impl Request {
                     };
                     i += 1;
 
-                    imgs.push(Img {
+                    imgs.push(ImgRecv {
                         path,
                         img,
                         dim: dims,
@@ -729,15 +765,15 @@ impl Request {
                     i += 1;
                     let mut out = Vec::with_capacity(n_outputs);
                     for _ in 0..n_outputs {
-                        let output = deserialize_string(&bytes[i..]);
-                        i += 4 + output.len();
+                        let output = MmappedStr::new(&mmap, &bytes[i..]);
+                        i += 4 + output.str().len();
                         out.push(output);
                     }
                     outputs.push(out.into());
 
                     if bytes[i] == 1 {
                         i += 1;
-                        let (animation, offset) = Animation::deserialize(&bytes[i..]);
+                        let (animation, offset) = AnimationRecv::deserialize(&mmap, &bytes[i..]);
                         i += offset;
                         animations.push(animation);
                     } else {
@@ -745,7 +781,7 @@ impl Request {
                     }
                 }
 
-                Self::Img(ImageRequest {
+                Self::Img(ImageRecv {
                     transition,
                     imgs: imgs.into(),
                     outputs: outputs.into(),
@@ -814,8 +850,8 @@ impl Answer {
             1 => Self::Ping(true),
             2 => Self::Ping(false),
             3 => {
-                let mut mmap = socket_msg.shm.unwrap();
-                let bytes = mmap.slice_mut();
+                let mmap = socket_msg.shm.unwrap();
+                let bytes = mmap.slice();
                 let len = bytes[0] as usize;
                 let mut bg_infos = Vec::with_capacity(len);
 
@@ -829,8 +865,8 @@ impl Answer {
                 Self::Info(bg_infos.into())
             }
             4 => {
-                let mut mmap = socket_msg.shm.unwrap();
-                let bytes = mmap.slice_mut();
+                let mmap = socket_msg.shm.unwrap();
+                let bytes = mmap.slice();
                 Self::Err(deserialize_string(bytes))
             }
             _ => panic!("Received malformed answer from daemon"),
@@ -979,10 +1015,143 @@ pub fn connect_to_socket(addr: &PathBuf, tries: u8, interval: u64) -> Result<Own
     Err(format!("Failed to connect to socket: {error}"))
 }
 
+pub struct MmappedBytes {
+    base_ptr: NonNull<std::ffi::c_void>,
+    ptr: NonNull<std::ffi::c_void>,
+    len: usize,
+}
+
+impl MmappedBytes {
+    const PROT: ProtFlags = ProtFlags::READ;
+    const FLAGS: MapFlags = MapFlags::SHARED;
+
+    pub(crate) fn new(map: &Mmap, bytes: &[u8]) -> Self {
+        let len = u32::from_ne_bytes(bytes[0..4].try_into().unwrap()) as usize;
+        let offset = 4 + bytes.as_ptr() as usize - map.ptr.as_ptr() as usize;
+
+        let base_ptr = unsafe {
+            let ptr = mmap(
+                std::ptr::null_mut(),
+                map.len,
+                Self::PROT,
+                Self::FLAGS,
+                &map.fd,
+                0,
+            )
+            .unwrap();
+            // SAFETY: the function above will never return a null pointer if it succeeds
+            // POSIX says that the implementation will never select an address at 0
+            NonNull::new_unchecked(ptr)
+        };
+        let ptr = unsafe { NonNull::new_unchecked(base_ptr.as_ptr().byte_add(offset)) };
+
+        Self { base_ptr, ptr, len }
+    }
+
+    pub(crate) fn new_with_len(map: &Mmap, bytes: &[u8], len: usize) -> Self {
+        let offset = bytes.as_ptr() as usize - map.ptr.as_ptr() as usize;
+
+        let base_ptr = unsafe {
+            let ptr = mmap(
+                std::ptr::null_mut(),
+                map.len,
+                Self::PROT,
+                Self::FLAGS,
+                &map.fd,
+                0,
+            )
+            .unwrap();
+            // SAFETY: the function above will never return a null pointer if it succeeds
+            // POSIX says that the implementation will never select an address at 0
+            NonNull::new_unchecked(ptr)
+        };
+        let ptr = unsafe { NonNull::new_unchecked(base_ptr.as_ptr().byte_add(offset)) };
+
+        Self { base_ptr, ptr, len }
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn bytes(&self) -> &[u8] {
+        unsafe { std::slice::from_raw_parts(self.ptr.as_ptr().cast(), self.len) }
+    }
+}
+
+impl Drop for MmappedBytes {
+    #[inline]
+    fn drop(&mut self) {
+        let len = self.len + self.ptr.as_ptr() as usize - self.base_ptr.as_ptr() as usize;
+        if let Err(e) = unsafe { munmap(self.base_ptr.as_ptr(), len) } {
+            eprintln!("ERROR WHEN UNMAPPING MEMORY: {e}");
+        }
+    }
+}
+
+unsafe impl Send for MmappedBytes {}
+unsafe impl Sync for MmappedBytes {}
+
+pub struct MmappedStr {
+    base_ptr: NonNull<std::ffi::c_void>,
+    ptr: NonNull<std::ffi::c_void>,
+    len: usize,
+}
+
+impl MmappedStr {
+    const PROT: ProtFlags = ProtFlags::READ;
+    const FLAGS: MapFlags = MapFlags::SHARED;
+
+    fn new(map: &Mmap, bytes: &[u8]) -> Self {
+        let len = u32::from_ne_bytes(bytes[0..4].try_into().unwrap()) as usize;
+        let offset = 4 + bytes.as_ptr() as usize - map.ptr.as_ptr() as usize;
+
+        let base_ptr = unsafe {
+            let ptr = mmap(
+                std::ptr::null_mut(),
+                map.len,
+                Self::PROT,
+                Self::FLAGS,
+                &map.fd,
+                0,
+            )
+            .unwrap();
+            // SAFETY: the function above will never return a null pointer if it succeeds
+            // POSIX says that the implementation will never select an address at 0
+            NonNull::new_unchecked(ptr)
+        };
+        let ptr = unsafe { NonNull::new_unchecked(base_ptr.as_ptr().byte_add(offset)) };
+
+        // try to parse, panicking if we fail
+        let s = unsafe { std::slice::from_raw_parts(ptr.as_ptr().cast(), len) };
+        let _s = std::str::from_utf8(s).expect("received a non utf8 string from socket");
+
+        Self { base_ptr, ptr, len }
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn str(&self) -> &str {
+        let s = unsafe { std::slice::from_raw_parts(self.ptr.as_ptr().cast(), self.len) };
+        unsafe { std::str::from_utf8_unchecked(s) }
+    }
+}
+
+unsafe impl Send for MmappedStr {}
+unsafe impl Sync for MmappedStr {}
+
+impl Drop for MmappedStr {
+    #[inline]
+    fn drop(&mut self) {
+        let len = self.len + self.ptr.as_ptr() as usize - self.base_ptr.as_ptr() as usize;
+        if let Err(e) = unsafe { munmap(self.base_ptr.as_ptr(), len) } {
+            eprintln!("ERROR WHEN UNMAPPING MEMORY: {e}");
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct Mmap {
     fd: OwnedFd,
-    ptr: *mut std::ffi::c_void,
+    ptr: NonNull<std::ffi::c_void>,
     len: usize,
 }
 
@@ -996,8 +1165,12 @@ impl Mmap {
         let fd = create_shm_fd().unwrap();
         rustix::io::retry_on_intr(|| rustix::fs::ftruncate(&fd, len as u64)).unwrap();
 
-        let ptr =
-            unsafe { mmap(std::ptr::null_mut(), len, Self::PROT, Self::FLAGS, &fd, 0).unwrap() };
+        let ptr = unsafe {
+            let ptr = mmap(std::ptr::null_mut(), len, Self::PROT, Self::FLAGS, &fd, 0).unwrap();
+            // SAFETY: the function above will never return a null pointer if it succeeds
+            // POSIX says that the implementation will never select an address at 0
+            NonNull::new_unchecked(ptr)
+        };
         Self { fd, ptr, len }
     }
 
@@ -1009,7 +1182,7 @@ impl Mmap {
         {
             let result = unsafe {
                 rustix::mm::mremap(
-                    self.ptr,
+                    self.ptr.as_ptr(),
                     self.len,
                     new_len,
                     rustix::mm::MremapFlags::MAYMOVE,
@@ -1017,19 +1190,21 @@ impl Mmap {
             };
 
             if let Ok(ptr) = result {
+                // SAFETY: the mremap above will never return a null pointer if it succeeds
+                let ptr = unsafe { NonNull::new_unchecked(ptr) };
                 self.ptr = ptr;
                 self.len = new_len;
                 return;
             }
         }
 
-        if let Err(e) = unsafe { munmap(self.ptr, self.len) } {
+        if let Err(e) = unsafe { munmap(self.ptr.as_ptr(), self.len) } {
             eprintln!("ERROR WHEN UNMAPPING MEMORY: {e}");
         }
 
         self.len = new_len;
         self.ptr = unsafe {
-            mmap(
+            let ptr = mmap(
                 std::ptr::null_mut(),
                 self.len,
                 Self::PROT,
@@ -1037,20 +1212,34 @@ impl Mmap {
                 &self.fd,
                 0,
             )
-            .unwrap()
+            .unwrap();
+            // SAFETY: the function above will never return a null pointer if it succeeds
+            // POSIX says that the implementation will never select an address at 0
+            NonNull::new_unchecked(ptr)
         };
     }
 
+    #[must_use]
     fn from_fd(fd: OwnedFd, len: usize) -> Self {
-        let ptr =
-            unsafe { mmap(std::ptr::null_mut(), len, Self::PROT, Self::FLAGS, &fd, 0).unwrap() };
+        let ptr = unsafe {
+            let ptr = mmap(std::ptr::null_mut(), len, Self::PROT, Self::FLAGS, &fd, 0).unwrap();
+            // SAFETY: the function above will never return a null pointer if it succeeds
+            // POSIX says that the implementation will never select an address at 0
+            NonNull::new_unchecked(ptr)
+        };
         Self { fd, ptr, len }
     }
 
     #[inline]
     #[must_use]
     pub fn slice_mut(&mut self) -> &mut [u8] {
-        unsafe { std::slice::from_raw_parts_mut(self.ptr.cast(), self.len) }
+        unsafe { std::slice::from_raw_parts_mut(self.ptr.as_ptr().cast(), self.len) }
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn slice(&self) -> &[u8] {
+        unsafe { std::slice::from_raw_parts(self.ptr.as_ptr().cast(), self.len) }
     }
 
     #[inline]
@@ -1070,7 +1259,7 @@ impl Mmap {
 impl Drop for Mmap {
     #[inline]
     fn drop(&mut self) {
-        if let Err(e) = unsafe { munmap(self.ptr, self.len) } {
+        if let Err(e) = unsafe { munmap(self.ptr.as_ptr(), self.len) } {
             eprintln!("ERROR WHEN UNMAPPING MEMORY: {e}");
         }
     }
@@ -1149,11 +1338,6 @@ fn create_memfd() -> rustix::io::Result<OwnedFd> {
 fn serialize_bytes(bytes: &[u8], buf: &mut Vec<u8>) {
     buf.extend((bytes.len() as u32).to_ne_bytes());
     buf.extend(bytes);
-}
-
-fn deserialize_bytes(bytes: &[u8]) -> Box<[u8]> {
-    let size = u32::from_ne_bytes(bytes[0..4].try_into().unwrap()) as usize;
-    bytes[4..4 + size].into()
 }
 
 fn deserialize_string(bytes: &[u8]) -> String {

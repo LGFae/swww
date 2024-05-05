@@ -7,7 +7,7 @@ use std::{
 
 use utils::{
     compression::Decompressor,
-    ipc::{self, Animation, Answer, BgImg, Img},
+    ipc::{self, AnimationRecv, Answer, BgImg, ImgRecv},
 };
 
 use crate::wallpaper::{AnimationToken, Wallpaper};
@@ -36,7 +36,7 @@ impl Animator {
         scope: &'a Scope<'b, '_>,
         transition: &'b ipc::Transition,
         img: &'b [u8],
-        path: &'b String,
+        path: &'b str,
         dim: (u32, u32),
         wallpapers: &'b mut Vec<Arc<Wallpaper>>,
     ) where
@@ -68,8 +68,8 @@ impl Animator {
     pub(super) fn transition(
         &mut self,
         transition: ipc::Transition,
-        imgs: Box<[Img]>,
-        animations: Option<Box<[Animation]>>,
+        imgs: Box<[ImgRecv]>,
+        animations: Option<Box<[AnimationRecv]>>,
         mut wallpapers: Vec<Vec<Arc<Wallpaper>>>,
     ) -> Answer {
         let barrier = self.anim_barrier.clone();
@@ -78,10 +78,17 @@ impl Animator {
             .name("animation spawner".to_string())
             .spawn(move || {
                 thread::scope(|s| {
-                    for (Img { img, path, dim, .. }, wallpapers) in
+                    for (ImgRecv { img, path, dim, .. }, wallpapers) in
                         imgs.iter().zip(wallpapers.iter_mut())
                     {
-                        Self::spawn_transition_thread(s, &transition, img, path, *dim, wallpapers);
+                        Self::spawn_transition_thread(
+                            s,
+                            &transition,
+                            img.bytes(),
+                            path.str(),
+                            *dim,
+                            wallpapers,
+                        );
                     }
                 });
                 drop(imgs);
@@ -102,7 +109,7 @@ impl Animator {
 
     fn spawn_animation_thread<'a, 'b>(
         scope: &'a Scope<'b, '_>,
-        animation: &'b Animation,
+        animation: &'b AnimationRecv,
         mut wallpapers: Vec<Arc<Wallpaper>>,
         barrier: ArcAnimBarrier,
     ) where

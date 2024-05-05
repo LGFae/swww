@@ -6,7 +6,7 @@ use comp::pack_bytes;
 use decomp::{unpack_bytes_3channels, unpack_bytes_4channels};
 use std::ffi::{c_char, c_int};
 
-use crate::ipc::PixelFormat;
+use crate::ipc::{Mmap, MmappedBytes, PixelFormat};
 mod comp;
 mod cpu;
 mod decomp;
@@ -42,9 +42,14 @@ extern "C" {
     fn LZ4_compressBound(input_size: c_int) -> c_int;
 }
 
+enum Inner {
+    Boxed(Box<[u8]>),
+    Mmapped(MmappedBytes),
+}
+
 /// This struct represents the cached difference between the previous frame and the next
 pub struct BitPack {
-    inner: Box<[u8]>,
+    inner: Inner,
     /// This field will ensure we won't ever try to unpack the images on a buffer of the wrong size,
     /// which ultimately is what allows us to use unsafe in the unpack_bytes function
     expected_buf_size: u32,
@@ -55,22 +60,23 @@ pub struct BitPack {
 impl BitPack {
     pub(crate) fn serialize(&self, buf: &mut Vec<u8>) {
         let Self {
-            inner,
             expected_buf_size,
             compressed_size,
+            ..
         } = self;
-        buf.extend((inner.len() as u32).to_ne_bytes());
+        buf.extend((self.bytes().len() as u32).to_ne_bytes());
         buf.extend((expected_buf_size).to_ne_bytes());
         buf.extend((compressed_size).to_ne_bytes());
-        buf.extend(inner.iter());
+        buf.extend(self.bytes().iter());
     }
 
-    pub(crate) fn deserialize(bytes: &[u8]) -> (Self, usize) {
+    #[must_use]
+    pub(crate) fn deserialize(map: &Mmap, bytes: &[u8]) -> (Self, usize) {
         assert!(bytes.len() > 12);
         let len = u32::from_ne_bytes(bytes[0..4].try_into().unwrap()) as usize;
         let expected_buf_size = u32::from_ne_bytes(bytes[4..8].try_into().unwrap());
         let compressed_size = i32::from_ne_bytes(bytes[8..12].try_into().unwrap());
-        let inner = bytes[12..12 + len].into();
+        let inner = Inner::Mmapped(MmappedBytes::new_with_len(map, &bytes[12..12 + len], len));
         (
             Self {
                 inner,
@@ -79,6 +85,15 @@ impl BitPack {
             },
             12 + len,
         )
+    }
+
+    #[inline]
+    #[must_use]
+    fn bytes(&self) -> &[u8] {
+        match &self.inner {
+            Inner::Boxed(b) => b.as_ref(),
+            Inner::Mmapped(m) => m.bytes(),
+        }
     }
 }
 
@@ -156,7 +171,7 @@ impl Compressor {
         };
 
         Some(BitPack {
-            inner: v.into_boxed_slice(),
+            inner: Inner::Boxed(v.into_boxed_slice()),
             expected_buf_size,
             compressed_size: self.buf.len() as i32,
         })
@@ -240,10 +255,11 @@ impl Decompressor {
         // SAFETY: errors will never happen because BitPacked is *always* only produced
         // with correct lz4 compression, and ptr has the necessary capacity
         let size = unsafe {
+            let bytes = bitpack.bytes();
             LZ4_decompress_safe(
-                bitpack.inner.as_ptr() as _,
+                bytes.as_ptr() as _,
                 self.ptr.as_ptr() as _,
-                bitpack.inner.len() as c_int,
+                bytes.len() as c_int,
                 bitpack.compressed_size as c_int,
             )
         };

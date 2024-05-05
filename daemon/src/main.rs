@@ -47,8 +47,8 @@ use wayland_client::{
 };
 
 use utils::ipc::{
-    connect_to_socket, get_socket_path, read_socket, Answer, BgInfo, ImageRequest, PixelFormat,
-    Request, Scale,
+    connect_to_socket, get_socket_path, read_socket, Answer, BgInfo, ImageRecv, MmappedStr,
+    PixelFormat, Request, RequestRecv, Scale,
 };
 
 use animations::Animator;
@@ -363,9 +363,9 @@ impl Daemon {
                 return;
             }
         };
-        let request = Request::receive(bytes);
+        let request = RequestRecv::receive(bytes);
         let answer = match request {
-            Request::Clear(clear) => {
+            RequestRecv::Clear(clear) => {
                 let wallpapers = self.find_wallpapers_by_names(&clear.outputs);
                 std::thread::Builder::new()
                     .stack_size(1 << 15)
@@ -386,17 +386,17 @@ impl Daemon {
                     .unwrap(); // builder only failed if the name contains null bytes
                 Answer::Ok
             }
-            Request::Ping => Answer::Ping(
+            RequestRecv::Ping => Answer::Ping(
                 self.wallpapers
                     .iter()
                     .all(|w| w.configured.load(std::sync::atomic::Ordering::Acquire)),
             ),
-            Request::Kill => {
+            RequestRecv::Kill => {
                 exit_daemon();
                 Answer::Ok
             }
-            Request::Query => Answer::Info(self.wallpapers_info()),
-            Request::Img(ImageRequest {
+            RequestRecv::Query => Answer::Info(self.wallpapers_info()),
+            RequestRecv::Img(ImageRecv {
                 transition,
                 imgs,
                 outputs,
@@ -426,11 +426,11 @@ impl Daemon {
             .collect()
     }
 
-    fn find_wallpapers_by_names(&self, names: &[String]) -> Vec<Arc<Wallpaper>> {
+    fn find_wallpapers_by_names(&self, names: &[MmappedStr]) -> Vec<Arc<Wallpaper>> {
         self.wallpapers
             .iter()
             .filter_map(|wallpaper| {
-                if names.is_empty() || names.iter().any(|n| wallpaper.has_name(n)) {
+                if names.is_empty() || names.iter().any(|n| wallpaper.has_name(n.str())) {
                     return Some(Arc::clone(wallpaper));
                 }
                 None
