@@ -3,8 +3,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use rayon::prelude::*;
-
 use log::debug;
 use utils::ipc::{Position, TransitionType};
 
@@ -126,13 +124,7 @@ impl<'a> Transition<'a> {
             for wallpaper in self.wallpapers.iter() {
                 wallpaper.canvas_change(|canvas| {
                     for (old, new) in canvas.iter_mut().zip(new_img) {
-                        if old.abs_diff(*new) < step {
-                            *old = *new;
-                        } else if *old > *new {
-                            *old -= step;
-                        } else {
-                            *old += step;
-                        }
+                        change_byte(step, old, new);
                     }
                     done = canvas == new_img;
                 });
@@ -177,8 +169,6 @@ impl<'a> Transition<'a> {
 
         let circle_radius = screen_diag / 2.0;
 
-        let f = |x: f64| (x / scale_x).sin() * scale_y;
-
         // graph: https://www.desmos.com/calculator/wunde042es
         //
         // checks if a pixel is to the left or right of the line
@@ -187,16 +177,15 @@ impl<'a> Transition<'a> {
             let y = y - center.1 as f64;
 
             let lhs = y * sin - x * cos;
-            let rhs = f(x * sin + y * cos) - circle_radius + offset / circle_radius;
+
+            let f = ((x * sin + y * cos) / scale_x).sin() * scale_y;
+            let rhs = f - circle_radius + offset / circle_radius;
             lhs <= rhs
         };
 
-        let mut offset = {
-            let (x, y) = angle.sin_cos();
-            (x.abs() * width as f64 + y.abs() * height as f64) * 2.0
-        };
-        let a = circle_radius * angle.cos();
-        let b = circle_radius * angle.sin();
+        let mut offset = (sin.abs() * width as f64 + cos.abs() * height as f64) * 2.0;
+        let a = circle_radius * cos;
+        let b = circle_radius * sin;
         let max_offset = circle_radius.pow(2) * 2.0;
         let (width, height) = (width as usize, height as usize);
 
@@ -230,40 +219,31 @@ impl<'a> Transition<'a> {
                         for col in col_begin..col_end {
                             let old = unsafe { canvas.get_unchecked_mut(line * stride + col) };
                             let new = unsafe { new_img.get_unchecked(line * stride + col) };
-                            if old.abs_diff(*new) < step {
-                                *old = *new;
-                            } else if *old > *new {
-                                *old -= step;
-                            } else {
-                                *old += step;
-                            }
+                            change_byte(step, old, new);
                         }
-                        {
-                            let old_x = x;
-                            let y = ((height - line) as f64 - center.1 as f64 + scale_y * sin) * b;
-                            let x = (circle_radius.powi(2) - y - offset) / a + center.0 as f64
-                                - scale_y * cos;
-                            let x = x.min(width as f64);
-                            let (col_begin, col_end) = if old_x < x {
-                                (old_x as usize, x as usize)
-                            } else {
-                                (x as usize, old_x as usize)
-                            };
-                            for col in col_begin..col_end {
-                                if is_low(col as f64, line as f64, offset) {
-                                    change_byte(
-                                        channels,
-                                        step,
-                                        &mut canvas[line * stride + col * channels..],
-                                        &new_img[line * stride + col * channels..],
-                                    );
+                        let old_x = x;
+                        let y = ((height - line) as f64 - center.1 as f64 + scale_y * sin) * b;
+                        let x = (circle_radius.powi(2) - y - offset) / a + center.0 as f64
+                            - scale_y * cos;
+                        let x = x.min(width as f64);
+                        let (col_begin, col_end) = if old_x < x {
+                            (old_x as usize, x as usize)
+                        } else {
+                            (x as usize, old_x as usize)
+                        };
+                        for col in col_begin..col_end {
+                            if is_low(col as f64, line as f64, offset) {
+                                let i = line * stride + col * channels;
+                                for j in 0..channels {
+                                    let old = unsafe { canvas.get_unchecked_mut(i + j) };
+                                    let new = unsafe { new_img.get_unchecked(i + j) };
+                                    change_byte(step, old, new);
                                 }
                             }
                         }
                     }
                 });
             }
-            log::error!("TIME: {}us", now.elapsed().as_micros());
 
             self.updt_wallpapers(&mut now);
         }
@@ -316,13 +296,7 @@ impl<'a> Transition<'a> {
                         for col in col_begin..col_end {
                             let old = unsafe { canvas.get_unchecked_mut(line * stride + col) };
                             let new = unsafe { new_img.get_unchecked(line * stride + col) };
-                            if old.abs_diff(*new) < step {
-                                *old = *new;
-                            } else if *old > *new {
-                                *old -= step;
-                            } else {
-                                *old += step;
-                            }
+                            change_byte(step, old, new);
                         }
                     }
                 });
@@ -372,13 +346,7 @@ impl<'a> Transition<'a> {
                         for col in col_begin..col_end {
                             let old = unsafe { canvas.get_unchecked_mut(line * stride + col) };
                             let new = unsafe { new_img.get_unchecked(line * stride + col) };
-                            if old.abs_diff(*new) < step {
-                                *old = *new;
-                            } else if *old > *new {
-                                *old -= step;
-                            } else {
-                                *old += step;
-                            }
+                            change_byte(step, old, new);
                         }
                     }
                 });
@@ -426,24 +394,12 @@ impl<'a> Transition<'a> {
                         for col in 0..col_begin {
                             let old = unsafe { canvas.get_unchecked_mut(line * stride + col) };
                             let new = unsafe { new_img.get_unchecked(line * stride + col) };
-                            if old.abs_diff(*new) < step {
-                                *old = *new;
-                            } else if *old > *new {
-                                *old -= step;
-                            } else {
-                                *old += step;
-                            }
+                            change_byte(step, old, new);
                         }
                         for col in col_end..stride {
                             let old = unsafe { canvas.get_unchecked_mut(line * stride + col) };
                             let new = unsafe { new_img.get_unchecked(line * stride + col) };
-                            if old.abs_diff(*new) < step {
-                                *old = *new;
-                            } else if *old > *new {
-                                *old -= step;
-                            } else {
-                                *old += step;
-                            }
+                            change_byte(step, old, new);
                         }
                     }
                 });
@@ -456,43 +412,15 @@ impl<'a> Transition<'a> {
         self.step = 4 + self.step / 4;
         self.simple(new_img)
     }
-
-    /// Runs pixels_change_fn for every byte in the old img, in parallel
-    #[inline(always)]
-    fn parallel_draw_all<F>(&self, channels: usize, new_img: &[u8], f: F)
-    where
-        F: FnOnce(usize, &mut [u8], &[u8]) + Copy + Sync,
-    {
-        self.wallpapers.iter().for_each(|wallpaper| {
-            wallpaper.canvas_change(|canvas| {
-                canvas
-                    .par_chunks_exact_mut(channels)
-                    .zip_eq(new_img.par_chunks_exact(channels))
-                    .enumerate()
-                    .for_each(|(i, (old, new))| f(i, old, new));
-            });
-        });
-    }
 }
 
 #[inline(always)]
-fn change_byte(channels: usize, step: u8, old: &mut [u8], new: &[u8]) {
-    // this check improves the assembly generation slightly, by making the compiler not assume
-    // channels can be arbitrarily large
-    if channels != 3 && channels != 4 {
-        log::error!("weird channel size of: {channels}");
-        return;
-    }
-
-    for i in 0..channels {
-        let old = unsafe { old.get_unchecked_mut(i) };
-        let new = unsafe { new.get_unchecked(i) };
-        if old.abs_diff(*new) < step {
-            *old = *new;
-        } else if *old > *new {
-            *old -= step;
-        } else {
-            *old += step;
-        }
+fn change_byte(step: u8, old: &mut u8, new: &u8) {
+    if old.abs_diff(*new) < step {
+        *old = *new;
+    } else if *old > *new {
+        *old -= step;
+    } else {
+        *old += step;
     }
 }
