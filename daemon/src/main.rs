@@ -367,8 +367,7 @@ impl Daemon {
         let answer = match request {
             Request::Clear(clear) => {
                 let wallpapers = self.find_wallpapers_by_names(&clear.outputs);
-                let color = clear.color;
-                let spawn_result = std::thread::Builder::new()
+                std::thread::Builder::new()
                     .stack_size(1 << 15)
                     .name("clear".to_string())
                     .spawn(move || {
@@ -376,18 +375,16 @@ impl Daemon {
                             wallpaper.stop_animations();
                         }
                         for wallpaper in &wallpapers {
-                            wallpaper.set_img_info(utils::ipc::BgImg::Color(color));
-                            wallpaper.clear(color);
+                            wallpaper.set_img_info(utils::ipc::BgImg::Color(clear.color));
+                            wallpaper.clear(clear.color);
                         }
                         for wallpaper in &wallpapers {
                             wallpaper.draw();
                         }
                         flush_wayland();
-                    });
-                match spawn_result {
-                    Ok(_) => Answer::Ok,
-                    Err(e) => Answer::Err(format!("failed to spawn `clear` thread: {e}")),
-                }
+                    })
+                    .unwrap(); // builder only failed if the name contains null bytes
+                Answer::Ok
             }
             Request::Ping => Answer::Ping(
                 self.wallpapers

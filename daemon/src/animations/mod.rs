@@ -42,7 +42,7 @@ impl Animator {
     ) where
         'a: 'b,
     {
-        if let Err(e) = thread::Builder::new()
+        thread::Builder::new()
             .name("transition".to_string()) //Name our threads  for better log messages
             .stack_size(STACK_SIZE) //the default of 2MB is way too overkill for this
             .spawn_scoped(scope, move || {
@@ -62,9 +62,7 @@ impl Animator {
 
                 Transition::new(wallpapers, dim, transition).execute(img);
             })
-        {
-            error!("failed to spawn 'transition' thread: {}", e);
-        }
+            .unwrap(); // builder only fails if name contains null bytes
     }
 
     pub(super) fn transition(
@@ -75,7 +73,7 @@ impl Animator {
         mut wallpapers: Vec<Vec<Arc<Wallpaper>>>,
     ) -> Answer {
         let barrier = self.anim_barrier.clone();
-        let spawn_result = thread::Builder::new()
+        thread::Builder::new()
             .stack_size(1 << 15)
             .name("animation spawner".to_string())
             .spawn(move || {
@@ -97,11 +95,9 @@ impl Animator {
                         }
                     });
                 }
-            });
-        match spawn_result {
-            Ok(_) => Answer::Ok,
-            Err(e) => Answer::Err(e.to_string()),
-        }
+            })
+            .unwrap(); // builder only fails if name contains null bytes
+        Answer::Ok
     }
 
     fn spawn_animation_thread<'a, 'b>(
@@ -112,7 +108,7 @@ impl Animator {
     ) where
         'a: 'b,
     {
-        if let Err(e) = thread::Builder::new()
+        thread::Builder::new()
             .name("animation".to_string()) //Name our threads  for better log messages
             .stack_size(STACK_SIZE) //the default of 2MB is way too overkill for this
             .spawn_scoped(scope, move || {
@@ -170,8 +166,6 @@ impl Animator {
                     now = std::time::Instant::now();
                 }
             })
-        {
-            error!("failed to spawn 'animation' thread: {}", e);
-        }
+            .unwrap(); // builder only fails if name contains null bytes
     }
 }

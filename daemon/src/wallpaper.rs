@@ -240,7 +240,7 @@ impl Wallpaper {
 
         if inner.name != staging.name && use_cache {
             let name = staging.name.clone().unwrap_or("".to_string());
-            if let Err(e) = std::thread::Builder::new()
+            std::thread::Builder::new()
                 .name("cache loader".to_string())
                 .stack_size(1 << 14)
                 .spawn(move || {
@@ -248,9 +248,7 @@ impl Wallpaper {
                         warn!("failed to load cache: {e}");
                     }
                 })
-            {
-                warn!("failed to spawn `cache loader` thread: {e}");
-            }
+                .unwrap(); // builder only fails if `name` contains null bytes
         }
 
         let (width, height) = if matches!(
