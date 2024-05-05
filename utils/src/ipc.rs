@@ -505,28 +505,6 @@ impl Animation {
             i,
         )
     }
-
-    pub(crate) fn deserialize_copy(bytes: &[u8]) -> (Self, usize) {
-        let mut i = 0;
-        let animation_len = u32::from_ne_bytes(bytes[i..i + 4].try_into().unwrap()) as usize;
-        i += 4;
-        let mut animation = Vec::with_capacity(animation_len);
-        for _ in 0..animation_len {
-            let (anim, offset) = BitPack::deserialize_copy(&bytes[i..]);
-            i += offset;
-            let duration =
-                Duration::from_secs_f64(f64::from_ne_bytes(bytes[i..i + 8].try_into().unwrap()));
-            i += 8;
-            animation.push((anim, duration));
-        }
-
-        (
-            Self {
-                animation: animation.into(),
-            },
-            i,
-        )
-    }
 }
 
 pub struct ImageRequest {
@@ -1245,7 +1223,7 @@ impl Mmap {
     }
 
     #[must_use]
-    fn from_fd(fd: OwnedFd, len: usize) -> Self {
+    pub(crate) fn from_fd(fd: OwnedFd, len: usize) -> Self {
         let ptr = unsafe {
             let ptr = mmap(std::ptr::null_mut(), len, Self::PROT, Self::FLAGS, &fd, 0).unwrap();
             // SAFETY: the function above will never return a null pointer if it succeeds

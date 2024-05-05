@@ -10,7 +10,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::ipc::{Animation, PixelFormat};
+use crate::ipc::{Animation, Mmap, PixelFormat};
 
 pub(crate) fn store(output_name: &str, img_path: &str) -> io::Result<()> {
     let mut filepath = cache_dir()?;
@@ -52,10 +52,11 @@ pub fn load_animation_frames(
 
     for entry in read_dir.into_iter().flatten() {
         if entry.path() == filepath {
-            let mut buf = Vec::new();
-            File::open(&filepath)?.read_to_end(&mut buf)?;
+            let fd = File::open(&filepath)?.into();
+            let len = rustix::fs::seek(&fd, rustix::fs::SeekFrom::End(0))?;
+            let mmap = Mmap::from_fd(fd, len as usize);
 
-            match std::panic::catch_unwind(|| Animation::deserialize_copy(&buf)) {
+            match std::panic::catch_unwind(|| Animation::deserialize(&mmap, mmap.slice())) {
                 Ok((frames, _)) => return Ok(Some(frames)),
                 Err(e) => eprintln!("Error loading animation frames: {e:?}"),
             }

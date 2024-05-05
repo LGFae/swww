@@ -87,23 +87,6 @@ impl BitPack {
         )
     }
 
-    #[must_use]
-    pub(crate) fn deserialize_copy(bytes: &[u8]) -> (Self, usize) {
-        assert!(bytes.len() > 12);
-        let len = u32::from_ne_bytes(bytes[0..4].try_into().unwrap()) as usize;
-        let expected_buf_size = u32::from_ne_bytes(bytes[4..8].try_into().unwrap());
-        let compressed_size = i32::from_ne_bytes(bytes[8..12].try_into().unwrap());
-        let inner = Inner::Boxed(bytes[12..12 + len].into());
-        (
-            Self {
-                inner,
-                expected_buf_size,
-                compressed_size,
-            },
-            12 + len,
-        )
-    }
-
     #[inline]
     #[must_use]
     fn bytes(&self) -> &[u8] {
