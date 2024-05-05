@@ -3,7 +3,7 @@ use std::{path::PathBuf, process::Stdio, time::Duration};
 
 use utils::{
     cache,
-    ipc::{self, connect_to_socket, get_socket_path, read_socket, Answer, Request},
+    ipc::{self, connect_to_socket, get_socket_path, read_socket, Answer, RequestSend},
 };
 
 mod imgproc;
@@ -61,7 +61,7 @@ fn main() -> Result<(), String> {
 
     loop {
         let socket = connect_to_socket(&get_socket_path(), 5, 100)?;
-        Request::Ping.send(&socket)?;
+        RequestSend::Ping.send(&socket)?;
         let bytes = read_socket(&socket)?;
         let answer = Answer::receive(bytes);
         if let Answer::Ping(configured) = answer {
@@ -114,7 +114,7 @@ fn process_swww_args(args: &Swww) -> Result<(), String> {
     Ok(())
 }
 
-fn make_request(args: &Swww) -> Result<Option<Request>, String> {
+fn make_request(args: &Swww) -> Result<Option<RequestSend>, String> {
     match args {
         Swww::Clear(c) => {
             let (format, _, _) = get_format_dims_and_outputs(&[])?;
@@ -122,11 +122,11 @@ fn make_request(args: &Swww) -> Result<Option<Request>, String> {
             if format.must_swap_r_and_b_channels() {
                 color.swap(0, 2);
             }
-            let clear = ipc::Clear {
+            let clear = ipc::ClearSend {
                 color,
                 outputs: split_cmdline_outputs(&c.outputs),
             };
-            Ok(Some(Request::Clear(clear.create_request())))
+            Ok(Some(RequestSend::Clear(clear.create_request())))
         }
         Swww::Restore(restore) => {
             let requested_outputs = split_cmdline_outputs(&restore.outputs);
@@ -139,7 +139,7 @@ fn make_request(args: &Swww) -> Result<Option<Request>, String> {
             let (format, dims, outputs) = get_format_dims_and_outputs(&requested_outputs)?;
             let imgbuf = ImgBuf::new(&img.path)?;
             let img_request = make_img_request(img, &imgbuf, &dims, format, &outputs)?;
-            Ok(Some(Request::Img(img_request)))
+            Ok(Some(RequestSend::Img(img_request)))
         }
         Swww::Init { no_cache, .. } => {
             if !*no_cache {
@@ -147,8 +147,8 @@ fn make_request(args: &Swww) -> Result<Option<Request>, String> {
             }
             Ok(None)
         }
-        Swww::Kill => Ok(Some(Request::Kill)),
-        Swww::Query => Ok(Some(Request::Query)),
+        Swww::Kill => Ok(Some(RequestSend::Kill)),
+        Swww::Query => Ok(Some(RequestSend::Query)),
     }
 }
 
@@ -212,7 +212,7 @@ fn make_img_request(
         };
 
         img_req_builder.push(
-            ipc::Img {
+            ipc::ImgSend {
                 img,
                 path,
                 dim,
@@ -235,7 +235,7 @@ fn get_format_dims_and_outputs(
     let mut imgs: Vec<ipc::BgImg> = Vec::new();
 
     let socket = connect_to_socket(&get_socket_path(), 5, 100)?;
-    Request::Query.send(&socket)?;
+    RequestSend::Query.send(&socket)?;
     let bytes = read_socket(&socket)?;
     drop(socket);
     let answer = Answer::receive(bytes);
@@ -316,7 +316,7 @@ fn is_daemon_running() -> Result<bool, String> {
         Err(_) => return Ok(false),
     };
 
-    Request::Ping.send(&socket)?;
+    RequestSend::Ping.send(&socket)?;
     let answer = Answer::receive(read_socket(&socket)?);
     match answer {
         Answer::Ping(_) => Ok(true),

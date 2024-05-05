@@ -7,7 +7,7 @@ use std::{
 
 use utils::{
     compression::Decompressor,
-    ipc::{self, Animation, Answer, BgImg, ImgRecv},
+    ipc::{self, Animation, Answer, BgImg, ImgReq},
 };
 
 use crate::wallpaper::{AnimationToken, Wallpaper};
@@ -68,7 +68,7 @@ impl Animator {
     pub(super) fn transition(
         &mut self,
         transition: ipc::Transition,
-        imgs: Box<[ImgRecv]>,
+        imgs: Box<[ImgReq]>,
         animations: Option<Box<[Animation]>>,
         mut wallpapers: Vec<Vec<Arc<Wallpaper>>>,
     ) -> Answer {
@@ -78,7 +78,7 @@ impl Animator {
             .name("animation spawner".to_string())
             .spawn(move || {
                 thread::scope(|s| {
-                    for (ImgRecv { img, path, dim, .. }, wallpapers) in
+                    for (ImgReq { img, path, dim, .. }, wallpapers) in
                         imgs.iter().zip(wallpapers.iter_mut())
                     {
                         Self::spawn_transition_thread(

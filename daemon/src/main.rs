@@ -47,8 +47,8 @@ use wayland_client::{
 };
 
 use utils::ipc::{
-    connect_to_socket, get_socket_path, read_socket, Answer, BgInfo, ImageRecv, MmappedStr,
-    PixelFormat, Request, RequestRecv, Scale,
+    connect_to_socket, get_socket_path, read_socket, Answer, BgInfo, ImageReq, MmappedStr,
+    PixelFormat, RequestRecv, RequestSend, Scale,
 };
 
 use animations::Animator;
@@ -396,7 +396,7 @@ impl Daemon {
                 Answer::Ok
             }
             RequestRecv::Query => Answer::Info(self.wallpapers_info()),
-            RequestRecv::Img(ImageRecv {
+            RequestRecv::Img(ImageReq {
                 transition,
                 imgs,
                 outputs,
@@ -864,7 +864,7 @@ pub fn is_daemon_running(addr: &PathBuf) -> Result<bool, String> {
         Err(_) => return Ok(false),
     };
 
-    Request::Ping.send(&sock)?;
+    RequestSend::Ping.send(&sock)?;
     let answer = Answer::receive(read_socket(&sock)?);
     match answer {
         Answer::Ping(_) => Ok(true),
