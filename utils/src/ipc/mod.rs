@@ -75,7 +75,7 @@ impl ImageRequestBuilder {
             self.serialize_bytes(output.as_bytes());
         }
 
-        let animation_start = self.len;
+        let animation_start = self.len + 1;
         if let Some(animation) = animation.as_ref() {
             self.push_byte(1);
             animation.serialize(self);
