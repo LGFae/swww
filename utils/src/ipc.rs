@@ -740,6 +740,8 @@ impl Request {
                         let (animation, offset) = Animation::deserialize(&bytes[i..]);
                         i += offset;
                         animations.push(animation);
+                    } else {
+                        i += 1;
                     }
                 }
 
