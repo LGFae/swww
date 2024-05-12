@@ -1,5 +1,5 @@
 [workspace]
-members = ["daemon"]
+members = [".", "daemon", "utils"]
 default-members = [".", "daemon"]
 
 [package]
