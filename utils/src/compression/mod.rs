@@ -50,8 +50,8 @@ enum Inner {
 /// This struct represents the cached difference between the previous frame and the next
 pub struct BitPack {
     inner: Inner,
-    /// This field will ensure we won't ever try to unpack the images on a buffer of the wrong size,
-    /// which ultimately is what allows us to use unsafe in the unpack_bytes function
+    /// This field will ensure we won't ever try to unpack the images on a buffer of the wrong
+    /// size, which ultimately is what allows us to use unsafe in the unpack_bytes function
     expected_buf_size: u32,
 
     compressed_size: i32,
@@ -143,7 +143,8 @@ impl Compressor {
             return None;
         }
 
-        // This should only be a problem with 64k monitors and beyond, (hopefully) far into the future
+        // This should only be a problem with 64k monitors and beyond, (hopefully) far into the
+        // future
         assert!(
             self.buf.len() <= LZ4_MAX_INPUT_SIZE,
             "frame is too large! cannot compress with LZ4!"

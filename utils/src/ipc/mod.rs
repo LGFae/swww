@@ -7,7 +7,9 @@ mod socket;
 mod types;
 
 use crate::cache;
-pub use {mmap::*, socket::*, types::*};
+pub use mmap::*;
+pub use socket::*;
+pub use types::*;
 
 pub struct ImageRequestBuilder {
     memory: Mmap,

@@ -34,7 +34,6 @@ impl ArcAnimBarrier {
         self.get().wait(timeout);
     }
 
-    #[inline]
     fn get(&self) -> &AnimBarrier {
         unsafe { self.ptr.as_ref() }
     }

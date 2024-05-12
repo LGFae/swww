@@ -1,31 +1,18 @@
-use std::{
-    os::unix::prelude::OwnedFd,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
-};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use utils::ipc::Mmap;
-use wayland_client::{
-    backend::ObjectData,
-    protocol::{
-        wl_buffer::WlBuffer,
-        wl_shm::{self, WlShm},
-        wl_shm_pool::{self, WlShmPool},
-    },
-    Proxy, WEnum,
-};
+
+use super::{globals, ObjectId};
 
 #[derive(Debug)]
-struct ReleaseFlag(AtomicBool);
+pub struct ReleaseFlag(AtomicBool);
 
 impl ReleaseFlag {
     fn is_released(&self) -> bool {
         self.0.load(Ordering::Acquire)
     }
 
-    fn set_released(&self) {
+    pub fn set_released(&self) {
         self.0.store(true, Ordering::Release)
     }
 
@@ -34,57 +21,40 @@ impl ReleaseFlag {
     }
 }
 
-impl ObjectData for ReleaseFlag {
-    fn event(
-        self: Arc<Self>,
-        _: &wayland_client::backend::Backend,
-        msg: wayland_client::backend::protocol::Message<wayland_client::backend::ObjectId, OwnedFd>,
-    ) -> Option<Arc<(dyn ObjectData + 'static)>> {
-        if msg.opcode == wayland_client::protocol::wl_buffer::Event::Release.opcode() {
-            self.set_released();
-        }
-
-        None
-    }
-
-    fn destroyed(&self, _: wayland_client::backend::ObjectId) {}
-}
-
 #[derive(Debug)]
 struct Buffer {
-    inner: WlBuffer,
-    released: Arc<ReleaseFlag>,
+    object_id: ObjectId,
+    released: ReleaseFlag,
 }
 
 impl Buffer {
     fn new(
-        pool: &WlShmPool,
+        pool_id: ObjectId,
         offset: i32,
         width: i32,
         height: i32,
         stride: i32,
-        format: wl_shm::Format,
+        format: u32,
     ) -> Self {
-        let released = Arc::new(ReleaseFlag(AtomicBool::new(true)));
-        let inner = pool
-            .send_constructor(
-                wl_shm_pool::Request::CreateBuffer {
-                    offset,
-                    width,
-                    height,
-                    stride,
-                    format: WEnum::Value(format),
-                },
-                released.clone(),
-            )
-            .expect("WlShmPool failed to create buffer");
-        Self { inner, released }
+        let released = ReleaseFlag(AtomicBool::new(true));
+
+        let object_id = globals::object_create(super::WlDynObj::Buffer);
+        super::interfaces::wl_shm_pool::req::create_buffer(
+            pool_id, object_id, offset, width, height, stride, format,
+        )
+        .expect("WlShmPool failed to create buffer");
+        Self {
+            object_id,
+            released,
+        }
     }
 }
 
 impl Drop for Buffer {
     fn drop(&mut self) {
-        self.inner.destroy();
+        if let Err(e) = super::interfaces::wl_buffer::req::destroy(self.object_id) {
+            log::error!("failed to destroy wl_buffer: {e:?}");
+        }
     }
 }
 
@@ -93,9 +63,8 @@ impl Drop for Buffer {
 /// them are freed. It also takes care of copying the previous buffer's content over to the new one
 /// for us
 pub(crate) struct BumpPool {
-    pool: WlShmPool,
+    pool_id: ObjectId,
     mmap: Mmap,
-
     buffers: Vec<Buffer>,
     width: i32,
     height: i32,
@@ -104,13 +73,14 @@ pub(crate) struct BumpPool {
 
 impl BumpPool {
     /// We assume `width` and `height` have already been multiplied by their scale factor
-    pub(crate) fn new(width: i32, height: i32, shm: &WlShm) -> Self {
-        let len = width as usize * height as usize * crate::pixel_format().channels() as usize;
-        let (pool, mmap) = new_pool(len, shm);
+    pub(crate) fn new(width: i32, height: i32) -> Self {
+        let len =
+            width as usize * height as usize * super::globals::pixel_format().channels() as usize;
+        let (mmap, pool_id) = new_pool(len);
         let buffers = vec![];
 
         Self {
-            pool,
+            pool_id,
             mmap,
             buffers,
             width,
@@ -119,17 +89,26 @@ impl BumpPool {
         }
     }
 
-    #[inline]
-    fn buffer_len(&self) -> usize {
-        self.width as usize * self.height as usize * crate::pixel_format().channels() as usize
+    pub(crate) fn get_buffer_release_flag(&self, buffer_id: ObjectId) -> Option<&ReleaseFlag> {
+        self.buffers.iter().find_map(|b| {
+            if b.object_id == buffer_id {
+                Some(&b.released)
+            } else {
+                None
+            }
+        })
     }
 
-    #[inline]
+    fn buffer_len(&self) -> usize {
+        self.width as usize
+            * self.height as usize
+            * super::globals::pixel_format().channels() as usize
+    }
+
     fn buffer_offset(&self, buffer_index: usize) -> usize {
         self.buffer_len() * buffer_index
     }
 
-    #[inline]
     fn occupied_bytes(&self) -> usize {
         self.buffer_offset(self.buffers.len())
     }
@@ -142,17 +121,17 @@ impl BumpPool {
         let new_len = self.occupied_bytes() + len;
         if new_len > self.mmap.len() {
             self.mmap.remap(new_len);
-            self.pool.resize(new_len as i32);
+            super::interfaces::wl_shm_pool::req::resize(self.pool_id, new_len as i32).unwrap();
         }
 
         let new_buffer_index = self.buffers.len();
         self.buffers.push(Buffer::new(
-            &self.pool,
+            self.pool_id,
             self.buffer_offset(new_buffer_index).try_into().unwrap(),
             self.width,
             self.height,
-            self.width * crate::pixel_format().channels() as i32,
-            crate::wl_shm_format(),
+            self.width * super::globals::pixel_format().channels() as i32,
+            super::globals::wl_shm_format(),
         ));
 
         log::info!(
@@ -197,13 +176,11 @@ impl BumpPool {
     /// gets the last buffer we've drawn to
     ///
     /// This may return None if there was a resize request in-between the last call to get_drawable
-    #[inline]
-    pub(crate) fn get_commitable_buffer(&self) -> Option<&WlBuffer> {
-        self.last_used_buffer.map(|i| &self.buffers[i].inner)
+    pub(crate) fn get_commitable_buffer(&self) -> Option<ObjectId> {
+        self.last_used_buffer.map(|i| self.buffers[i].object_id)
     }
 
     /// We assume `width` and `height` have already been multiplied by their scale factor
-    #[inline]
     pub(crate) fn resize(&mut self, width: i32, height: i32) {
         self.width = width;
         self.height = height;
@@ -214,37 +191,17 @@ impl BumpPool {
 
 impl Drop for BumpPool {
     fn drop(&mut self) {
-        self.pool.destroy();
+        if let Err(e) = super::interfaces::wl_shm_pool::req::destroy(self.pool_id) {
+            log::error!("failed to destroy wl_shm_pool: {e}");
+        }
     }
 }
 
-fn new_pool(len: usize, shm: &WlShm) -> (WlShmPool, Mmap) {
+fn new_pool(len: usize) -> (Mmap, ObjectId) {
     let mmap = Mmap::create(len);
-
-    let pool = shm
-        .send_constructor(
-            wl_shm::Request::CreatePool {
-                fd: mmap.fd(),
-                size: len as i32,
-            },
-            Arc::new(ShmPoolData),
-        )
+    let pool_id = globals::object_create(super::WlDynObj::ShmPool);
+    super::interfaces::wl_shm::req::create_pool(pool_id, &mmap.fd(), len as i32)
         .expect("failed to create WlShmPool object");
 
-    (pool, mmap)
-}
-
-#[derive(Debug)]
-struct ShmPoolData;
-
-impl ObjectData for ShmPoolData {
-    fn event(
-        self: Arc<Self>,
-        _: &wayland_client::backend::Backend,
-        _: wayland_client::backend::protocol::Message<wayland_client::backend::ObjectId, OwnedFd>,
-    ) -> Option<Arc<(dyn ObjectData + 'static)>> {
-        unreachable!("wl_shm_pool has no events")
-    }
-
-    fn destroyed(&self, _: wayland_client::backend::ObjectId) {}
+    (mmap, pool_id)
 }

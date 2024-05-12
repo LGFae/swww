@@ -3,355 +3,125 @@
 //! of `expects`, **on purpose**, because we **want** to unwind and exit when they happen
 
 mod animations;
-pub mod bump_pool;
 mod cli;
 mod wallpaper;
+#[allow(dead_code)]
+mod wayland;
 use log::{debug, error, info, warn, LevelFilter};
 use rustix::{
     event::{poll, PollFd, PollFlags},
     fd::OwnedFd,
 };
+
 use wallpaper::Wallpaper;
-use wayland_protocols::wp::{
-    fractional_scale::v1::client::{
-        wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1,
-        wp_fractional_scale_v1::WpFractionalScaleV1,
-    },
-    viewporter::client::{wp_viewport::WpViewport, wp_viewporter::WpViewporter},
+use wayland::{
+    globals::{self, Initializer},
+    ObjectId,
 };
 
 use std::{
     fs,
     io::{IsTerminal, Write},
-    num::NonZeroI32,
+    num::{NonZeroI32, NonZeroU32},
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, OnceLock,
+        Arc,
     },
-};
-
-use wayland_client::{
-    backend::WeakBackend,
-    globals::{registry_queue_init, GlobalList, GlobalListContents},
-    protocol::{
-        wl_callback::WlCallback,
-        wl_compositor::WlCompositor,
-        wl_output,
-        wl_region::WlRegion,
-        wl_registry::WlRegistry,
-        wl_shm::{self, WlShm},
-        wl_surface::{self, WlSurface},
-    },
-    Connection, Dispatch, Proxy, QueueHandle,
 };
 
 use utils::ipc::{
     connect_to_socket, get_socket_path, read_socket, Answer, BgInfo, ImageReq, MmappedStr,
-    PixelFormat, RequestRecv, RequestSend, Scale,
+    RequestRecv, RequestSend, Scale,
 };
 
 use animations::Animator;
 
-pub type LayerShell =
-    wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_shell_v1::ZwlrLayerShellV1;
-pub type LayerSurface =
-    wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_surface_v1::ZwlrLayerSurfaceV1;
-
 // We need this because this might be set by signals, so we can't keep it in the daemon
 static EXIT: AtomicBool = AtomicBool::new(false);
 
-#[inline]
 fn exit_daemon() {
     EXIT.store(true, Ordering::Release);
 }
 
-#[inline]
 fn should_daemon_exit() -> bool {
     EXIT.load(Ordering::Acquire)
-}
-
-static PIXEL_FORMAT: OnceLock<PixelFormat> = OnceLock::new();
-static BACKEND: OnceLock<WeakBackend> = OnceLock::new();
-
-#[inline]
-pub fn wl_shm_format() -> wl_shm::Format {
-    match pixel_format() {
-        PixelFormat::Xrgb => wl_shm::Format::Xrgb8888,
-        PixelFormat::Xbgr => wl_shm::Format::Xbgr8888,
-        PixelFormat::Rgb => wl_shm::Format::Rgb888,
-        PixelFormat::Bgr => wl_shm::Format::Bgr888,
-    }
-}
-
-#[inline]
-pub fn flush_wayland() {
-    debug_assert!(BACKEND.get().is_some());
-    BACKEND.get().unwrap().upgrade().unwrap().flush().unwrap();
-}
-
-#[inline]
-pub fn pixel_format() -> PixelFormat {
-    debug_assert!(PIXEL_FORMAT.get().is_some());
-    *PIXEL_FORMAT.get().unwrap_or(&PixelFormat::Xrgb)
 }
 
 extern "C" fn signal_handler(_s: libc::c_int) {
     exit_daemon();
 }
 
-fn main() -> Result<(), String> {
-    let cli = cli::Cli::new();
-    make_logger(cli.quiet);
-
-    if let Some(format) = cli.format {
-        PIXEL_FORMAT.set(format).unwrap();
-        info!("Forced usage of wl_shm format: {:?}", wl_shm_format());
-    }
-
-    let listener = SocketWrapper::new()?;
-    setup_signals();
-
-    let conn = Connection::connect_to_env().expect("failed to connect to the wayland server");
-    BACKEND.set(conn.backend().downgrade()).unwrap();
-    // Enumerate the list of globals to get the protocols the server implements.
-    let (globals, mut event_queue) =
-        registry_queue_init(&conn).expect("failed to initialize the event queue");
-    let qh = event_queue.handle();
-
-    let mut daemon = Daemon::new(&globals, &qh, cli.no_cache);
-    // roundtrip to get the shm formats before setting up the outputs
-    event_queue.roundtrip(&mut daemon).unwrap();
-
-    for global in globals.contents().clone_list() {
-        if global.interface == "wl_output" {
-            if global.version >= 2 {
-                let output = globals
-                    .registry()
-                    .bind(global.name, global.version, &qh, ());
-                daemon.new_output(&qh, output, global.name);
-            } else {
-                error!("wl_output must be at least version 2 for swww-daemon!")
-            }
-        }
-    }
-
-    if let Ok(true) = sd_notify::booted() {
-        if let Err(e) = sd_notify::notify(true, &[sd_notify::NotifyState::Ready]) {
-            error!("Error sending status update to systemd: {}", e.to_string());
-        }
-    }
-    info!("Initialization succeeded! Starting main loop...");
-    while !should_daemon_exit() {
-        // Process wayland events
-        event_queue
-            .flush()
-            .expect("failed to flush the event queue");
-        let read_guard = event_queue
-            .prepare_read()
-            .expect("failed to prepare the event queue's read");
-
-        let events = {
-            let connection_fd = read_guard.connection_fd();
-            let mut fds = [
-                PollFd::new(&connection_fd, PollFlags::IN),
-                PollFd::new(&listener.0, PollFlags::IN),
-            ];
-
-            match poll(&mut fds, -1) {
-                Ok(_) => (),
-                Err(e) => match e {
-                    rustix::io::Errno::INTR => (),
-                    _ => panic!("failed to poll file descriptors: {e}"),
-                },
-            };
-
-            [fds[0].revents(), fds[1].revents()]
-        };
-
-        if !events[0].is_empty() {
-            match read_guard.read() {
-                Ok(_) => {
-                    event_queue
-                        .dispatch_pending(&mut daemon)
-                        .expect("failed to dispatch events");
-                }
-                Err(e) => match e {
-                    wayland_client::backend::WaylandError::Io(io) => match io.kind() {
-                        std::io::ErrorKind::WouldBlock => {
-                            warn!("failed to read wayland events because it would block")
-                        }
-                        _ => panic!("Io error when reading wayland events: {io}"),
-                    },
-                    wayland_client::backend::WaylandError::Protocol(e) => {
-                        panic!("{e}")
-                    }
-                },
-            }
-        } else {
-            drop(read_guard);
-        }
-
-        if !events[1].is_empty() {
-            match rustix::net::accept(&listener.0) {
-                Ok(stream) => daemon.recv_socket_msg(stream),
-                Err(e) => match e.kind() {
-                    std::io::ErrorKind::WouldBlock => (),
-                    _ => return Err(format!("failed to accept incoming connection: {e}")),
-                },
-            }
-        }
-    }
-
-    info!("Goodbye!");
-    Ok(())
-}
-
-fn setup_signals() {
-    // C data structure, expected to be zeroed out.
-    let mut sigaction: libc::sigaction = unsafe { std::mem::zeroed() };
-    unsafe { libc::sigemptyset(std::ptr::addr_of_mut!(sigaction.sa_mask)) };
-
-    #[cfg(not(target_os = "aix"))]
-    {
-        sigaction.sa_sigaction = signal_handler as usize;
-    }
-    #[cfg(target_os = "aix")]
-    {
-        sigaction.sa_union.__su_sigaction = handler;
-    }
-
-    for signal in [libc::SIGINT, libc::SIGQUIT, libc::SIGTERM, libc::SIGHUP] {
-        let ret =
-            unsafe { libc::sigaction(signal, std::ptr::addr_of!(sigaction), std::ptr::null_mut()) };
-        if ret != 0 {
-            error!("Failed to install signal handler!")
-        }
-    }
-}
-
-/// This is a wrapper that makes sure to delete the socket when it is dropped
-struct SocketWrapper(OwnedFd);
-impl SocketWrapper {
-    fn new() -> Result<Self, String> {
-        let socket_addr = get_socket_path();
-
-        if socket_addr.exists() {
-            if is_daemon_running(&socket_addr)? {
-                return Err(
-                    "There is an swww-daemon instance already running on this socket!".to_string(),
-                );
-            } else {
-                warn!(
-                    "socket file {} was not deleted when the previous daemon exited",
-                    socket_addr.to_string_lossy()
-                );
-                if let Err(e) = std::fs::remove_file(&socket_addr) {
-                    return Err(format!("failed to delete previous socket: {e}"));
-                }
-            }
-        }
-
-        let runtime_dir = match socket_addr.parent() {
-            Some(path) => path,
-            None => return Err("couldn't find a valid runtime directory".to_owned()),
-        };
-
-        if !runtime_dir.exists() {
-            match fs::create_dir(runtime_dir) {
-                Ok(()) => (),
-                Err(e) => return Err(format!("failed to create runtime dir: {e}")),
-            }
-        }
-
-        let socket = rustix::net::socket_with(
-            rustix::net::AddressFamily::UNIX,
-            rustix::net::SocketType::STREAM,
-            rustix::net::SocketFlags::CLOEXEC.union(rustix::net::SocketFlags::NONBLOCK),
-            None,
-        )
-        .expect("failed to create socket file descriptor");
-
-        rustix::net::bind_unix(
-            &socket,
-            &rustix::net::SocketAddrUnix::new(&socket_addr).unwrap(),
-        )
-        .unwrap();
-
-        rustix::net::listen(&socket, 0).unwrap();
-
-        debug!(
-            "Made socket in {:?} and initialized logger. Starting daemon...",
-            socket_addr
-        );
-
-        Ok(Self(socket))
-    }
-}
-
-impl Drop for SocketWrapper {
-    fn drop(&mut self) {
-        let socket_addr = get_socket_path();
-        if let Err(e) = fs::remove_file(&socket_addr) {
-            error!("Failed to remove socket at {socket_addr:?}: {e}");
-        }
-        info!("Removed socket at {:?}", socket_addr);
-    }
-}
-
-struct Daemon {
-    // Wayland stuff
-    layer_shell: LayerShell,
-    compositor: WlCompositor,
-    shm: WlShm,
-    pixel_format: PixelFormat,
-    shm_format: wl_shm::Format,
-    viewporter: WpViewporter,
-    fractional_scale_manager: Option<WpFractionalScaleManagerV1>,
-
-    // swww stuff
+struct Daemon2 {
     wallpapers: Vec<Arc<Wallpaper>>,
     animator: Animator,
     use_cache: bool,
+    fractional_scale_manager: Option<(ObjectId, NonZeroU32)>,
 }
 
-impl Daemon {
-    fn new(globals: &GlobalList, qh: &QueueHandle<Self>, no_cache: bool) -> Self {
-        // The compositor (not to be confused with the server which is commonly called the compositor) allows
-        // configuring surfaces to be presented.
-        let compositor: WlCompositor = globals
-            .bind(qh, 1..=6, ())
-            .expect("wl_compositor is not available");
+impl Daemon2 {
+    fn new(initializer: &Initializer, no_cache: bool) -> Self {
+        log::info!(
+            "Selected wl_shm format: {:?}",
+            wayland::globals::pixel_format()
+        );
+        let fractional_scale_manager = initializer.fractional_scale().cloned();
 
-        let layer_shell: LayerShell = globals
-            .bind(qh, 1..=4, ())
-            .expect("layer shell is not available");
-
-        let shm: WlShm = globals
-            .bind(qh, 1..=1, ())
-            .expect("wl_shm is not available");
-
-        let pixel_format = PixelFormat::Xrgb;
-        let shm_format = wl_shm::Format::Xrgb8888;
-
-        let viewporter = globals
-            .bind(qh, 1..=1, ())
-            .expect("viewported not available");
-        let fractional_scale_manager = globals.bind(qh, 1..=1, ()).ok();
+        let wallpapers = Vec::new();
 
         Self {
-            layer_shell,
-            compositor,
-            shm,
-            pixel_format,
-            shm_format,
-            viewporter,
-            fractional_scale_manager,
-
-            wallpapers: Vec::new(),
+            wallpapers,
             animator: Animator::new(),
             use_cache: !no_cache,
+            fractional_scale_manager,
         }
+    }
+
+    fn new_output(&mut self, output_name: u32) {
+        use wayland::interfaces::*;
+        let output = globals::object_create(wayland::WlDynObj::Output);
+        wl_registry::req::bind(output_name, output, "wl_output", 4).unwrap();
+
+        let surface = globals::object_create(wayland::WlDynObj::Surface);
+        wl_compositor::req::create_surface(surface).unwrap();
+
+        let region = globals::object_create(wayland::WlDynObj::Region);
+        wl_compositor::req::create_region(region).unwrap();
+
+        wl_surface::req::set_input_region(surface, Some(region)).unwrap();
+        wl_region::req::destroy(region).unwrap();
+
+        let layer_surface = globals::object_create(wayland::WlDynObj::LayerSurface);
+        zwlr_layer_shell_v1::req::get_layer_surface(
+            layer_surface,
+            surface,
+            Some(output),
+            zwlr_layer_shell_v1::layer::BACKGROUND,
+            "swww-daemon",
+        )
+        .unwrap();
+
+        let viewport = globals::object_create(wayland::WlDynObj::Viewport);
+        wp_viewporter::req::get_viewport(viewport, surface).unwrap();
+
+        let wp_fractional = if let Some((id, _)) = self.fractional_scale_manager.as_ref() {
+            let fractional = globals::object_create(wayland::WlDynObj::FractionalScale);
+            wp_fractional_scale_manager_v1::req::get_fractional_scale(*id, fractional, surface)
+                .unwrap();
+            Some(fractional)
+        } else {
+            None
+        };
+
+        debug!("New output: {output_name}");
+        self.wallpapers.push(Arc::new(Wallpaper::new(
+            output,
+            output_name,
+            surface,
+            viewport,
+            wp_fractional,
+            layer_surface,
+        )));
     }
 
     fn recv_socket_msg(&mut self, stream: OwnedFd) {
@@ -381,7 +151,6 @@ impl Daemon {
                         for wallpaper in &wallpapers {
                             wallpaper.draw();
                         }
-                        flush_wayland();
                     })
                     .unwrap(); // builder only failed if the name contains null bytes
                 Answer::Ok
@@ -437,360 +206,358 @@ impl Daemon {
             })
             .collect()
     }
+}
 
-    fn new_output(&mut self, qh: &QueueHandle<Self>, output: wl_output::WlOutput, name: u32) {
-        if PIXEL_FORMAT.get().is_none() {
-            assert!(PIXEL_FORMAT.set(self.pixel_format).is_ok());
-            log::info!("Selected wl_shm format: {:?}", self.shm_format);
+impl wayland::interfaces::wl_display::EvHandler for Daemon2 {
+    fn delete_id(&mut self, id: u32) {
+        if let Some(id) = NonZeroU32::new(id) {
+            globals::object_remove(ObjectId::new(id));
         }
+    }
+}
+impl wayland::interfaces::wl_registry::EvHandler for Daemon2 {
+    fn global(&mut self, name: u32, interface: &str, version: u32) {
+        if interface == "wl_output" {
+            if version < 4 {
+                error!("your compositor must support at least version 4 of wl_output");
+            } else {
+                self.new_output(name);
+            }
+        }
+    }
 
-        let surface = self.compositor.create_surface(qh, ());
+    fn global_remove(&mut self, name: u32) {
+        self.wallpapers.retain(|w| !w.has_output_name(name));
+    }
+}
 
-        // Wayland clients are expected to render the cursor on their input region.
-        // By setting the input region to an empty region, the compositor renders the
-        // default cursor. Without this, an empty desktop won't render a cursor.
-        let region = self.compositor.create_region(qh, ());
-        surface.set_input_region(Some(&region));
-
-        let layer_surface = self.layer_shell.get_layer_surface(
-            &surface,
-            Some(&output),
-            wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_shell_v1::Layer::Background,
-            "swww-daemon".to_string(),
-            qh,
-            (),
+impl wayland::interfaces::wl_shm::EvHandler for Daemon2 {
+    fn format(&mut self, format: u32) {
+        warn!(
+            "received a wl_shm format after initialization: {format}. This shouldn't be possible"
         );
-
-        let wp_viewport = self.viewporter.get_viewport(&surface, qh, ());
-        let wp_fractional = self
-            .fractional_scale_manager
-            .as_ref()
-            .map(|f| f.get_fractional_scale(&surface, qh, surface.clone()));
-
-        debug!("New output: {}", output.id());
-        self.wallpapers.push(Arc::new(Wallpaper::new(
-            output,
-            name,
-            surface,
-            wp_viewport,
-            wp_fractional,
-            layer_surface,
-            &self.shm,
-            qh,
-        )));
     }
 }
 
-impl Dispatch<wl_output::WlOutput, ()> for Daemon {
-    fn event(
-        state: &mut Self,
-        proxy: &wl_output::WlOutput,
-        event: <wl_output::WlOutput as wayland_client::Proxy>::Event,
-        _data: &(),
-        _conn: &Connection,
-        _qhandle: &QueueHandle<Self>,
+impl wayland::interfaces::wl_output::EvHandler for Daemon2 {
+    fn geometry(
+        &mut self,
+        sender_id: ObjectId,
+        _x: i32,
+        _y: i32,
+        _physical_width: i32,
+        _physical_height: i32,
+        _subpixel: i32,
+        _make: &str,
+        _model: &str,
+        transform: i32,
     ) {
-        for wallpaper in state.wallpapers.iter_mut() {
-            if wallpaper.has_output(proxy) {
-                match event {
-                    wl_output::Event::Geometry {
-                        x, y, transform, ..
-                    } => {
-                        debug!("output {} position: {x},{y}", proxy.id());
-                        match transform {
-                            wayland_client::WEnum::Value(v) => wallpaper.set_transform(v),
-                            wayland_client::WEnum::Unknown(u) => {
-                                error!("received unknown transform from compositor: {u}")
-                            }
+        for wallpaper in self.wallpapers.iter() {
+            if wallpaper.has_output(sender_id) {
+                if transform as u32 > wayland::interfaces::wl_output::transform::FLIPPED_270 {
+                    error!("received invalid transform value from compositor: {transform}")
+                } else {
+                    wallpaper.set_transform(transform as u32);
+                }
+                break;
+            }
+        }
+    }
+
+    fn mode(&mut self, sender_id: ObjectId, _flags: u32, width: i32, height: i32, _refresh: i32) {
+        for wallpaper in self.wallpapers.iter() {
+            if wallpaper.has_output(sender_id) {
+                wallpaper.set_dimensions(width, height);
+                break;
+            }
+        }
+    }
+
+    fn done(&mut self, sender_id: ObjectId) {
+        for wallpaper in self.wallpapers.iter() {
+            if wallpaper.has_output(sender_id) {
+                wallpaper.commit_surface_changes(self.use_cache);
+                break;
+            }
+        }
+    }
+
+    fn scale(&mut self, sender_id: ObjectId, factor: i32) {
+        for wallpaper in self.wallpapers.iter() {
+            if wallpaper.has_output(sender_id) {
+                match NonZeroI32::new(factor) {
+                    Some(factor) => wallpaper.set_scale(Scale::Whole(factor)),
+                    None => error!("received scale factor of 0 from compositor"),
+                }
+                break;
+            }
+        }
+    }
+
+    fn name(&mut self, sender_id: ObjectId, name: &str) {
+        for wallpaper in self.wallpapers.iter() {
+            if wallpaper.has_output(sender_id) {
+                wallpaper.set_name(name.to_string());
+                break;
+            }
+        }
+    }
+
+    fn description(&mut self, sender_id: ObjectId, description: &str) {
+        for wallpaper in self.wallpapers.iter() {
+            if wallpaper.has_output(sender_id) {
+                wallpaper.set_desc(description.to_string());
+                break;
+            }
+        }
+    }
+}
+impl wayland::interfaces::wl_surface::EvHandler for Daemon2 {
+    fn enter(&mut self, _sender_id: ObjectId, output: ObjectId) {
+        debug!("Output {}: Surface Enter", output.get());
+    }
+
+    fn leave(&mut self, _sender_id: ObjectId, output: ObjectId) {
+        debug!("Output {}: Surface Leave", output.get());
+    }
+
+    fn preferred_buffer_scale(&mut self, sender_id: ObjectId, factor: i32) {
+        for wallpaper in self.wallpapers.iter() {
+            if wallpaper.has_surface(sender_id) {
+                match NonZeroI32::new(factor) {
+                    Some(factor) => wallpaper.set_scale(Scale::Whole(factor)),
+                    None => error!("received scale factor of 0 from compositor"),
+                }
+                break;
+            }
+        }
+    }
+
+    fn preferred_buffer_transform(&mut self, _sender_id: ObjectId, _transform: u32) {
+        warn!("Received PreferredBufferTransform. We currently ignore those")
+    }
+}
+
+impl wayland::interfaces::wl_buffer::EvHandler for Daemon2 {
+    fn release(&mut self, sender_id: ObjectId) {
+        for wallpaper in self.wallpapers.iter() {
+            if wallpaper.try_set_buffer_release_flag(sender_id) {
+                break;
+            }
+        }
+    }
+}
+
+impl wayland::interfaces::wl_callback::EvHandler for Daemon2 {
+    fn done(&mut self, sender_id: ObjectId, _callback_data: u32) {
+        for wallpaper in self.wallpapers.iter() {
+            if wallpaper.has_callback(sender_id) {
+                wallpaper.frame_callback_completed();
+                break;
+            }
+        }
+    }
+}
+
+impl wayland::interfaces::zwlr_layer_surface_v1::EvHandler for Daemon2 {
+    fn configure(&mut self, sender_id: ObjectId, serial: u32, _width: u32, _height: u32) {
+        for wallpaper in self.wallpapers.iter() {
+            if wallpaper.has_layer_surface(sender_id) {
+                wayland::interfaces::zwlr_layer_surface_v1::req::ack_configure(sender_id, serial)
+                    .unwrap();
+                break;
+            }
+        }
+    }
+
+    fn closed(&mut self, sender_id: ObjectId) {
+        self.wallpapers.retain(|w| !w.has_layer_surface(sender_id));
+    }
+}
+
+impl wayland::interfaces::wp_fractional_scale_v1::EvHandler for Daemon2 {
+    fn preferred_scale(&mut self, sender_id: ObjectId, scale: u32) {
+        for wallpaper in self.wallpapers.iter() {
+            if wallpaper.has_fractional_scale(sender_id) {
+                match NonZeroI32::new(scale as i32) {
+                    Some(factor) => {
+                        wallpaper.set_scale(Scale::Fractional(factor));
+                        wallpaper.commit_surface_changes(self.use_cache);
+                    }
+                    None => error!("received scale factor of 0 from compositor"),
+                }
+                break;
+            }
+        }
+    }
+}
+
+fn main() -> Result<(), String> {
+    let cli = cli::Cli::new();
+    make_logger(cli.quiet);
+    let initializer = wayland::globals::init(cli.format);
+    let listener = SocketWrapper::new()?;
+    setup_signals();
+    let mut daemon = Daemon2::new(&initializer, cli.no_cache);
+    for &output_name in initializer.output_names() {
+        daemon.new_output(output_name);
+    }
+    drop(initializer);
+
+    let wayland_fd = wayland::globals::wayland_fd();
+    let mut fds = [
+        PollFd::new(&wayland_fd, PollFlags::IN),
+        PollFd::new(&listener.0, PollFlags::IN),
+    ];
+    while !should_daemon_exit() {
+        use wayland::{interfaces::*, wire, WlDynObj};
+
+        if let Err(e) = poll(&mut fds, -1) {
+            match e {
+                rustix::io::Errno::INTR => continue,
+                _ => panic!("failed to poll file descriptors: {e:?}"),
+            }
+        }
+
+        if !fds[0].revents().is_empty() {
+            let (msg, payload) = match wire::WireMsg::recv() {
+                Ok((msg, payload)) => (msg, payload),
+                Err(e) => match e {
+                    rustix::io::Errno::INTR => continue,
+                    _ => panic!("failed to poll file descriptors: {e:?}"),
+                },
+            };
+            match msg.sender_id() {
+                // in case there are errors
+                globals::WL_DISPLAY => wl_display::event(&mut daemon, msg, payload),
+                globals::WL_REGISTRY => wl_registry::event(&mut daemon, msg, payload),
+                globals::WL_COMPOSITOR => error!("wl_compositor has no events"),
+                globals::WL_SHM => wl_shm::event(&mut daemon, msg, payload),
+                globals::WP_VIEWPORTER => error!("wp_viewporter has no events"),
+                globals::ZWLR_LAYER_SHELL_V1 => error!("zwlr_layer_shell_v1 has no events"),
+                other => {
+                    let obj_id = globals::object_type_get(other);
+                    match obj_id {
+                        WlDynObj::Output => wl_output::event(&mut daemon, msg, payload),
+                        WlDynObj::Surface => wl_surface::event(&mut daemon, msg, payload),
+                        WlDynObj::Region => error!("wl_region has no events"),
+                        WlDynObj::LayerSurface => {
+                            zwlr_layer_surface_v1::event(&mut daemon, msg, payload)
                         }
-                    }
-                    wl_output::Event::Mode {
-                        flags: _flags,
-                        width,
-                        height,
-                        ..
-                    } => wallpaper.set_dimensions(width, height),
-                    wl_output::Event::Done => wallpaper.commit_surface_changes(state.use_cache),
-                    wl_output::Event::Scale { factor } => match NonZeroI32::new(factor) {
-                        Some(factor) => wallpaper.set_scale(Scale::Whole(factor)),
-                        None => error!("received scale factor of 0 from compositor"),
-                    },
-                    wl_output::Event::Name { name } => wallpaper.set_name(name),
-                    wl_output::Event::Description { description } => {
-                        wallpaper.set_desc(description)
-                    }
-                    e => error!("unrecognized WlOutput event: {e:?}"),
-                }
-                return;
-            }
-        }
-        warn!("received event for non-existing output")
-    }
-}
-
-impl Dispatch<WlCompositor, ()> for Daemon {
-    fn event(
-        _state: &mut Self,
-        _proxy: &WlCompositor,
-        _event: <WlCompositor as wayland_client::Proxy>::Event,
-        _data: &(),
-        _conn: &Connection,
-        _qhandle: &QueueHandle<Self>,
-    ) {
-        error!("WlCompositor has no events");
-    }
-}
-
-impl Dispatch<WlSurface, ()> for Daemon {
-    fn event(
-        state: &mut Self,
-        proxy: &WlSurface,
-        event: <WlSurface as wayland_client::Proxy>::Event,
-        _data: &(),
-        _conn: &Connection,
-        _qh: &QueueHandle<Self>,
-    ) {
-        match event {
-            wl_surface::Event::Enter { output } => debug!("Output {}: Surface Enter", output.id()),
-            wl_surface::Event::Leave { output } => debug!("Output {}: Surface Leave", output.id()),
-            wl_surface::Event::PreferredBufferScale { factor } => {
-                for wallpaper in state.wallpapers.iter_mut() {
-                    if wallpaper.has_surface(proxy) {
-                        match NonZeroI32::new(factor) {
-                            Some(factor) => {
-                                wallpaper.set_scale(Scale::Whole(factor));
-                                wallpaper.commit_surface_changes(state.use_cache);
-                            }
-                            None => error!("received scale factor of 0 from compositor"),
+                        WlDynObj::Buffer => wl_buffer::event(&mut daemon, msg, payload),
+                        WlDynObj::ShmPool => error!("wl_shm_pool has no events"),
+                        WlDynObj::Callback => wl_callback::event(&mut daemon, msg, payload),
+                        WlDynObj::Viewport => error!("wp_viewport has no events"),
+                        WlDynObj::FractionalScale => {
+                            wp_fractional_scale_v1::event(&mut daemon, msg, payload)
                         }
-                        return;
-                    }
-                }
-                warn!("received new scale factor for non-existing surface")
-            }
-            wl_surface::Event::PreferredBufferTransform { .. } => {
-                warn!("Received transform. We currently ignore those")
-            }
-            e => error!("unrecognized WlSurface event: {e:?}"),
-        }
-    }
-}
-
-impl Dispatch<WlRegion, ()> for Daemon {
-    fn event(
-        _state: &mut Self,
-        _proxy: &WlRegion,
-        _event: <WlRegion as wayland_client::Proxy>::Event,
-        _data: &(),
-        _conn: &Connection,
-        _qhandle: &QueueHandle<Self>,
-    ) {
-        error!("WlRegion has no events")
-    }
-}
-
-impl Dispatch<WlShm, ()> for Daemon {
-    fn event(
-        state: &mut Self,
-        _proxy: &WlShm,
-        event: <WlShm as wayland_client::Proxy>::Event,
-        _data: &(),
-        _conn: &Connection,
-        _qhandle: &QueueHandle<Self>,
-    ) {
-        match event {
-            wl_shm::Event::Format { format: wenum } => match wenum {
-                wayland_client::WEnum::Value(format) => {
-                    if format == wl_shm::Format::Bgr888 {
-                        state.shm_format = wl_shm::Format::Bgr888;
-                        state.pixel_format = PixelFormat::Bgr;
-                    } else if format == wl_shm::Format::Rgb888
-                        && state.pixel_format != PixelFormat::Bgr
-                    {
-                        state.shm_format = wl_shm::Format::Rgb888;
-                        state.pixel_format = PixelFormat::Rgb;
-                    } else if format == wl_shm::Format::Xbgr8888
-                        && state.pixel_format == PixelFormat::Xrgb
-                    {
-                        state.shm_format = wl_shm::Format::Xbgr8888;
-                        state.pixel_format = PixelFormat::Xbgr;
-                    }
-                }
-                wayland_client::WEnum::Unknown(v) => {
-                    error!("Received unknown shm format number {v} from server")
-                }
-            },
-            e => warn!("unhandled WlShm event: {e:?}"),
-        }
-    }
-}
-
-impl Dispatch<WlCallback, WlSurface> for Daemon {
-    fn event(
-        state: &mut Self,
-        _proxy: &WlCallback,
-        event: <WlCallback as wayland_client::Proxy>::Event,
-        data: &WlSurface,
-        _conn: &Connection,
-        _qh: &QueueHandle<Self>,
-    ) {
-        match event {
-            wayland_client::protocol::wl_callback::Event::Done { callback_data } => {
-                for wallpaper in state.wallpapers.iter_mut() {
-                    if wallpaper.has_surface(data) {
-                        wallpaper.frame_callback_completed(callback_data);
-                        return;
-                    }
-                }
-                warn!("received callback for non-existing surface!")
-            }
-            e => error!("unrecognized WlCallback event: {e:?}"),
-        }
-    }
-}
-
-impl Dispatch<WlRegistry, GlobalListContents> for Daemon {
-    fn event(
-        state: &mut Self,
-        proxy: &WlRegistry,
-        event: <WlRegistry as wayland_client::Proxy>::Event,
-        _data: &GlobalListContents,
-        _conn: &Connection,
-        qh: &QueueHandle<Self>,
-    ) {
-        match event {
-            wayland_client::protocol::wl_registry::Event::Global {
-                name,
-                interface,
-                version,
-            } => {
-                if interface.as_str() == "wl_output" {
-                    if version < 2 {
-                        error!("your compositor must support at least version 2 of wl_output");
-                    } else {
-                        let output = proxy.bind(name, version, qh, ());
-                        state.new_output(qh, output, name)
+                        WlDynObj::None => unreachable!("This should not be possible..."),
                     }
                 }
             }
+        }
 
-            wayland_client::protocol::wl_registry::Event::GlobalRemove { name } => {
-                state.wallpapers.retain(|w| !w.has_output_name(name));
-
-                debug!("Destroyed output with id: {name}");
+        if !fds[1].revents().is_empty() {
+            match rustix::net::accept(&listener.0) {
+                Ok(stream) => daemon.recv_socket_msg(stream),
+                Err(e) => match e.kind() {
+                    std::io::ErrorKind::WouldBlock => (),
+                    _ => return Err(format!("failed to accept incoming connection: {e}")),
+                },
             }
-            e => error!("unrecognized WlRegistry event: {e:?}"),
         }
     }
+
+    info!("Goodbye!");
+    Ok(())
 }
 
-impl Dispatch<WpViewporter, ()> for Daemon {
-    fn event(
-        _state: &mut Self,
-        _proxy: &WpViewporter,
-        _event: <WpViewporter as Proxy>::Event,
-        _data: &(),
-        _conn: &Connection,
-        _qhandle: &QueueHandle<Self>,
-    ) {
-        error!("WpViewporter has no events");
+fn setup_signals() {
+    // C data structure, expected to be zeroed out.
+    let mut sigaction: libc::sigaction = unsafe { std::mem::zeroed() };
+    unsafe { libc::sigemptyset(std::ptr::addr_of_mut!(sigaction.sa_mask)) };
+
+    #[cfg(not(target_os = "aix"))]
+    {
+        sigaction.sa_sigaction = signal_handler as usize;
     }
-}
-
-impl Dispatch<WpViewport, ()> for Daemon {
-    fn event(
-        _state: &mut Self,
-        _proxy: &WpViewport,
-        _event: <WpViewport as Proxy>::Event,
-        _data: &(),
-        _conn: &Connection,
-        _qhandle: &QueueHandle<Self>,
-    ) {
-        error!("WpViewport has no events");
+    #[cfg(target_os = "aix")]
+    {
+        sigaction.sa_union.__su_sigaction = handler;
     }
-}
 
-impl Dispatch<WpFractionalScaleManagerV1, ()> for Daemon {
-    fn event(
-        _state: &mut Self,
-        _proxy: &WpFractionalScaleManagerV1,
-        _event: <WpFractionalScaleManagerV1 as Proxy>::Event,
-        _data: &(),
-        _conn: &Connection,
-        _qhandle: &QueueHandle<Self>,
-    ) {
-        error!("WpFractionalScaleManagerV1 has no events");
-    }
-}
-
-impl Dispatch<WpFractionalScaleV1, WlSurface> for Daemon {
-    fn event(
-        state: &mut Self,
-        _proxy: &WpFractionalScaleV1,
-        event: <WpFractionalScaleV1 as Proxy>::Event,
-        data: &WlSurface,
-        _conn: &Connection,
-        _qhandle: &QueueHandle<Self>,
-    ) {
-        use wayland_protocols::wp::fractional_scale::v1::client::wp_fractional_scale_v1;
-        match event {
-            wp_fractional_scale_v1::Event::PreferredScale { scale } => {
-                for wallpaper in state.wallpapers.iter_mut() {
-                    if wallpaper.has_surface(data) {
-                        match NonZeroI32::new(scale as i32) {
-                            Some(factor) => {
-                                wallpaper.set_scale(Scale::Fractional(factor));
-                                wallpaper.commit_surface_changes(state.use_cache);
-                            }
-                            None => error!("received scale factor of 0 from compositor"),
-                        }
-                        return;
-                    }
-                }
-                warn!("received new fractional scale factor for non-existing surface")
-            }
-            e => error!("unrecognized WpFractionalScaleV1 event: {e:?}"),
+    for signal in [libc::SIGINT, libc::SIGQUIT, libc::SIGTERM, libc::SIGHUP] {
+        let ret =
+            unsafe { libc::sigaction(signal, std::ptr::addr_of!(sigaction), std::ptr::null_mut()) };
+        if ret != 0 {
+            error!("Failed to install signal handler!")
         }
     }
+    debug!("Finished setting up signal handlers")
 }
 
-impl Dispatch<LayerShell, ()> for Daemon {
-    fn event(
-        _state: &mut Self,
-        _proxy: &LayerShell,
-        _event: <LayerShell as Proxy>::Event,
-        _data: &(),
-        _conn: &Connection,
-        _qhandle: &QueueHandle<Self>,
-    ) {
-        error!("LayerShell has no events");
-    }
-}
+/// This is a wrapper that makes sure to delete the socket when it is dropped
+struct SocketWrapper(OwnedFd);
+impl SocketWrapper {
+    fn new() -> Result<Self, String> {
+        let socket_addr = get_socket_path();
 
-impl Dispatch<LayerSurface, ()> for Daemon {
-    fn event(
-        state: &mut Self,
-        proxy: &LayerSurface,
-        event: <LayerSurface as Proxy>::Event,
-        _data: &(),
-        _conn: &Connection,
-        _qhandle: &QueueHandle<Self>,
-    ) {
-        use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_surface_v1::Event;
-        match event {
-            Event::Configure { serial, .. } => {
-                for w in &mut state.wallpapers {
-                    if w.has_layer_surface(proxy) {
-                        proxy.ack_configure(serial);
-                        return;
-                    }
+        if socket_addr.exists() {
+            if is_daemon_running(&socket_addr)? {
+                return Err(
+                    "There is an swww-daemon instance already running on this socket!".to_string(),
+                );
+            } else {
+                warn!(
+                    "socket file {} was not deleted when the previous daemon exited",
+                    socket_addr.to_string_lossy()
+                );
+                if let Err(e) = std::fs::remove_file(&socket_addr) {
+                    return Err(format!("failed to delete previous socket: {e}"));
                 }
             }
-            Event::Closed => {
-                state.wallpapers.retain(|w| !w.has_layer_surface(proxy));
-            }
-            e => error!("unrecognized LayerSurface event: {e:?}"),
         }
+
+        let runtime_dir = match socket_addr.parent() {
+            Some(path) => path,
+            None => return Err("couldn't find a valid runtime directory".to_owned()),
+        };
+
+        if !runtime_dir.exists() {
+            match fs::create_dir(runtime_dir) {
+                Ok(()) => (),
+                Err(e) => return Err(format!("failed to create runtime dir: {e}")),
+            }
+        }
+
+        let socket = rustix::net::socket_with(
+            rustix::net::AddressFamily::UNIX,
+            rustix::net::SocketType::STREAM,
+            rustix::net::SocketFlags::CLOEXEC.union(rustix::net::SocketFlags::NONBLOCK),
+            None,
+        )
+        .expect("failed to create socket file descriptor");
+
+        rustix::net::bind_unix(
+            &socket,
+            &rustix::net::SocketAddrUnix::new(&socket_addr).unwrap(),
+        )
+        .unwrap();
+
+        rustix::net::listen(&socket, 0).unwrap();
+
+        debug!("Created socket in {:?}", socket_addr);
+        Ok(Self(socket))
+    }
+}
+
+impl Drop for SocketWrapper {
+    fn drop(&mut self) {
+        let socket_addr = get_socket_path();
+        if let Err(e) = fs::remove_file(&socket_addr) {
+            error!("Failed to remove socket at {socket_addr:?}: {e}");
+        }
+        info!("Removed socket at {:?}", socket_addr);
     }
 }
 
