@@ -182,7 +182,7 @@ pub enum Swww {
         ///Don't load the cache *during initialization* (it still loads on monitor (re)connection)
         ///
         ///If want to always pass an image for `swww` to load, this option can help make the
-        ///results some reliable: `swww init --no-cache && swww img <some img>`
+        ///results some reliable: `swww-daemon --no-cache && swww img <some img>`
         #[clap(long)]
         no_cache: bool,
 

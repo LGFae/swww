@@ -47,7 +47,7 @@ a background by controlling the *swww-daemon* at runtime.
 It supports animated gifs and putting different stuff in different monitors. I
 also did my best to make it as resource efficient as possible.
 
-To start, begin by running *swww init*. That will set up the *swww-daemon*.
+To start, begin by running *swww-daemon*. That will set up the *swww-daemon*.
 Then, you can send images to be displayed with *swww img*. To kill the daemon,
 use *swww kill*.
 
