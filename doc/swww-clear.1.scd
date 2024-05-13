@@ -29,7 +29,7 @@ Currently, we *do not* cache this, so if you want a color to be set at
 initialization, you must set it every time:
 
 ```
-swww init && swww clear 1a804a
+swww-daemon && swww clear 1a804a
 ```
 
 # SEE ALSO
