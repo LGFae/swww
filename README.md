@@ -43,6 +43,25 @@ The man pages will be in `doc/generated`. To install them, you must move them to
 to the appropriate location in your system. You should be able to figure out
 where that is by running `manpath`.
 
+### Nix
+
+NixOS users can directly use this repository to get the latest swww for their system.
+
+Add in your `flake.nix`:
+
+```nix
+  inputs.swww.url = "github:LGFae/swww";
+```
+
+Pass inputs to your modules using `specialArgs` and
+Then in `configuration.nix`:
+
+```nix
+  environment.systemPackages = [
+    inputs.swww.packages.${pkgs.system}.swww
+  ];
+```
+
 ## Features
 
  - Display animated gifs on your desktop
