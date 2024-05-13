@@ -1,3 +1,10 @@
+//! Wayland Interfaces we care about
+//!
+//! I only bothered implementing the interfaces we actually use. The initial implementation was
+//! done with an ad-hoc wayland scanner, but then I later refined it to make it more specific to
+//! what `swww-daemon` needs. Specifically, we use a lot of the globals in `super::globals` to
+//! simplify the code.
+
 use super::{
     globals,
     wire::{WaylandPayload, WireMsg, WireMsgBuilder, WlFixed},

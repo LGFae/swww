@@ -1,3 +1,10 @@
+//! Implementation of the Wayland Wire Protocol
+//!
+//! There are some things that are specific for `swww-daemon` (for example, our ancillary buffer
+//! for receiving socket messages is always empty, since none of the events we care about have file
+//! descriptors), but I tried to actually make it fairly complete. This means types like `WlFixed`
+//! exist even if they aren't used at all in the rest of the codebase.
+
 use rustix::fd::{AsRawFd, BorrowedFd, OwnedFd};
 use std::num::NonZeroU32;
 

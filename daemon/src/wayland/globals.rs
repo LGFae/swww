@@ -1,3 +1,17 @@
+//! `swww-daemon` global variables
+//!
+//! There are a lot of `static mut`s in here. The strategy to make them safe is as follows:
+//!
+//! First, this module only exposes getter functions to the mutable statics, meaning they cannot be
+//! mutated anywhere but in here.
+//!
+//! Second, the `pub init(..)` function only executes once. We ensure that using an atomic boolean.
+//! This means we will only be mutating these variables inside that function, once.
+//!
+//! In order to be safe, then, all we have to do is make sure we call `init(..)` as early as
+//! possible in the code, and everything will be fine. If we ever fail to that, we have a failsafe
+//! with `debug_assert`s in the getter functions, so we would see it explode while debugging.
+
 use rustix::{
     fd::{AsFd, BorrowedFd, FromRawFd, OwnedFd},
     net::SocketAddrAny,
@@ -14,6 +28,9 @@ use std::{
     sync::{atomic::AtomicBool, Mutex},
 };
 
+// all of these objects must always exist for `swww-daemon` to work correctly, so we turn them into
+// global constants
+
 pub const WL_DISPLAY: ObjectId = ObjectId(unsafe { NonZeroU32::new_unchecked(1) });
 pub const WL_REGISTRY: ObjectId = ObjectId(unsafe { NonZeroU32::new_unchecked(2) });
 pub const WL_COMPOSITOR: ObjectId = ObjectId(unsafe { NonZeroU32::new_unchecked(3) });
@@ -21,18 +38,26 @@ pub const WL_SHM: ObjectId = ObjectId(unsafe { NonZeroU32::new_unchecked(4) });
 pub const WP_VIEWPORTER: ObjectId = ObjectId(unsafe { NonZeroU32::new_unchecked(5) });
 pub const ZWLR_LAYER_SHELL_V1: ObjectId = ObjectId(unsafe { NonZeroU32::new_unchecked(6) });
 
+/// wl_display and wl_registry will always be available, but these globals could theoretically be
+/// absent. Nevertheless, they are required for `swww-daemon` to function, so we will need to bind
+/// all of them.
 const REQUIRED_GLOBALS: [&str; 4] = [
     "wl_compositor",
     "wl_shm",
     "wp_viewporter",
     "zwlr_layer_shell_v1",
 ];
+/// Minimal version necessary for `REQUIRED_GLOBALS`
 const VERSIONS: [u32; 4] = [4, 1, 1, 3];
 
 static mut WAYLAND_FD: OwnedFd = unsafe { std::mem::zeroed() };
 static mut FRACTIONAL_SCALE_SUPPORT: bool = false;
-static mut OBJECT_MANAGER: MaybeUninit<Mutex<ObjectManager>> = MaybeUninit::uninit();
 static mut PIXEL_FORMAT: PixelFormat = PixelFormat::Xrgb;
+
+/// This is the most fragile of the `static mut`s, because it starts uninitialized. This is simply
+/// an unfortunate consequence of `BinaryHeap::new()` not being `const` yet. Once that is
+/// stabilized, we can turn this into a normal `static mut` just like the others.
+static mut OBJECT_MANAGER: MaybeUninit<Mutex<ObjectManager>> = MaybeUninit::uninit();
 
 static INITIALIZED: AtomicBool = AtomicBool::new(false);
 
@@ -44,7 +69,6 @@ pub fn wayland_fd() -> BorrowedFd<'static> {
 
 #[must_use]
 pub fn fractional_scale_support() -> bool {
-    debug_assert!(INITIALIZED.load(std::sync::atomic::Ordering::Relaxed));
     unsafe { FRACTIONAL_SCALE_SUPPORT }
 }
 
@@ -91,12 +115,18 @@ pub fn wl_shm_format() -> u32 {
     }
 }
 
+/// Note that this function assumes the logger has already been set up
 pub fn init(pixel_format: Option<PixelFormat>) -> Initializer {
+    // if we have initialized already, return imediatelly with an empty Initializer
     let mut initializer = Initializer::new(pixel_format);
     if INITIALIZED.load(std::sync::atomic::Ordering::SeqCst) {
         return initializer;
     }
 
+    // initialize the two most important globals:
+    //   * the wayland file descriptor; and
+    //   * the object manager
+    // we optionally initialize the pixel_format, if necessary
     unsafe {
         WAYLAND_FD = connect();
         OBJECT_MANAGER = MaybeUninit::new(Mutex::new(ObjectManager::new()));
@@ -105,13 +135,19 @@ pub fn init(pixel_format: Option<PixelFormat>) -> Initializer {
             PIXEL_FORMAT = format;
         }
     }
+    // the only globals that can break catastrophically are WAYLAND_FD and OBJECT_MANAGER, that we
+    // have just initialized above. So this is safe
     INITIALIZED.store(true, std::sync::atomic::Ordering::SeqCst);
 
+    // these functions already require for the wayland file descriptor and the object manager to
+    // have been initialized, which we just did above
     super::interfaces::wl_display::req::get_registry().unwrap();
     super::interfaces::wl_display::req::sync(ObjectId::new(NonZeroU32::new(3).unwrap())).unwrap();
 
     const IDS: [ObjectId; 4] = [WL_COMPOSITOR, WL_SHM, WP_VIEWPORTER, ZWLR_LAYER_SHELL_V1];
 
+    // this loop will process and store all advertised wayland globals, storing their global name
+    // in the Initializer struct
     while !initializer.should_exit {
         let (msg, payload) = super::wire::WireMsg::recv().unwrap();
         if msg.sender_id().get() == 3 {
@@ -125,6 +161,7 @@ pub fn init(pixel_format: Option<PixelFormat>) -> Initializer {
         }
     }
 
+    // if we failed to find some necessary global, panic
     if let Some((_, missing)) = initializer
         .global_names
         .iter()
@@ -134,6 +171,7 @@ pub fn init(pixel_format: Option<PixelFormat>) -> Initializer {
         panic!("Compositor does not implement required interface: {missing}");
     }
 
+    // bind all the globals we need
     for (i, name) in initializer.global_names.into_iter().enumerate() {
         let id = IDS[i];
         let interface = REQUIRED_GLOBALS[i];
@@ -141,6 +179,7 @@ pub fn init(pixel_format: Option<PixelFormat>) -> Initializer {
         super::interfaces::wl_registry::req::bind(name, id, interface, version).unwrap();
     }
 
+    // bind fractional scale, if it is supported
     if let Some((id, name)) = initializer.fractional_scale.as_ref() {
         unsafe { FRACTIONAL_SCALE_SUPPORT = true };
         super::interfaces::wl_registry::req::bind(
@@ -155,6 +194,8 @@ pub fn init(pixel_format: Option<PixelFormat>) -> Initializer {
     let callback_id = initializer.callback_id();
     super::interfaces::wl_display::req::sync(callback_id).unwrap();
     initializer.should_exit = false;
+    // this loop will go through all the advertised wl_shm format, selecting one for the
+    // PIXEL_FORMAT global, if `--format <..>` wasn't passed as a command line argument
     while !initializer.should_exit {
         let (msg, payload) = super::wire::WireMsg::recv().unwrap();
         match msg.sender_id() {
@@ -175,7 +216,7 @@ pub fn init(pixel_format: Option<PixelFormat>) -> Initializer {
     initializer
 }
 
-/// copy-pasted from wayland-client.rs
+/// copy-pasted from `wayland-client.rs`
 fn connect() -> OwnedFd {
     if let Ok(txt) = std::env::var("WAYLAND_SOCKET") {
         // We should connect to the provided WAYLAND_SOCKET
@@ -196,7 +237,7 @@ fn connect() -> OwnedFd {
         let socket_addr =
             rustix::net::getsockname(&fd).expect("failed to get wayland socket address");
         if let SocketAddrAny::Unix(addr) = socket_addr {
-            rustix::net::connect_unix(&fd, &addr).expect("failed to conenct to unix socket");
+            rustix::net::connect_unix(&fd, &addr).expect("failed to connect to unix socket");
             fd
         } else {
             panic!("socket address is not a unix socket");
@@ -227,7 +268,7 @@ fn connect() -> OwnedFd {
 
 /// Helper struct to do all the initialization in this file
 pub struct Initializer {
-    global_names: [u32; 4],
+    global_names: [u32; REQUIRED_GLOBALS.len()],
     output_names: Vec<u32>,
     fractional_scale: Option<(ObjectId, NonZeroU32)>,
     forced_shm_format: bool,
@@ -237,7 +278,7 @@ pub struct Initializer {
 impl Initializer {
     fn new(cli_format: Option<PixelFormat>) -> Self {
         Self {
-            global_names: [0; 4],
+            global_names: [0; REQUIRED_GLOBALS.len()],
             output_names: Vec::new(),
             fractional_scale: None,
             forced_shm_format: cli_format.is_some(),

@@ -52,14 +52,14 @@ extern "C" fn signal_handler(_s: libc::c_int) {
     exit_daemon();
 }
 
-struct Daemon2 {
+struct Daemon {
     wallpapers: Vec<Arc<Wallpaper>>,
     animator: Animator,
     use_cache: bool,
     fractional_scale_manager: Option<(ObjectId, NonZeroU32)>,
 }
 
-impl Daemon2 {
+impl Daemon {
     fn new(initializer: &Initializer, no_cache: bool) -> Self {
         log::info!(
             "Selected wl_shm format: {:?}",
@@ -208,14 +208,14 @@ impl Daemon2 {
     }
 }
 
-impl wayland::interfaces::wl_display::EvHandler for Daemon2 {
+impl wayland::interfaces::wl_display::EvHandler for Daemon {
     fn delete_id(&mut self, id: u32) {
         if let Some(id) = NonZeroU32::new(id) {
             globals::object_remove(ObjectId::new(id));
         }
     }
 }
-impl wayland::interfaces::wl_registry::EvHandler for Daemon2 {
+impl wayland::interfaces::wl_registry::EvHandler for Daemon {
     fn global(&mut self, name: u32, interface: &str, version: u32) {
         if interface == "wl_output" {
             if version < 4 {
@@ -231,7 +231,7 @@ impl wayland::interfaces::wl_registry::EvHandler for Daemon2 {
     }
 }
 
-impl wayland::interfaces::wl_shm::EvHandler for Daemon2 {
+impl wayland::interfaces::wl_shm::EvHandler for Daemon {
     fn format(&mut self, format: u32) {
         warn!(
             "received a wl_shm format after initialization: {format}. This shouldn't be possible"
@@ -239,7 +239,7 @@ impl wayland::interfaces::wl_shm::EvHandler for Daemon2 {
     }
 }
 
-impl wayland::interfaces::wl_output::EvHandler for Daemon2 {
+impl wayland::interfaces::wl_output::EvHandler for Daemon {
     fn geometry(
         &mut self,
         sender_id: ObjectId,
@@ -312,7 +312,7 @@ impl wayland::interfaces::wl_output::EvHandler for Daemon2 {
         }
     }
 }
-impl wayland::interfaces::wl_surface::EvHandler for Daemon2 {
+impl wayland::interfaces::wl_surface::EvHandler for Daemon {
     fn enter(&mut self, _sender_id: ObjectId, output: ObjectId) {
         debug!("Output {}: Surface Enter", output.get());
     }
@@ -338,7 +338,7 @@ impl wayland::interfaces::wl_surface::EvHandler for Daemon2 {
     }
 }
 
-impl wayland::interfaces::wl_buffer::EvHandler for Daemon2 {
+impl wayland::interfaces::wl_buffer::EvHandler for Daemon {
     fn release(&mut self, sender_id: ObjectId) {
         for wallpaper in self.wallpapers.iter() {
             if wallpaper.try_set_buffer_release_flag(sender_id) {
@@ -348,7 +348,7 @@ impl wayland::interfaces::wl_buffer::EvHandler for Daemon2 {
     }
 }
 
-impl wayland::interfaces::wl_callback::EvHandler for Daemon2 {
+impl wayland::interfaces::wl_callback::EvHandler for Daemon {
     fn done(&mut self, sender_id: ObjectId, _callback_data: u32) {
         for wallpaper in self.wallpapers.iter() {
             if wallpaper.has_callback(sender_id) {
@@ -359,7 +359,7 @@ impl wayland::interfaces::wl_callback::EvHandler for Daemon2 {
     }
 }
 
-impl wayland::interfaces::zwlr_layer_surface_v1::EvHandler for Daemon2 {
+impl wayland::interfaces::zwlr_layer_surface_v1::EvHandler for Daemon {
     fn configure(&mut self, sender_id: ObjectId, serial: u32, _width: u32, _height: u32) {
         for wallpaper in self.wallpapers.iter() {
             if wallpaper.has_layer_surface(sender_id) {
@@ -375,7 +375,7 @@ impl wayland::interfaces::zwlr_layer_surface_v1::EvHandler for Daemon2 {
     }
 }
 
-impl wayland::interfaces::wp_fractional_scale_v1::EvHandler for Daemon2 {
+impl wayland::interfaces::wp_fractional_scale_v1::EvHandler for Daemon {
     fn preferred_scale(&mut self, sender_id: ObjectId, scale: u32) {
         for wallpaper in self.wallpapers.iter() {
             if wallpaper.has_fractional_scale(sender_id) {
@@ -393,12 +393,21 @@ impl wayland::interfaces::wp_fractional_scale_v1::EvHandler for Daemon2 {
 }
 
 fn main() -> Result<(), String> {
+    // first, get the command line arguments and make the logger
     let cli = cli::Cli::new();
     make_logger(cli.quiet);
+
+    // initialize the wayland connection, getting all the necessary globals
     let initializer = wayland::globals::init(cli.format);
+
+    // create the socket listener and setup the signal handlers
+    // this will also return an error if there is an `swww-daemon` instance already
+    // running
     let listener = SocketWrapper::new()?;
     setup_signals();
-    let mut daemon = Daemon2::new(&initializer, cli.no_cache);
+
+    // use the initializer to create the Daemon, then drop it to free up the memory
+    let mut daemon = Daemon::new(&initializer, cli.no_cache);
     for &output_name in initializer.output_names() {
         daemon.new_output(output_name);
     }
@@ -409,6 +418,8 @@ fn main() -> Result<(), String> {
         PollFd::new(&wayland_fd, PollFlags::IN),
         PollFd::new(&listener.0, PollFlags::IN),
     ];
+
+    // main loop
     while !should_daemon_exit() {
         use wayland::{interfaces::*, wire, WlDynObj};
 
@@ -427,8 +438,8 @@ fn main() -> Result<(), String> {
                     _ => panic!("failed to poll file descriptors: {e:?}"),
                 },
             };
+
             match msg.sender_id() {
-                // in case there are errors
                 globals::WL_DISPLAY => wl_display::event(&mut daemon, msg, payload),
                 globals::WL_REGISTRY => wl_registry::event(&mut daemon, msg, payload),
                 globals::WL_COMPOSITOR => error!("wl_compositor has no events"),
