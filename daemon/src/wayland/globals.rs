@@ -22,7 +22,6 @@ use utils::ipc::PixelFormat;
 
 use super::{ObjectId, ObjectManager, WlDynObj};
 use std::{
-    mem::MaybeUninit,
     num::NonZeroU32,
     path::PathBuf,
     sync::{atomic::AtomicBool, Mutex},
@@ -53,11 +52,7 @@ const VERSIONS: [u32; 4] = [4, 1, 1, 3];
 static mut WAYLAND_FD: OwnedFd = unsafe { std::mem::zeroed() };
 static mut FRACTIONAL_SCALE_SUPPORT: bool = false;
 static mut PIXEL_FORMAT: PixelFormat = PixelFormat::Xrgb;
-
-/// This is the most fragile of the `static mut`s, because it starts uninitialized. This is simply
-/// an unfortunate consequence of `BinaryHeap::new()` not being `const` yet. Once that is
-/// stabilized, we can turn this into a normal `static mut` just like the others.
-static mut OBJECT_MANAGER: MaybeUninit<Mutex<ObjectManager>> = MaybeUninit::uninit();
+static mut OBJECT_MANAGER: Mutex<ObjectManager> = Mutex::new(ObjectManager::new());
 
 static INITIALIZED: AtomicBool = AtomicBool::new(false);
 
@@ -75,27 +70,20 @@ pub fn fractional_scale_support() -> bool {
 #[must_use]
 pub fn object_type_get(object_id: ObjectId) -> WlDynObj {
     debug_assert!(INITIALIZED.load(std::sync::atomic::Ordering::Relaxed));
-    unsafe { OBJECT_MANAGER.assume_init_ref() }
-        .lock()
-        .unwrap()
-        .get(object_id)
+    unsafe { OBJECT_MANAGER.lock() }.unwrap().get(object_id)
 }
 
 #[must_use]
 pub fn object_create(object_type: WlDynObj) -> ObjectId {
     debug_assert!(INITIALIZED.load(std::sync::atomic::Ordering::Relaxed));
-    unsafe { OBJECT_MANAGER.assume_init_ref() }
-        .lock()
+    unsafe { OBJECT_MANAGER.lock() }
         .unwrap()
         .create(object_type)
 }
 
 pub fn object_remove(object_id: ObjectId) {
     debug_assert!(INITIALIZED.load(std::sync::atomic::Ordering::Relaxed));
-    unsafe { OBJECT_MANAGER.assume_init_ref() }
-        .lock()
-        .unwrap()
-        .remove(object_id)
+    unsafe { OBJECT_MANAGER.lock() }.unwrap().remove(object_id)
 }
 
 #[must_use]
@@ -129,7 +117,6 @@ pub fn init(pixel_format: Option<PixelFormat>) -> Initializer {
     // we optionally initialize the pixel_format, if necessary
     unsafe {
         WAYLAND_FD = connect();
-        OBJECT_MANAGER = MaybeUninit::new(Mutex::new(ObjectManager::new()));
         if let Some(format) = pixel_format {
             info!("Forced usage of wl_shm format: {:?}", format);
             PIXEL_FORMAT = format;

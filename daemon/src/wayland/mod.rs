@@ -19,7 +19,7 @@
 //!
 //! Furthermore, this also prevents any changes to `wayland-client.rs` from affecting us. We are
 //! now completely independent from them.
-use std::{cmp::Reverse, collections::BinaryHeap, num::NonZeroU32};
+use std::num::NonZeroU32;
 
 pub mod bump_pool;
 pub mod globals;
@@ -57,46 +57,61 @@ pub enum WlDynObj {
     Callback,
     Viewport,
     FractionalScale,
-    None,
 }
 
 /// Object Manager for creating, removing, and maintaining Wayland Objects
 pub struct ObjectManager {
-    next_id: BinaryHeap<Reverse<u32>>,
-    objects: Vec<WlDynObj>,
+    /// stores the object types. The position in this vector + the base offset is the object id
+    /// for example, if objects[0] == LayerSurface, then the object of id 0 + BASE_OFFSET = 7 is of
+    /// the type "LayerSurface"
+    objects: Vec<Option<WlDynObj>>,
+    /// the next id we ought to generate
+    next: u32,
 }
 
 impl ObjectManager {
     /// Ids 1-6, inclusive, are all already taken by the globals in `globals.rs`
     const BASE_OFFSET: u32 = 7;
 
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
-            next_id: BinaryHeap::new(),
             objects: Vec::new(),
+            next: 0,
         }
     }
+
     /// get the type of the wayland object from its id
+    ///
+    /// panics if the object was already deleted
     #[must_use]
-    pub fn get(&mut self, object_id: ObjectId) -> WlDynObj {
+    pub fn get(&self, object_id: ObjectId) -> WlDynObj {
         let offset = Self::BASE_OFFSET + globals::fractional_scale_support() as u32;
-        self.objects[(object_id.get() - offset) as usize]
+        let pos = object_id.get() - offset;
+        self.objects[pos as usize].expect("attempting to get a deleted object!")
     }
+
     /// creates a new Id to use in requests
     #[must_use]
     pub fn create(&mut self, object: WlDynObj) -> ObjectId {
         let offset = Self::BASE_OFFSET + globals::fractional_scale_support() as u32;
+        if self.next as usize == self.objects.len() {
+            self.next += 1;
+            self.objects.push(Some(object));
+            ObjectId::new(unsafe { NonZeroU32::new(self.next + offset - 1).unwrap_unchecked() })
+        } else {
+            let i = self.next as usize;
+            self.objects[i] = Some(object);
 
-        match self.next_id.pop() {
-            Some(i) => {
-                self.objects[i.0 as usize] = object;
-                ObjectId::new(unsafe { NonZeroU32::new(i.0 + offset).unwrap_unchecked() })
+            // update next to the next available id
+            self.next += 1;
+            while (self.next as usize) < self.objects.len() {
+                if self.objects[self.next as usize].is_none() {
+                    break;
+                }
+                self.next += 1;
             }
-            None => {
-                let i = self.objects.len() as u32;
-                self.objects.push(object);
-                ObjectId::new(unsafe { NonZeroU32::new(i + offset).unwrap_unchecked() })
-            }
+
+            ObjectId::new(unsafe { NonZeroU32::new(i as u32 + offset).unwrap_unchecked() })
         }
     }
 
@@ -107,8 +122,10 @@ impl ObjectManager {
     pub fn remove(&mut self, object_id: ObjectId) {
         let offset = Self::BASE_OFFSET + globals::fractional_scale_support() as u32;
         let pos = object_id.get() - offset;
-        self.objects[pos as usize] = WlDynObj::None;
-        self.next_id.push(Reverse(pos));
+        self.objects[pos as usize] = None;
+        if pos < self.next {
+            self.next = pos;
+        }
     }
 }
 

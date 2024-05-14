@@ -46,7 +46,6 @@ pub mod wl_display {
                     super::super::WlDynObj::Callback => "wl_callback",
                     super::super::WlDynObj::Viewport => "wl_viewport",
                     super::super::WlDynObj::FractionalScale => "wp_fractional_scale_v1",
-                    super::super::WlDynObj::None => "???",
                 },
             };
 

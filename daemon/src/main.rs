@@ -462,7 +462,6 @@ fn main() -> Result<(), String> {
                         WlDynObj::FractionalScale => {
                             wp_fractional_scale_v1::event(&mut daemon, msg, payload)
                         }
-                        WlDynObj::None => unreachable!("This should not be possible..."),
                     }
                 }
             }
