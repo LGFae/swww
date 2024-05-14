@@ -1,5 +1,5 @@
 [workspace]
-members = ["daemon"]
+members = [".", "daemon", "utils"]
 default-members = [".", "daemon"]
 
 [package]
@@ -7,7 +7,7 @@ name = "swww"
 version = "0.9.5-master"
 authors = ["Leonardo Gibrowski Faé <leonardo.fae44@gmail.com>"]
 edition = "2021"
-rust-version = "1.74"
+rust-version = "1.75"
 
 # Enable some optimizations in debug mode. Otherwise, it is a pain to test it
 [profile.dev]
