@@ -43,16 +43,16 @@ impl Position {
         let y = match self.y {
             Coord::Pixel(y) => {
                 if invert_y {
-                    dim.1 as f32 - y
-                } else {
                     y
+                } else {
+                    dim.1 as f32 - y
                 }
             }
             Coord::Percent(y) => {
                 if invert_y {
-                    (1.0 - y) * dim.1 as f32
-                } else {
                     y * dim.1 as f32
+                } else {
+                    (1.0 - y) * dim.1 as f32
                 }
             }
         };
