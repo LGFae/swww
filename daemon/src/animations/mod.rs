@@ -171,6 +171,7 @@ impl Animator {
                     }
                     let timeout = duration.saturating_sub(now.elapsed());
                     spin_sleep::sleep(timeout);
+                    crate::wallpaper::commit_wallpapers(&wallpapers);
 
                     now = std::time::Instant::now();
                 }

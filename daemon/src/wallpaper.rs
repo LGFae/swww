@@ -5,7 +5,7 @@ use std::{
     num::NonZeroI32,
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
-        Condvar, Mutex, RwLock,
+        Arc, Condvar, Mutex, RwLock,
     },
 };
 
@@ -415,14 +415,26 @@ impl Wallpaper {
             wl_surface::req::damage_buffer(self.wl_surface, 0, 0, width, height).unwrap();
             self.frame_callback_handler
                 .request_frame_callback(self.wl_surface);
-            wl_surface::req::commit(self.wl_surface).unwrap();
         } else {
             drop(inner);
-            // commit and send another frame request, since we consumed the previous one
+            // send another frame request, since we consumed the previous one
             self.frame_callback_handler
                 .request_frame_callback(self.wl_surface);
-            wl_surface::req::commit(self.wl_surface).unwrap();
         }
+    }
+}
+
+/// commits multiple wallpapers at once with a single message through the socket
+pub(crate) fn commit_wallpapers(wallpapers: &[Arc<Wallpaper>]) {
+    let mut msg = Vec::with_capacity(wallpapers.len());
+    for wallpaper in wallpapers {
+        let object_id = wallpaper.wl_surface.get() as u64;
+        msg.push(object_id | 0x0008000600000000);
+    }
+    let len = wallpapers.len() << 3;
+    unsafe {
+        let msg = std::slice::from_raw_parts(msg.as_ptr() as *mut u8, len);
+        crate::wayland::wire::send_unchecked(msg, &[]).unwrap()
     }
 }
 

@@ -147,10 +147,9 @@ impl Daemon {
                         for wallpaper in &wallpapers {
                             wallpaper.set_img_info(utils::ipc::BgImg::Color(clear.color));
                             wallpaper.clear(clear.color);
-                        }
-                        for wallpaper in &wallpapers {
                             wallpaper.draw();
                         }
+                        crate::wallpaper::commit_wallpapers(&wallpapers);
                     })
                     .unwrap(); // builder only failed if the name contains null bytes
                 Answer::Ok

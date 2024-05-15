@@ -90,11 +90,12 @@ impl<'a> Transition<'a> {
             }
             i += 1;
         }
-
         self.wallpapers.iter().for_each(|w| w.draw());
 
         let timeout = self.fps.saturating_sub(now.elapsed());
         spin_sleep::sleep(timeout);
+        crate::wallpaper::commit_wallpapers(self.wallpapers);
+
         *now = Instant::now();
     }
 
@@ -106,13 +107,11 @@ impl<'a> Transition<'a> {
     }
 
     fn none(&mut self, new: &[u8]) {
-        for wallpaper in self.wallpapers.iter() {
-            wallpaper.canvas_change(|canvas| canvas.copy_from_slice(new));
-        }
-
-        for wallpaper in self.wallpapers.iter() {
-            wallpaper.draw();
-        }
+        self.wallpapers
+            .iter()
+            .for_each(|w| w.canvas_change(|canvas| canvas.copy_from_slice(new)));
+        self.wallpapers.iter().for_each(|w| w.draw());
+        crate::wallpaper::commit_wallpapers(self.wallpapers);
     }
 
     fn simple(&mut self, new_img: &[u8]) {

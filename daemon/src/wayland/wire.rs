@@ -5,7 +5,10 @@
 //! descriptors), but I tried to actually make it fairly complete. This means types like `WlFixed`
 //! exist even if they aren't used at all in the rest of the codebase.
 
-use rustix::fd::{AsRawFd, BorrowedFd, OwnedFd};
+use rustix::{
+    fd::{AsRawFd, BorrowedFd, OwnedFd},
+    io, net,
+};
 use std::num::NonZeroU32;
 
 use super::{globals::wayland_fd, ObjectId};
@@ -46,7 +49,6 @@ impl WaylandPayload {
 
 impl WireMsg {
     pub fn recv() -> rustix::io::Result<(Self, WaylandPayload)> {
-        use rustix::{io, net};
         let fds = Vec::new();
 
         let mut header_buf = [0u32; 2];
@@ -233,23 +235,27 @@ impl WireMsgBuilder {
     }
 
     pub fn send(self) -> rustix::io::Result<()> {
-        use rustix::{io, net};
         let Self { mut msg, fds } = self;
         let len = msg.len() << 2;
         // put the correct length in the upper part of the header's second word
         msg[1] |= (len as u32) << 16;
 
-        let iov = io::IoSlice::new(u32_slice_to_u8(&msg));
-        let mut control_buf = [0u8; rustix::cmsg_space!(ScmRights(1))];
-        let mut control = net::SendAncillaryBuffer::new(&mut control_buf);
         let mut borrowed_fds = Vec::with_capacity(fds.len());
         for fd in fds {
             borrowed_fds.push(unsafe { BorrowedFd::borrow_raw(fd) });
         }
-        let msg = net::SendAncillaryMessage::ScmRights(&borrowed_fds);
-        control.push(msg);
-        net::sendmsg(wayland_fd(), &[iov], &mut control, net::SendFlags::NOSIGNAL).map(|_| ())
+        unsafe { send_unchecked(u32_slice_to_u8(&msg), &borrowed_fds) }
     }
+}
+
+/// try to send a raw message through the wayland socket. We do no input validation whatsoever
+pub unsafe fn send_unchecked(msg: &[u8], fds: &[BorrowedFd]) -> rustix::io::Result<()> {
+    let iov = io::IoSlice::new(msg);
+    let mut control_buf = [0u8; rustix::cmsg_space!(ScmRights(1))];
+    let mut control = net::SendAncillaryBuffer::new(&mut control_buf);
+    let msg = net::SendAncillaryMessage::ScmRights(fds);
+    control.push(msg);
+    net::sendmsg(wayland_fd(), &[iov], &mut control, net::SendFlags::NOSIGNAL).map(|_| ())
 }
 
 impl<'a> WlSlice<'a> {
