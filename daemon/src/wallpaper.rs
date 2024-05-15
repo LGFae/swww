@@ -374,8 +374,7 @@ impl Wallpaper {
         self.frame_callback_handler.cvar.notify_all();
     }
 
-    /// Stops all animations with the current id, by increasing that id
-    pub(super) fn stop_animations(&self) {
+    fn stop_animations(&self) {
         self.animation_state.id.fetch_add(1, Ordering::AcqRel);
     }
 
@@ -395,47 +394,93 @@ impl Wallpaper {
         );
         *self.img.lock().unwrap() = img_info;
     }
+}
 
-    pub(super) fn draw(&self) {
-        {
-            let mut done = self.frame_callback_handler.done.lock().unwrap();
+/// stops all animations for the passed wallpapers
+pub(crate) fn stop_animations(wallpapers: &[Arc<Wallpaper>]) {
+    wallpapers
+        .iter()
+        .for_each(|wallpaper| wallpaper.stop_animations());
+}
+
+/// attaches all pending buffers and damages all surfaces with one single request
+pub(crate) fn attach_buffers_and_damange_surfaces(wallpapers: &[Arc<Wallpaper>]) {
+    #[rustfmt::skip]
+    // Note this is little-endian specific
+    const MSG: [u8; 56] = [
+        0, 0, 0, 0,             // wl_surface object id (to be filled)
+        1, 0,                   // attach opcode
+        20, 0,                  // msg length
+        0, 0, 0, 0,             // attach buffer id (to be filled)
+        0, 0, 0, 0, 0, 0, 0, 0, // attach arguments
+        0, 0, 0, 0,             // wl_surface object id (to be filled)
+        9, 0,                   // damage opcode
+        24, 0,                  // msg length
+        0, 0, 0, 0, 0, 0, 0, 0, // damage first arguments
+        0, 0, 0, 0, 0, 0, 0, 0, // damage second arguments (to be filled)
+        0, 0, 0, 0,             // wl_surface object id (to be filled)
+        3, 0,                   // frame opcode
+        12, 0,                  // msg length
+        0, 0, 0, 0,             // wl_callback object id (to be filled)
+    ];
+    let msg: Box<[u8]> = wallpapers
+        .iter()
+        .flat_map(|wallpaper| {
+            let mut done = wallpaper.frame_callback_handler.done.lock().unwrap();
             while !*done {
-                debug!("waiting for condvar");
-                done = self.frame_callback_handler.cvar.wait(done).unwrap();
+                //debug!("waiting for frame callback");
+                done = wallpaper.frame_callback_handler.cvar.wait(done).unwrap();
             }
             *done = false;
-        }
-        let inner = self.inner.read().unwrap();
-        if let Some(buf) = self.pool.lock().unwrap().get_commitable_buffer() {
+            drop(done);
+
+            let mut msg = MSG;
+
+            let buf = wallpaper.pool.lock().unwrap().get_commitable_buffer();
+            let inner = wallpaper.inner.read().unwrap();
             let (width, height) = inner
                 .scale_factor
                 .mul_dim(inner.width.get(), inner.height.get());
-            wl_surface::req::attach(self.wl_surface, Some(buf), 0, 0).unwrap();
             drop(inner);
-            wl_surface::req::damage_buffer(self.wl_surface, 0, 0, width, height).unwrap();
-            self.frame_callback_handler
-                .request_frame_callback(self.wl_surface);
-        } else {
-            drop(inner);
-            // send another frame request, since we consumed the previous one
-            self.frame_callback_handler
-                .request_frame_callback(self.wl_surface);
-        }
-    }
+
+            // attach
+            msg[0..4].copy_from_slice(&wallpaper.wl_surface.get().to_ne_bytes());
+            msg[8..12].copy_from_slice(&buf.get().to_ne_bytes());
+
+            //damage buffer
+            msg[20..24].copy_from_slice(&wallpaper.wl_surface.get().to_ne_bytes());
+            msg[36..40].copy_from_slice(&width.to_ne_bytes());
+            msg[40..44].copy_from_slice(&height.to_ne_bytes());
+
+            // frame callback
+            let callback = globals::object_create(WlDynObj::Callback);
+            *wallpaper.frame_callback_handler.callback.lock().unwrap() = callback;
+            msg[44..48].copy_from_slice(&wallpaper.wl_surface.get().to_ne_bytes());
+            msg[52..56].copy_from_slice(&callback.get().to_ne_bytes());
+            msg
+        })
+        .collect();
+    unsafe { crate::wayland::wire::send_unchecked(msg.as_ref(), &[]).unwrap() }
 }
 
 /// commits multiple wallpapers at once with a single message through the socket
 pub(crate) fn commit_wallpapers(wallpapers: &[Arc<Wallpaper>]) {
-    let mut msg = Vec::with_capacity(wallpapers.len());
-    for wallpaper in wallpapers {
-        let object_id = wallpaper.wl_surface.get() as u64;
-        msg.push(object_id | 0x0008000600000000);
-    }
-    let len = wallpapers.len() << 3;
-    unsafe {
-        let msg = std::slice::from_raw_parts(msg.as_ptr() as *mut u8, len);
-        crate::wayland::wire::send_unchecked(msg, &[]).unwrap()
-    }
+    // Note this is little-endian specific
+    #[rustfmt::skip]
+    const MSG: [u8; 8] = [
+        0, 0, 0, 0, // wl_surface object id (to be filled)
+        6, 0,       // commit opcode
+        8, 0,       // msg length
+    ];
+    let msg: Box<[u8]> = wallpapers
+        .iter()
+        .flat_map(|wallpaper| {
+            let mut msg = MSG;
+            msg[0..4].copy_from_slice(&wallpaper.wl_surface.get().to_ne_bytes());
+            msg
+        })
+        .collect();
+    unsafe { crate::wayland::wire::send_unchecked(msg.as_ref(), &[]).unwrap() }
 }
 
 impl Drop for Wallpaper {

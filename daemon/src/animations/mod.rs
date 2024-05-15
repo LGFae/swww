@@ -166,9 +166,7 @@ impl Animator {
                         return;
                     }
 
-                    for wallpaper in &wallpapers {
-                        wallpaper.draw();
-                    }
+                    crate::wallpaper::attach_buffers_and_damange_surfaces(&wallpapers);
                     let timeout = duration.saturating_sub(now.elapsed());
                     spin_sleep::sleep(timeout);
                     crate::wallpaper::commit_wallpapers(&wallpapers);

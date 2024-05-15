@@ -141,14 +141,12 @@ impl Daemon {
                     .stack_size(1 << 15)
                     .name("clear".to_string())
                     .spawn(move || {
-                        for wallpaper in &wallpapers {
-                            wallpaper.stop_animations();
-                        }
+                        crate::wallpaper::stop_animations(&wallpapers);
                         for wallpaper in &wallpapers {
                             wallpaper.set_img_info(utils::ipc::BgImg::Color(clear.color));
                             wallpaper.clear(clear.color);
-                            wallpaper.draw();
                         }
+                        crate::wallpaper::attach_buffers_and_damange_surfaces(&wallpapers);
                         crate::wallpaper::commit_wallpapers(&wallpapers);
                     })
                     .unwrap(); // builder only failed if the name contains null bytes
@@ -172,10 +170,8 @@ impl Daemon {
             }) => {
                 let mut used_wallpapers = Vec::new();
                 for names in outputs.iter() {
-                    let mut wallpapers = self.find_wallpapers_by_names(names);
-                    for wallpaper in wallpapers.iter_mut() {
-                        wallpaper.stop_animations();
-                    }
+                    let wallpapers = self.find_wallpapers_by_names(names);
+                    crate::wallpaper::stop_animations(&wallpapers);
                     used_wallpapers.push(wallpapers);
                 }
                 self.animator

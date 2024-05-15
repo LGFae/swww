@@ -68,7 +68,7 @@ pub(crate) struct BumpPool {
     buffers: Vec<Buffer>,
     width: i32,
     height: i32,
-    last_used_buffer: Option<usize>,
+    last_used_buffer: usize,
 }
 
 impl BumpPool {
@@ -85,7 +85,7 @@ impl BumpPool {
             buffers,
             width,
             height,
-            last_used_buffer: None,
+            last_used_buffer: 0,
         }
     }
 
@@ -162,13 +162,13 @@ impl BumpPool {
         let offset = self.buffer_offset(i);
         buf.released.unset_released();
 
-        if let Some(i) = self.last_used_buffer {
-            let last_offset = self.buffer_offset(i);
+        if self.last_used_buffer != i {
+            let last_offset = self.buffer_offset(self.last_used_buffer);
             self.mmap
                 .slice_mut()
                 .copy_within(last_offset..last_offset + len, offset);
+            self.last_used_buffer = i;
         }
-        self.last_used_buffer = Some(i);
 
         &mut self.mmap.slice_mut()[offset..offset + len]
     }
@@ -176,15 +176,15 @@ impl BumpPool {
     /// gets the last buffer we've drawn to
     ///
     /// This may return None if there was a resize request in-between the last call to get_drawable
-    pub(crate) fn get_commitable_buffer(&self) -> Option<ObjectId> {
-        self.last_used_buffer.map(|i| self.buffers[i].object_id)
+    pub(crate) fn get_commitable_buffer(&self) -> ObjectId {
+        self.buffers[self.last_used_buffer].object_id
     }
 
     /// We assume `width` and `height` have already been multiplied by their scale factor
     pub(crate) fn resize(&mut self, width: i32, height: i32) {
         self.width = width;
         self.height = height;
-        self.last_used_buffer = None;
+        self.last_used_buffer = 0;
         self.buffers.clear();
     }
 }

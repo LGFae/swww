@@ -90,12 +90,10 @@ impl<'a> Transition<'a> {
             }
             i += 1;
         }
-        self.wallpapers.iter().for_each(|w| w.draw());
-
+        crate::wallpaper::attach_buffers_and_damange_surfaces(self.wallpapers);
         let timeout = self.fps.saturating_sub(now.elapsed());
         spin_sleep::sleep(timeout);
         crate::wallpaper::commit_wallpapers(self.wallpapers);
-
         *now = Instant::now();
     }
 
@@ -110,7 +108,7 @@ impl<'a> Transition<'a> {
         self.wallpapers
             .iter()
             .for_each(|w| w.canvas_change(|canvas| canvas.copy_from_slice(new)));
-        self.wallpapers.iter().for_each(|w| w.draw());
+        crate::wallpaper::attach_buffers_and_damange_surfaces(self.wallpapers);
         crate::wallpaper::commit_wallpapers(self.wallpapers);
     }
 
