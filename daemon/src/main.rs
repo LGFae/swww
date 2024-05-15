@@ -412,6 +412,12 @@ fn main() -> Result<(), String> {
     }
     drop(initializer);
 
+    if let Ok(true) = sd_notify::booted() {
+        if let Err(e) = sd_notify::notify(true, &[sd_notify::NotifyState::Ready]) {
+            error!("Error sending status update to systemd: {e}");
+        }
+    }
+
     let wayland_fd = wayland::globals::wayland_fd();
     let mut fds = [
         PollFd::new(&wayland_fd, PollFlags::IN),
