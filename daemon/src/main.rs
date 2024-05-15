@@ -482,6 +482,7 @@ fn main() -> Result<(), String> {
             }
         }
     }
+    crate::wallpaper::stop_animations(&daemon.wallpapers);
 
     info!("Goodbye!");
     Ok(())
