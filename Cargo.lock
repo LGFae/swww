@@ -1315,7 +1315,7 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 
 [[package]]
 name = "swww"
-version = "0.9.5-master"
+version = "0.9.5-masterV2"
 dependencies = [
  "assert_cmd",
  "clap",
@@ -1328,7 +1328,7 @@ dependencies = [
 
 [[package]]
 name = "swww-daemon"
-version = "0.9.5-master"
+version = "0.9.5-masterV2"
 dependencies = [
  "keyframe",
  "libc",
@@ -1478,7 +1478,7 @@ checksum = "711b9620af191e0cdc7468a8d14e709c3dcdb115b36f838e601583af800a370a"
 
 [[package]]
 name = "utils"
-version = "0.9.5-master"
+version = "0.9.5-masterV2"
 dependencies = [
  "criterion",
  "pkg-config",
