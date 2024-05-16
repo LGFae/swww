@@ -82,12 +82,14 @@ impl ObjectManager {
 
     /// get the type of the wayland object from its id
     ///
-    /// panics if the object was already deleted
+    /// Returns
+    ///   * 'Some(WlDynObj)' if the object still exists
+    ///   * 'None' if the object was already deleted
     #[must_use]
-    pub fn get(&self, object_id: ObjectId) -> WlDynObj {
+    pub fn get(&self, object_id: ObjectId) -> Option<WlDynObj> {
         let offset = Self::BASE_OFFSET + globals::fractional_scale_support() as u32;
         let pos = object_id.get() - offset;
-        self.objects[pos as usize].expect("attempting to get a deleted object!")
+        self.objects[pos as usize]
     }
 
     /// creates a new Id to use in requests

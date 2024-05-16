@@ -68,7 +68,7 @@ pub fn fractional_scale_support() -> bool {
 }
 
 #[must_use]
-pub fn object_type_get(object_id: ObjectId) -> WlDynObj {
+pub fn object_type_get(object_id: ObjectId) -> Option<WlDynObj> {
     debug_assert!(INITIALIZED.load(std::sync::atomic::Ordering::Relaxed));
     unsafe { OBJECT_MANAGER.lock() }.unwrap().get(object_id)
 }

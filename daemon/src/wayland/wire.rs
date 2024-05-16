@@ -57,31 +57,34 @@ impl WireMsg {
         let mut ancillary_buf = [0; 0];
         let mut control = net::RecvAncillaryBuffer::new(i32_slice_to_u8_mut(&mut ancillary_buf));
 
-        {
-            let iov = io::IoSliceMut::new(u32_slice_to_u8_mut(&mut header_buf));
-            net::recvmsg(
-                wayland_fd(),
-                &mut [iov],
-                &mut control,
-                net::RecvFlags::empty(),
-            )?;
-        }
+        let iov = io::IoSliceMut::new(u32_slice_to_u8_mut(&mut header_buf));
+        net::recvmsg(
+            wayland_fd(),
+            &mut [iov],
+            &mut control,
+            net::RecvFlags::empty(),
+        )?;
 
-        let sender_id = ObjectId(NonZeroU32::new(header_buf[0]).unwrap());
+        let sender_id = ObjectId(
+            NonZeroU32::new(header_buf[0])
+                .expect("received a message from compositor with a null sender id"),
+        );
         let size = (header_buf[1] >> 16) as usize - 8;
         let op = (header_buf[1] & 0xFFFF) as u16;
 
         let mut payload = vec![0u32; size >> 2];
 
-        {
+        // this should not fail with INTR, because otherwise our socket's internal buffer will
+        // be left in an inconsistent state (a message without a header)
+        rustix::io::retry_on_intr(|| {
             let iov = io::IoSliceMut::new(u32_slice_to_u8_mut(&mut payload));
             net::recvmsg(
                 wayland_fd(),
                 &mut [iov],
                 &mut control,
                 net::RecvFlags::WAITALL,
-            )?;
-        }
+            )
+        })?;
 
         Ok((
             Self {

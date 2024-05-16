@@ -115,11 +115,13 @@ impl BumpPool {
 
     /// resizes the pool and creates a new WlBuffer at the next free offset
     fn grow(&mut self) {
-        //TODO: CHECK IF WE HAVE SIZE
         let len = self.buffer_len();
-
         let new_len = self.occupied_bytes() + len;
+
         if new_len > self.mmap.len() {
+            if new_len > i32::MAX as usize {
+                panic!("Buffers have grown too big. We cannot allocate any more.")
+            }
             self.mmap.remap(new_len);
             super::interfaces::wl_shm_pool::req::resize(self.pool_id, new_len as i32).unwrap();
         }
@@ -127,7 +129,7 @@ impl BumpPool {
         let new_buffer_index = self.buffers.len();
         self.buffers.push(Buffer::new(
             self.pool_id,
-            self.buffer_offset(new_buffer_index).try_into().unwrap(),
+            self.buffer_offset(new_buffer_index) as i32,
             self.width,
             self.height,
             self.width * super::globals::pixel_format().channels() as i32,

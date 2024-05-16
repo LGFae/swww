@@ -427,17 +427,15 @@ fn main() -> Result<(), String> {
         if let Err(e) = poll(&mut fds, -1) {
             match e {
                 rustix::io::Errno::INTR => continue,
-                _ => panic!("failed to poll file descriptors: {e:?}"),
+                _ => return Err(format!("failed to poll file descriptors: {e:?}")),
             }
         }
 
         if !fds[0].revents().is_empty() {
             let (msg, payload) = match wire::WireMsg::recv() {
                 Ok((msg, payload)) => (msg, payload),
-                Err(e) => match e {
-                    rustix::io::Errno::INTR => continue,
-                    _ => panic!("failed to poll file descriptors: {e:?}"),
-                },
+                Err(rustix::io::Errno::INTR) => continue,
+                Err(e) => return Err(format!("failed to receive wire message: {e:?}")),
             };
 
             match msg.sender_id() {
@@ -450,19 +448,20 @@ fn main() -> Result<(), String> {
                 other => {
                     let obj_id = globals::object_type_get(other);
                     match obj_id {
-                        WlDynObj::Output => wl_output::event(&mut daemon, msg, payload),
-                        WlDynObj::Surface => wl_surface::event(&mut daemon, msg, payload),
-                        WlDynObj::Region => error!("wl_region has no events"),
-                        WlDynObj::LayerSurface => {
+                        Some(WlDynObj::Output) => wl_output::event(&mut daemon, msg, payload),
+                        Some(WlDynObj::Surface) => wl_surface::event(&mut daemon, msg, payload),
+                        Some(WlDynObj::Region) => error!("wl_region has no events"),
+                        Some(WlDynObj::LayerSurface) => {
                             zwlr_layer_surface_v1::event(&mut daemon, msg, payload)
                         }
-                        WlDynObj::Buffer => wl_buffer::event(&mut daemon, msg, payload),
-                        WlDynObj::ShmPool => error!("wl_shm_pool has no events"),
-                        WlDynObj::Callback => wl_callback::event(&mut daemon, msg, payload),
-                        WlDynObj::Viewport => error!("wp_viewport has no events"),
-                        WlDynObj::FractionalScale => {
+                        Some(WlDynObj::Buffer) => wl_buffer::event(&mut daemon, msg, payload),
+                        Some(WlDynObj::ShmPool) => error!("wl_shm_pool has no events"),
+                        Some(WlDynObj::Callback) => wl_callback::event(&mut daemon, msg, payload),
+                        Some(WlDynObj::Viewport) => error!("wp_viewport has no events"),
+                        Some(WlDynObj::FractionalScale) => {
                             wp_fractional_scale_v1::event(&mut daemon, msg, payload)
                         }
+                        None => error!("Received event for deleted object ({other:?})"),
                     }
                 }
             }
@@ -471,10 +470,8 @@ fn main() -> Result<(), String> {
         if !fds[1].revents().is_empty() {
             match rustix::net::accept(&listener.0) {
                 Ok(stream) => daemon.recv_socket_msg(stream),
-                Err(e) => match e.kind() {
-                    std::io::ErrorKind::WouldBlock => (),
-                    _ => return Err(format!("failed to accept incoming connection: {e}")),
-                },
+                Err(rustix::io::Errno::INTR | rustix::io::Errno::WOULDBLOCK) => continue,
+                Err(e) => return Err(format!("failed to accept incoming connection: {e}")),
             }
         }
     }
