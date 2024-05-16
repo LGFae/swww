@@ -477,6 +477,24 @@ fn main() -> Result<(), String> {
     }
     crate::wallpaper::stop_animations(&daemon.wallpapers);
 
+    // wait for the animation threads to finish.
+    while !daemon.wallpapers.is_empty() {
+        // When all animations finish, Arc's strong count will be exactly 1
+        daemon
+            .wallpapers
+            .retain(|w| Arc::<Wallpaper>::strong_count(w) > 1);
+        // set all frame callbacks as completed, otherwise the animation threads might deadlock on
+        // the conditional variable
+        daemon
+            .wallpapers
+            .iter()
+            .for_each(|w| w.frame_callback_completed());
+        // yield to waste less cpu
+        std::thread::yield_now();
+    }
+
+    drop(daemon);
+    drop(listener);
     info!("Goodbye!");
     Ok(())
 }
