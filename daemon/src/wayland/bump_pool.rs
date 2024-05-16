@@ -48,10 +48,8 @@ impl Buffer {
             released,
         }
     }
-}
 
-impl Drop for Buffer {
-    fn drop(&mut self) {
+    fn destroy(self) {
         if let Err(e) = super::interfaces::wl_buffer::req::destroy(self.object_id) {
             log::error!("failed to destroy wl_buffer: {e:?}");
         }
@@ -187,12 +185,17 @@ impl BumpPool {
         self.width = width;
         self.height = height;
         self.last_used_buffer = 0;
-        self.buffers.clear();
+        for buffer in self.buffers.drain(..) {
+            buffer.destroy();
+        }
     }
 }
 
 impl Drop for BumpPool {
     fn drop(&mut self) {
+        for buffer in self.buffers.drain(..) {
+            buffer.destroy();
+        }
         if let Err(e) = super::interfaces::wl_shm_pool::req::destroy(self.pool_id) {
             log::error!("failed to destroy wl_shm_pool: {e}");
         }
