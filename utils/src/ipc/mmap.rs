@@ -12,6 +12,7 @@ pub struct Mmap {
     fd: OwnedFd,
     ptr: NonNull<std::ffi::c_void>,
     len: usize,
+    mmaped: bool,
 }
 
 impl Mmap {
@@ -30,7 +31,48 @@ impl Mmap {
             // POSIX says that the implementation will never select an address at 0
             NonNull::new_unchecked(ptr)
         };
-        Self { fd, ptr, len }
+        Self {
+            fd,
+            ptr,
+            len,
+            mmaped: true,
+        }
+    }
+
+    #[inline]
+    /// Unmaps without destroying the file descriptor
+    ///
+    /// This is only ever used in the daemon, when animations finish, in order to free up memory
+    pub fn unmap(&mut self) {
+        if let Err(e) = unsafe { munmap(self.ptr.as_ptr(), self.len) } {
+            eprintln!("ERROR WHEN UNMAPPING MEMORY: {e}");
+        } else {
+            self.mmaped = false;
+        }
+    }
+
+    #[inline]
+    /// Ensures that the underlying file descriptor is mapped
+    ///
+    /// Because `unmap`, above, is only used in the daemon, this is also only used there
+    pub fn ensure_mapped(&mut self) {
+        if !self.mmaped {
+            self.mmaped = true;
+            self.ptr = unsafe {
+                let ptr = mmap(
+                    std::ptr::null_mut(),
+                    self.len,
+                    Self::PROT,
+                    Self::FLAGS,
+                    &self.fd,
+                    0,
+                )
+                .unwrap();
+                // SAFETY: the function above will never return a null pointer if it succeeds
+                // POSIX says that the implementation will never select an address at 0
+                NonNull::new_unchecked(ptr)
+            };
+        }
     }
 
     #[inline]
@@ -57,9 +99,7 @@ impl Mmap {
             }
         }
 
-        if let Err(e) = unsafe { munmap(self.ptr.as_ptr(), self.len) } {
-            eprintln!("ERROR WHEN UNMAPPING MEMORY: {e}");
-        }
+        self.unmap();
 
         self.len = new_len;
         self.ptr = unsafe {
@@ -94,7 +134,12 @@ impl Mmap {
             // POSIX says that the implementation will never select an address at 0
             NonNull::new_unchecked(ptr)
         };
-        Self { fd, ptr, len }
+        Self {
+            fd,
+            ptr,
+            len,
+            mmaped: true,
+        }
     }
 
     #[inline]
@@ -126,8 +171,8 @@ impl Mmap {
 impl Drop for Mmap {
     #[inline]
     fn drop(&mut self) {
-        if let Err(e) = unsafe { munmap(self.ptr.as_ptr(), self.len) } {
-            eprintln!("ERROR WHEN UNMAPPING MEMORY: {e}");
+        if self.mmaped {
+            self.unmap();
         }
     }
 }

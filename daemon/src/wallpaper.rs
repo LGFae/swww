@@ -324,14 +324,15 @@ impl Wallpaper {
         self.layer_surface == layer_surface
     }
 
-    pub(super) fn try_set_buffer_release_flag(&self, buffer: ObjectId) -> bool {
-        let pool = self.pool.lock().unwrap();
-        if let Some(release_flag) = pool.get_buffer_release_flag(buffer) {
-            release_flag.set_released();
-            true
-        } else {
-            false
-        }
+    pub(super) fn try_set_buffer_release_flag(
+        &self,
+        buffer: ObjectId,
+        arc_strong_count: usize,
+    ) -> bool {
+        self.pool
+            .lock()
+            .unwrap()
+            .set_buffer_release_flag(buffer, arc_strong_count != 1)
     }
 
     pub(super) fn has_callback(&self, callback: ObjectId) -> bool {

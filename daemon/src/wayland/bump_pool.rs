@@ -87,14 +87,23 @@ impl BumpPool {
         }
     }
 
-    pub(crate) fn get_buffer_release_flag(&self, buffer_id: ObjectId) -> Option<&ReleaseFlag> {
-        self.buffers.iter().find_map(|b| {
-            if b.object_id == buffer_id {
-                Some(&b.released)
-            } else {
-                None
+    pub(crate) fn set_buffer_release_flag(
+        &mut self,
+        buffer_id: ObjectId,
+        is_animating: bool,
+    ) -> bool {
+        if let Some(b) = self.buffers.iter().find(|b| b.object_id == buffer_id) {
+            b.released.set_released();
+            if !is_animating && self.buffers.iter().all(|b| b.released.is_released()) {
+                for buffer in self.buffers.drain(..) {
+                    buffer.destroy();
+                }
+                self.mmap.unmap();
             }
-        })
+            true
+        } else {
+            false
+        }
     }
 
     fn buffer_len(&self) -> usize {
@@ -115,6 +124,8 @@ impl BumpPool {
     fn grow(&mut self) {
         let len = self.buffer_len();
         let new_len = self.occupied_bytes() + len;
+
+        self.mmap.ensure_mapped();
 
         if new_len > self.mmap.len() {
             if new_len > i32::MAX as usize {
