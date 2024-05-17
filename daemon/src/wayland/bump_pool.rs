@@ -59,7 +59,10 @@ impl Buffer {
 #[derive(Debug)]
 /// A pool implementation that only gives buffers of a fixed size, creating new ones if none of
 /// them are freed. It also takes care of copying the previous buffer's content over to the new one
-/// for us
+/// for us.
+///
+/// Current implementation will automatically unmap the underlying shared memory when we aren't
+/// animating and all created buffers have been released
 pub(crate) struct BumpPool {
     pool_id: ObjectId,
     mmap: Mmap,
@@ -74,8 +77,11 @@ impl BumpPool {
     pub(crate) fn new(width: i32, height: i32) -> Self {
         let len =
             width as usize * height as usize * super::globals::pixel_format().channels() as usize;
-        let (mmap, pool_id) = new_pool(len);
-        let buffers = vec![];
+        let mmap = Mmap::create(len);
+        let pool_id = globals::object_create(super::WlDynObj::ShmPool);
+        super::interfaces::wl_shm::req::create_pool(pool_id, &mmap.fd(), len as i32)
+            .expect("failed to create WlShmPool object");
+        let buffers = Vec::with_capacity(2);
 
         Self {
             pool_id,
@@ -87,6 +93,10 @@ impl BumpPool {
         }
     }
 
+    /// Releases a buffer, if we have it
+    ///
+    /// This will unmap the underlying shared memory if we aren't animating and all buffers have
+    /// been released
     pub(crate) fn set_buffer_release_flag(
         &mut self,
         buffer_id: ObjectId,
@@ -125,6 +135,8 @@ impl BumpPool {
         let len = self.buffer_len();
         let new_len = self.occupied_bytes() + len;
 
+        // we unmap the shared memory file descriptor when animations are done, so here we must
+        // ensure the bytes are actually mmaped
         self.mmap.ensure_mapped();
 
         if new_len > self.mmap.len() {
@@ -185,8 +197,6 @@ impl BumpPool {
     }
 
     /// gets the last buffer we've drawn to
-    ///
-    /// This may return None if there was a resize request in-between the last call to get_drawable
     pub(crate) fn get_commitable_buffer(&self) -> ObjectId {
         self.buffers[self.last_used_buffer].object_id
     }
@@ -211,13 +221,4 @@ impl Drop for BumpPool {
             log::error!("failed to destroy wl_shm_pool: {e}");
         }
     }
-}
-
-fn new_pool(len: usize) -> (Mmap, ObjectId) {
-    let mmap = Mmap::create(len);
-    let pool_id = globals::object_create(super::WlDynObj::ShmPool);
-    super::interfaces::wl_shm::req::create_pool(pool_id, &mmap.fd(), len as i32)
-        .expect("failed to create WlShmPool object");
-
-    (mmap, pool_id)
 }
