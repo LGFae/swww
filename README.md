@@ -221,6 +221,7 @@ recommend:
  - [`mpvpaper`](https://github.com/GhostNaN/mpvpaper) - if you want to display
  videos as your wallpapers. This is also what I used for gifs before making
  `swww`.
+ - [`kitty`](https://sw.kovidgoyal.net/kitty/) - you can use the kitty terminal emulator with its [panel](https://sw.kovidgoyal.net/kitty/kittens/panel/) kitten to have the output of an arbitrary TUI program such as htop or btop or similar as your desktop wallpaper.
 
 ## Acknowledgments
 
