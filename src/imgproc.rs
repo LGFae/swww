@@ -1,11 +1,10 @@
-use fast_image_resize::{FilterType, PixelType, Resizer};
+use fast_image_resize::{FilterType, PixelType, ResizeAlg, ResizeOptions, Resizer};
 use image::{
     codecs::{gif::GifDecoder, png::PngDecoder, webp::WebPDecoder},
     AnimationDecoder, DynamicImage, Frames, GenericImageView, ImageFormat,
 };
 use std::{
     io::{stdin, Cursor, Read},
-    num::NonZeroU32,
     path::Path,
     time::Duration,
 };
@@ -353,26 +352,21 @@ pub fn img_resize_fit(
         } else {
             PixelType::U8x4
         };
-        let src = match fast_image_resize::Image::from_vec_u8(
-            // We unwrap below because we know the images's dimensions should never be 0
-            NonZeroU32::new(img.width).unwrap(),
-            NonZeroU32::new(img.height).unwrap(),
-            img.bytes.to_vec(),
+        let src = match fast_image_resize::images::ImageRef::new(
+            img.width,
+            img.height,
+            img.bytes.as_ref(),
             pixel_type,
         ) {
             Ok(i) => i,
             Err(e) => return Err(e.to_string()),
         };
 
-        // We unwrap below because we know the outputs's dimensions should never be 0
-        let new_w = NonZeroU32::new(trg_w).unwrap();
-        let new_h = NonZeroU32::new(trg_h).unwrap();
+        let mut dst = fast_image_resize::images::Image::new(trg_w, trg_h, pixel_type);
+        let mut resizer = Resizer::new();
+        let options = ResizeOptions::new().resize_alg(ResizeAlg::Convolution(filter));
 
-        let mut dst = fast_image_resize::Image::new(new_w, new_h, pixel_type);
-        let mut dst_view = dst.view_mut();
-
-        let mut resizer = Resizer::new(fast_image_resize::ResizeAlg::Convolution(filter));
-        if let Err(e) = resizer.resize(&src.view(), &mut dst_view) {
+        if let Err(e) = resizer.resize(&src, &mut dst, Some(&options)) {
             return Err(e.to_string());
         }
 
@@ -400,28 +394,23 @@ pub fn img_resize_crop(
         } else {
             PixelType::U8x4
         };
-        let src = match fast_image_resize::Image::from_vec_u8(
-            // We unwrap below because we know the images's dimensions should never be 0
-            NonZeroU32::new(img.width).unwrap(),
-            NonZeroU32::new(img.height).unwrap(),
-            img.bytes.to_vec(),
+        let src = match fast_image_resize::images::ImageRef::new(
+            img.width,
+            img.height,
+            img.bytes.as_ref(),
             pixel_type,
         ) {
             Ok(i) => i,
             Err(e) => return Err(e.to_string()),
         };
 
-        // We unwrap below because we know the outputs's dimensions should never be 0
-        let new_w = NonZeroU32::new(width).unwrap();
-        let new_h = NonZeroU32::new(height).unwrap();
-        let mut src_view = src.view();
-        src_view.set_crop_box_to_fit_dst_size(new_w, new_h, Some((0.5, 0.5)));
+        let mut dst = fast_image_resize::images::Image::new(width, height, pixel_type);
+        let mut resizer = Resizer::new();
+        let options = ResizeOptions::new()
+            .resize_alg(ResizeAlg::Convolution(filter))
+            .fit_into_destination(Some((0.5, 0.5)));
 
-        let mut dst = fast_image_resize::Image::new(new_w, new_h, pixel_type);
-        let mut dst_view = dst.view_mut();
-
-        let mut resizer = Resizer::new(fast_image_resize::ResizeAlg::Convolution(filter));
-        if let Err(e) = resizer.resize(&src_view, &mut dst_view) {
+        if let Err(e) = resizer.resize(&src, &mut dst, Some(&options)) {
             return Err(e.to_string());
         }
 
