@@ -336,7 +336,8 @@ impl wayland::interfaces::wl_surface::EvHandler for Daemon {
 impl wayland::interfaces::wl_buffer::EvHandler for Daemon {
     fn release(&mut self, sender_id: ObjectId) {
         for wallpaper in self.wallpapers.iter() {
-            if wallpaper.try_set_buffer_release_flag(sender_id) {
+            let strong_count = Arc::strong_count(wallpaper);
+            if wallpaper.try_set_buffer_release_flag(sender_id, strong_count) {
                 break;
             }
         }
@@ -480,15 +481,12 @@ fn main() -> Result<(), String> {
     // wait for the animation threads to finish.
     while !daemon.wallpapers.is_empty() {
         // When all animations finish, Arc's strong count will be exactly 1
-        daemon
-            .wallpapers
-            .retain(|w| Arc::<Wallpaper>::strong_count(w) > 1);
+        daemon.wallpapers.retain(|w| Arc::strong_count(w) > 1);
         // set all frame callbacks as completed, otherwise the animation threads might deadlock on
         // the conditional variable
-        daemon
-            .wallpapers
-            .iter()
-            .for_each(|w| w.frame_callback_completed());
+        for wallpaper in &daemon.wallpapers {
+            wallpaper.frame_callback_completed();
+        }
         // yield to waste less cpu
         std::thread::yield_now();
     }
