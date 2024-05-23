@@ -5,12 +5,11 @@
 //!
 //! For what's left, we store only the difference from the last frame to this one.
 //! We do that as follows:
-//! * First, we count how many pixels didn't change. We store that value as a u8.
-//!   Every time the u8 hits the max (i.e. 255, or 0xFF), we push in onto the vector
-//!   and restart the counting.
-//! * Once we find a pixel that has changed, we count, starting from that one, how many
-//!   changed, the same way we counted above (i.e. store as u8, every time it hits the
-//!   max push and restart the counting)
+//! * First, we count how many pixels didn't change. We store that value as a u8. Every time the u8
+//!   hits the max (i.e. 255, or 0xFF), we push in onto the vector and restart the counting.
+//! * Once we find a pixel that has changed, we count, starting from that one, how many changed, the
+//!   same way we counted above (i.e. store as u8, every time it hits the max push and restart the
+//!   counting)
 //! * Then, we store all the new bytes.
 //! * Start from the top until we are done with the image
 //!

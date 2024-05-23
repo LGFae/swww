@@ -10,7 +10,10 @@ use utils::{
     ipc::{self, Animation, Answer, BgImg, ImgReq},
 };
 
-use crate::wallpaper::{AnimationToken, Wallpaper};
+use crate::{
+    wallpaper::{AnimationToken, Wallpaper},
+    wayland::globals,
+};
 
 mod anim_barrier;
 mod transitions;
@@ -146,7 +149,7 @@ impl Animator {
                         }
 
                         let result = wallpapers[i].canvas_change(|canvas| {
-                            decompressor.decompress(frame, canvas, crate::pixel_format())
+                            decompressor.decompress(frame, canvas, globals::pixel_format())
                         });
 
                         if let Err(e) = result {
@@ -163,12 +166,10 @@ impl Animator {
                         return;
                     }
 
-                    for wallpaper in &wallpapers {
-                        wallpaper.draw();
-                    }
+                    crate::wallpaper::attach_buffers_and_damange_surfaces(&wallpapers);
                     let timeout = duration.saturating_sub(now.elapsed());
                     spin_sleep::sleep(timeout);
-                    crate::flush_wayland();
+                    crate::wallpaper::commit_wallpapers(&wallpapers);
 
                     now = std::time::Instant::now();
                 }

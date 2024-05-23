@@ -6,7 +6,10 @@ use std::{
 use log::debug;
 use utils::ipc::{Position, TransitionType};
 
-use crate::wallpaper::{AnimationToken, Wallpaper};
+use crate::{
+    wallpaper::{AnimationToken, Wallpaper},
+    wayland::globals,
+};
 
 use keyframe::{
     functions::BezierCurve, keyframes, mint::Vector2, num_traits::Pow, AnimationSequence,
@@ -87,12 +90,10 @@ impl<'a> Transition<'a> {
             }
             i += 1;
         }
-
-        self.wallpapers.iter().for_each(|w| w.draw());
-
+        crate::wallpaper::attach_buffers_and_damange_surfaces(self.wallpapers);
         let timeout = self.fps.saturating_sub(now.elapsed());
         spin_sleep::sleep(timeout);
-        crate::flush_wayland();
+        crate::wallpaper::commit_wallpapers(self.wallpapers);
         *now = Instant::now();
     }
 
@@ -104,15 +105,11 @@ impl<'a> Transition<'a> {
     }
 
     fn none(&mut self, new: &[u8]) {
-        for wallpaper in self.wallpapers.iter() {
-            wallpaper.canvas_change(|canvas| canvas.copy_from_slice(new));
-        }
-
-        for wallpaper in self.wallpapers.iter() {
-            wallpaper.draw();
-        }
-
-        crate::flush_wayland();
+        self.wallpapers
+            .iter()
+            .for_each(|w| w.canvas_change(|canvas| canvas.copy_from_slice(new)));
+        crate::wallpaper::attach_buffers_and_damange_surfaces(self.wallpapers);
+        crate::wallpaper::commit_wallpapers(self.wallpapers);
     }
 
     fn simple(&mut self, new_img: &[u8]) {
@@ -192,7 +189,7 @@ impl<'a> Transition<'a> {
         let (mut seq, start) = self.bezier_seq(offset as f32, max_offset as f32);
 
         let step = self.step;
-        let channels = crate::pixel_format().channels() as usize;
+        let channels = globals::pixel_format().channels() as usize;
         let stride = width * channels;
         while start.elapsed().as_secs_f64() < seq.duration() {
             offset = seq.now() as f64;
@@ -275,7 +272,7 @@ impl<'a> Transition<'a> {
         let (mut seq, start) = self.bezier_seq(offset as f32, max_offset as f32);
 
         let step = self.step;
-        let channels = crate::pixel_format().channels() as usize;
+        let channels = globals::pixel_format().channels() as usize;
         let stride = width * channels;
         while start.elapsed().as_secs_f64() < seq.duration() {
             offset = seq.now() as f64;
@@ -327,7 +324,7 @@ impl<'a> Transition<'a> {
         let (center_x, center_y) = (center_x as usize, center_y as usize);
 
         let step = self.step;
-        let channels = crate::pixel_format().channels() as usize;
+        let channels = globals::pixel_format().channels() as usize;
         let stride = width * channels;
         let (mut seq, start) = self.bezier_seq(0.0, dist_end);
         let mut now = Instant::now();
@@ -378,7 +375,7 @@ impl<'a> Transition<'a> {
         let (center_x, center_y) = (center_x as usize, center_y as usize);
 
         let step = self.step;
-        let channels = crate::pixel_format().channels() as usize;
+        let channels = globals::pixel_format().channels() as usize;
         let stride = width * channels;
         let (mut seq, start) = self.bezier_seq(dist_center, 0.0);
         let mut now = Instant::now();

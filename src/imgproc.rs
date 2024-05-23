@@ -63,7 +63,6 @@ impl ImgBuf {
         })
     }
 
-    #[inline]
     pub fn is_animated(&self) -> bool {
         self.is_animated
     }
