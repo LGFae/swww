@@ -92,7 +92,7 @@ impl<'a> Transition<'a> {
         }
         crate::wallpaper::attach_buffers_and_damange_surfaces(self.wallpapers);
         let timeout = self.fps.saturating_sub(now.elapsed());
-        spin_sleep::sleep(timeout);
+        crate::spin_sleep(timeout);
         crate::wallpaper::commit_wallpapers(self.wallpapers);
         *now = Instant::now();
     }

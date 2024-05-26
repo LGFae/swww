@@ -663,3 +663,19 @@ pub fn is_daemon_running(addr: &PathBuf) -> Result<bool, String> {
         _ => Err("Daemon did not return Answer::Ping, as expected".to_string()),
     }
 }
+
+/// copy-pasted from the `spin_sleep` crate on crates.io
+///
+/// This will sleep for an amount of time we can roughly expected the OS to still be precise enough
+/// for frame timing (125 us, currently).
+fn spin_sleep(duration: std::time::Duration) {
+    const ACCURACY: std::time::Duration = std::time::Duration::new(0, 125_000);
+    let start = std::time::Instant::now();
+    if duration > ACCURACY {
+        std::thread::sleep(duration - ACCURACY);
+    }
+
+    while start.elapsed() < duration {
+        std::thread::yield_now();
+    }
+}

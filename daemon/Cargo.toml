@@ -13,7 +13,6 @@ rustix = { version = "0.38", default-features = false, features = [ "event" ] }
 libc = "0.2"
 
 keyframe = "1.1"
-spin_sleep = "1.2"
 
 sd-notify = { version = "0.4.1" }
 

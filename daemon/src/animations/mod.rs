@@ -168,7 +168,7 @@ impl Animator {
 
                     crate::wallpaper::attach_buffers_and_damange_surfaces(&wallpapers);
                     let timeout = duration.saturating_sub(now.elapsed());
-                    spin_sleep::sleep(timeout);
+                    crate::spin_sleep(timeout);
                     crate::wallpaper::commit_wallpapers(&wallpapers);
 
                     now = std::time::Instant::now();
