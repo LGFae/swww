@@ -17,8 +17,6 @@ skip-tree = []
 # The lint level for crates which do not have a detectable license
 allow = [
     "Apache-2.0",
-	"Apache-2.0 WITH LLVM-exception", # used by the ravif crate
-    "BSD-2-Clause", # used by the ravif crate
     "BSD-3-Clause",
     "GPL-3.0",
     "MIT",
