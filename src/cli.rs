@@ -406,19 +406,16 @@ fn parse_bezier(raw: &str) -> Result<(f32, f32, f32, f32), String> {
 }
 
 pub fn parse_image(raw: &str) -> Result<CliImage, String> {
-    if raw.starts_with("0x") {
-        let color = from_hex(raw.strip_prefix("0x").unwrap());
-        if let Ok(color) = color {
+    let path = PathBuf::from(raw);
+    if path.exists() {
+        return Ok(CliImage::Path(path));
+    }
+    if let Some(color) = raw.strip_prefix("0x") {
+        if let Ok(color) = from_hex(color) {
             return Ok(CliImage::Color(color));
         }
     }
-
-    let path = PathBuf::from(raw);
-    if !path.exists() {
-        return Err(format!("Path '{}' does not exist", raw));
-    }
-
-    Ok(CliImage::Path(path))
+    Err(format!("Path '{}' does not exist", raw))
 }
 
 // parses Percents and numbers in format of "<coord1>,<coord2>"
