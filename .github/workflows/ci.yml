@@ -14,3 +14,5 @@ jobs:
     uses: ./.github/workflows/dependencies.yml
   test:
     uses: ./.github/workflows/test.yml
+  nix-tests:
+    uses: ./.github/workflows/nix-tests.yml
