@@ -128,6 +128,7 @@ impl CliPosition {
 #[derive(Clone)]
 pub enum CliImage {
     Path(PathBuf),
+    /// Single rgb color
     Color([u8; 3]),
 }
 
