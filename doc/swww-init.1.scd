@@ -1,10 +1,10 @@
 swww-init(1)
 
 # NAME
-swww-init
+swww-init (DEPRECATED)
 
 # SYNOPSIS
-*swww init* [--no-daemon]
+*swww init* [--no-daemon] [--no-cache] [--format <xrgb|xbgr|rgb|bgr>]
 
 # OPTIONS
 
@@ -16,19 +16,27 @@ swww-init
 	much (ideally). This is mostly useful for debugging and developing.
 
 *--no-cache*
-	Don't load the cache *during initialization* (it still loads on monitor (re)connection)
+	Don't load the cache *during initialization* (it still loads on monitor
+	(re)connection).
 
-	If want to always pass an image for `swww` to load, this option can help make the
-	results some reliable: `swww init --no-cache && swww img <some img>`
+	If want to always pass an image for 'swww' to load, this option can help make the
+	results some reliable: 'swww init --no-cache && swww img <some img>'
+
+*--format* <xrgb|xbgr|rgb|bgr>
+	Force the daemon to use a specific wl_shm format.
+
+	IMPORTANT: make sure this is a value your compositor actually supports!
+	'swww-daemon' will automatically select the best format for itself during
+	initialization; this is only here for fallback, debug, and workaround
+	purposes.
 
 *-h*, *--help*
 	Print help (see a summary with '-h')
 
 # DESCRIPTION
 
-Initializes the daemon. This is the recommended way of doing it, since we make
-sure to check if another instance is already running, and wait until the daemon
-is 100% ready to receive requests.
+Initializes the daemon. This is used to be the recommended way of doing it, but
+that is no longer the case. You should call 'swww-daemon' directly instead.
 
 # SEE ALSO
 *swww-daemon*(1)

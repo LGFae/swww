@@ -11,6 +11,8 @@
    * xdg-output
  - [lz4](https://github.com/lz4/lz4) (for compressing frames when animating)
 
+**Note that this means `swww` will not run on Gnome, because it does not implement the `wlr-layer-shell` protocol**.
+
 ## Build
 
 <a href="https://repology.org/project/swww/versions">
@@ -19,7 +21,7 @@
 
 ### Dependencies:
 
-  - Up to date stable rustc compiler and cargo (specifically, MSRV is 1.70.0)
+  - Up to date stable rustc compiler and cargo (specifically, MSRV is 1.75.0)
 
 To build, clone this repository and run:
 ```
@@ -40,6 +42,25 @@ In order to generate the man pages, **you must have `scdoc` installed**. Run
 The man pages will be in `doc/generated`. To install them, you must move them to
 to the appropriate location in your system. You should be able to figure out
 where that is by running `manpath`.
+
+### Nix
+
+NixOS users can directly use this repository to get the latest swww for their system.
+
+Add in your `flake.nix`:
+
+```nix
+  inputs.swww.url = "github:LGFae/swww";
+```
+
+Pass inputs to your modules using `specialArgs` and
+Then in `configuration.nix`:
+
+```nix
+  environment.systemPackages = [
+    inputs.swww.packages.${pkgs.system}.swww
+  ];
+```
 
 ## Features
 
@@ -82,9 +103,9 @@ makes switching from one image to the next to happen very abruptly.
 
 Start by initializing the daemon:
 ```
-swww init
+swww-daemon
 ```
-Then, simply pass the image you want to display:
+Then, in a different terminal, simply pass the image you want to display:
 ```
 swww img <path/to/img>
 
@@ -146,6 +167,11 @@ which selects a transition effect at random.
 
 ## Troubleshooting
 
+### The image looks tilted and in grayscale on my laptop
+
+See #233. Current workaround is to use `swww-daemon --format xrgb` when starting
+the daemon.
+
 ### High cpu usage during caching of a gif's frames
 
 `swww` will use a non-insignificant amount of cpu power while caching the
@@ -195,6 +221,7 @@ recommend:
  - [`mpvpaper`](https://github.com/GhostNaN/mpvpaper) - if you want to display
  videos as your wallpapers. This is also what I used for gifs before making
  `swww`.
+ - [`kitty`](https://sw.kovidgoyal.net/kitty/) - you can use the kitty terminal emulator with its [panel](https://sw.kovidgoyal.net/kitty/kittens/panel/) kitten to have the output of an arbitrary TUI program such as htop or btop or similar as your desktop wallpaper.
 
 ## Acknowledgments
 

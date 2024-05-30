@@ -1,12 +1,12 @@
 [package]
 name = "utils"
-version = "0.8.2-master"
+version = "0.9.5-masterV2"
 authors = ["Leonardo Gibrowski Faé <leonardo.fae44@gmail.com>"]
 edition = "2021"
 license-file = "../LICENSE"
 
 [dependencies]
-rkyv = "0.7"
+rustix = { version = "0.38", default-features = false, features = [ "std", "net", "shm", "mm", "param" ] }
 
 [build-dependencies]
 pkg-config = "0.3"

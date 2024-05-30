@@ -47,7 +47,7 @@ a background by controlling the *swww-daemon* at runtime.
 It supports animated gifs and putting different stuff in different monitors. I
 also did my best to make it as resource efficient as possible.
 
-To start, begin by running *swww init*. That will set up the *swww-daemon*.
+To start, begin by running *swww-daemon*. That will set up the *swww-daemon*.
 Then, you can send images to be displayed with *swww img*. To kill the daemon,
 use *swww kill*.
 
@@ -56,8 +56,8 @@ protocol*. Typically, _wlr-roots_ based compositors.
 
 # FILES
 *swww* will create the following files in your system:
-	- A socket in _$XDG_RUNTIME_DIR/swww.socket_ or _/tmp/swww/swww.socket_, if
-	  $XDG_RUNTIME_DIR does not exist.
+	- A socket in _${XDG_RUNTIME_DIR}/swww-${WAYLAND_DISPLAY}.socket_,  or
+	_/tmp/swww/swww-${WAYLAND_DISPLAY}.socket_, if $XDG_RUNTIME_DIR is not set.
 	- Cache files in _$XDG_CACHE_HOME/swww_ or _$HOME/.cache/swww_ if
 	  $XDG_CACHE_HOME does not exist. These are used to set the wallpaper to the
 	  previous image when a monitor is (re)connected or turned on.

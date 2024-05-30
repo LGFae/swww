@@ -36,6 +36,18 @@ fn from_hex(hex: &str) -> Result<[u8; 3], String> {
     Ok(color)
 }
 
+#[derive(Clone, ValueEnum)]
+pub enum PixelFormat {
+    /// No swap, can copy directly onto WlBuffer
+    Bgr,
+    /// Swap R and B channels at client, can copy directly onto WlBuffer
+    Rgb,
+    /// No swap, must extend pixel with an extra byte when copying
+    Xbgr,
+    /// Swap R and B channels at client, must extend pixel with an extra byte when copying
+    Xrgb,
+}
+
 #[derive(Clone)]
 pub enum Filter {
     Nearest,
@@ -162,7 +174,7 @@ pub enum Swww {
     /// Use `-` to read from stdin
     Img(Img),
 
-    /// Initializes the daemon.
+    /// [DEPRECATED] Initializes the daemon.
     ///
     /// Exits if there is already a daemon running. We check that by seeing if
     /// $XDG_RUNTIME_DIR/swww.socket exists.
@@ -177,9 +189,17 @@ pub enum Swww {
         ///Don't load the cache *during initialization* (it still loads on monitor (re)connection)
         ///
         ///If want to always pass an image for `swww` to load, this option can help make the
-        ///results some reliable: `swww init --no-cache && swww img <some img>`
+        ///results some reliable: `swww-daemon --no-cache && swww img <some img>`
         #[clap(long)]
         no_cache: bool,
+
+        /// Force the daemon to use a specific wl_shm format
+        ///
+        /// IMPORTANT: make sure this is a value your compositor actually supports! `swww` will
+        /// automatically select the best format for itself during initialization; this is only
+        /// here for fallback, debug, and workaround purposes
+        #[clap(long)]
+        format: Option<PixelFormat>,
     },
 
     ///Kills the daemon
@@ -285,7 +305,8 @@ pub struct Img {
     ///
     ///Possible transitions are:
     ///
-    ///none | simple | fade | left | right | top | bottom | wipe | wave | grow | center | any | outer | random
+    ///none | simple | fade | left | right | top | bottom | wipe | wave | grow | center | any |
+    /// outer | random
     ///
     ///The 'left', 'right', 'top' and 'bottom' options make the transition happen from that
     ///position to its opposite in the screen.
@@ -293,14 +314,16 @@ pub struct Img {
     ///'none' is an alias to 'simple' that also sets the 'transition-step' to 255. This has the
     ///effect of the transition finishing instantly
     ///
-    ///'fade' is similar to 'simple' but the fade is controlled through the --transition-bezier flag
+    ///'fade' is similar to 'simple' but the fade is controlled through the --transition-bezier
+    /// flag
     ///
-    ///'wipe' is similar to 'left' but allows you to specify the angle for transition with the `--transition-angle` flag.
+    ///'wipe' is similar to 'left' but allows you to specify the angle for transition with the
+    /// `--transition-angle` flag.
     ///
     ///'wave' is similar to 'wipe' sweeping line is wavy
     ///
-    ///'grow' causes a growing circle to transition across the screen and allows changing the circle's center
-    /// position with the `--transition-pos` flag.
+    ///'grow' causes a growing circle to transition across the screen and allows changing the
+    /// circle's center position with the `--transition-pos` flag.
     ///
     ///'center' is an alias to 'grow' with position set to center of screen.
     ///
@@ -327,7 +350,7 @@ pub struct Img {
         default_value = "90",
         default_value_if("transition_type", "simple", "2")
     )]
-    pub transition_step: u8,
+    pub transition_step: std::num::NonZeroU8,
 
     ///How long the transition takes to complete in seconds.
     ///
@@ -346,11 +369,13 @@ pub struct Img {
 
     ///This is used for the 'wipe' and 'wave' transitions. It controls the angle of the wipe
     ///
-    ///Note that the angle is in degrees, where '0' is right to left and '90' is top to bottom, and '270' bottom to top
+    ///Note that the angle is in degrees, where '0' is right to left and '90' is top to bottom,
+    /// and '270' bottom to top
     #[arg(long, env = "SWWW_TRANSITION_ANGLE", default_value = "45")]
     pub transition_angle: f64,
 
-    ///This is only used for the 'grow','outer' transitions. It controls the center of circle (default is 'center').
+    ///This is only used for the 'grow','outer' transitions. It controls the center of circle
+    /// (default is 'center').
     ///
     ///Position values can be given in both percentage values and pixel values:
     ///  float values are interpreted as percentages and integer values as pixel values
@@ -358,7 +383,8 @@ pub struct Img {
     ///      200,400 means 200 pixels from the left and 400 pixels from the bottom
     ///
     ///the value can also be an alias which will set the position accordingly):
-    /// 'center' | 'top' | 'left' | 'right' | 'bottom' | 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
+    /// 'center' | 'top' | 'left' | 'right' | 'bottom' | 'top-left' | 'top-right' | 'bottom-left' |
+    /// 'bottom-right'
     #[arg(long, env = "SWWW_TRANSITION_POS", default_value = "center", value_parser=parse_coords)]
     pub transition_pos: CliPosition,
 

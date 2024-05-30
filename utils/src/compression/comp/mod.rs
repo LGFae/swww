@@ -5,12 +5,11 @@
 //!
 //! For what's left, we store only the difference from the last frame to this one.
 //! We do that as follows:
-//! * First, we count how many pixels didn't change. We store that value as a u8.
-//!   Every time the u8 hits the max (i.e. 255, or 0xFF), we push in onto the vector
-//!   and restart the counting.
-//! * Once we find a pixel that has changed, we count, starting from that one, how many
-//!   changed, the same way we counted above (i.e. store as u8, every time it hits the
-//!   max push and restart the counting)
+//! * First, we count how many pixels didn't change. We store that value as a u8. Every time the u8
+//!   hits the max (i.e. 255, or 0xFF), we push in onto the vector and restart the counting.
+//! * Once we find a pixel that has changed, we count, starting from that one, how many changed, the
+//!   same way we counted above (i.e. store as u8, every time it hits the max push and restart the
+//!   counting)
 //! * Then, we store all the new bytes.
 //! * Start from the top until we are done with the image
 //!
@@ -112,8 +111,9 @@ pub(super) unsafe fn pack_bytes(cur: &[u8], goal: &[u8], v: &mut Vec<u8>) {
     }
 
     if !v.is_empty() {
-        // add one extra zero to prevent access out of bounds later during decompression
-        v.push(0)
+        // add two extra bytes to prevent access out of bounds later during decompression
+        v.push(0);
+        v.push(0);
     }
 }
 

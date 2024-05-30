@@ -21,7 +21,7 @@ those locations corresponding to the current image/animation being displayed.
 
 Furthermore,  the cache will keep preprocessed versions of `gif`s. So, if you
 load a large `gif`, you would have to pay the price for its processing the first
-time. 
+time.
 
 Note that `swww` will automatically delete any preprocessed animation created
 with a previous version of `swww` from the cache.

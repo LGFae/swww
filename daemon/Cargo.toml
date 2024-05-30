@@ -1,26 +1,21 @@
 [package]
 name = "swww-daemon"
-version = "0.8.2-master"
+version = "0.9.5-masterV2"
 authors = ["Leonardo Gibrowski Faé <leonardo.fae44@gmail.com>"]
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-log = { version = "0.4", features = ["max_level_debug", "release_max_level_info"] }
-simplelog = "0.12"
+log = { version = "0.4", default_features = false, features = [ "max_level_debug", "release_max_level_info", "std" ] }
 
-wayland-client = { version = "0.31", default-features = false, features = [ "log" ]}
-smithay-client-toolkit = { version = "0.18", default-features = false }
+rustix = { version = "0.38", default-features = false, features = [ "event" ] }
+libc = "0.2"
 
-nix = { version = "0.27", default-features = false, features = [ "signal", "poll" ] }
 keyframe = "1.1"
-rkyv = "0.7"
-rayon = "1.7"
-spin_sleep = "1.1"
 
 sd-notify = { version = "0.4.1" }
 
-utils = { version = "0.8.2-master", path = "../utils" }
+utils = { version = "0.9.5-masterV2", path = "../utils" }
 [dev-dependencies]
 rand = "0.8"

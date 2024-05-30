@@ -1,10 +1,143 @@
 ### Unreleased
 
 
-### 0.8.2-master
+### 0.9.5
 
+This is mostly just fixes and small improvements.
+
+#### Fixes
+
+  * fixed wallpaper never setting `configured` to 'true'
+  * fixed fractional scaling rounding incorrectly 
+  * fixed scaling for vertical monitors (thanks, @AhJi26)
+  * fixed the annoying black screen on login issue (finally)
+
+#### Additions
+
+  * add --no-cache option to `swww-daemon`, by @lucasreis1
+
+#### Internal improvements
+
+  * specialized transition for `--transition-type none` (previously it was an alias
+  to `simple` with special values)
+  * remove an extra call to `thread::sleep` when loading the cache
+  * no longer using an `event_fd` to wake up the main thread
+
+### 0.9.4
+
+Fractional Scaling is finally implemented! Woooo!!
+
+That also fixes a nasty problem some people were having with fractionally
+scaled outputs.
+
+Apologies for spaming small releases like these in short order. Hopefully this
+will be the last one for a while.
+
+### 0.9.3
+
+Quick release to fix a scaling error that might affect a lot of people.
+
+#### Fixes
+
+  * fix wrong scale calculation
+
+#### Internal Improvements
+
+  * deleted leftover `/proc` traversal code in the client
+  * no longer setting nonblocking mode for daemon socket, since we are already
+  polling it
+  * better IPC structs between client and daemon
+
+### 0.9.2
+
+#### Fixes
+
+  * fix stack overflow on some systems, by @iynaix
+  * make sure we start the daemon even when the socket file already exists
+  * fix build in 32bit x86, by @Calandracas606
+  * fix image resize when image is larger than monitor
+  * fix transitions performance that had regressed from versions 0.8.*
+  * added SIGHUP to the list of signals we catch to exit properly
+  * allow `swww` to run on a nested wayland environment, by @Fuyukai.
+
+#### Improvements
+
+  * we no longer traverse `/proc` to detect whether the daemon is running, we
+  just try pinging it instead, by @Fuyukai
+  * many internal refactors:
+    - client now sends images in the format requested by the daemon (previously
+    we were transforming the images in the daemon itself)
+    - simplified the daemon's transitions
+    - using `bitcode` instead of `rkyv` for serialization
+    - using `rustix` instead of `nix` for unix stuff 
+    - The Big One: we've eliminated our dependency on `smithay-client-toolkit`,
+    now make calls directly to `wayland-client`. This gives us more control over
+    our code for the price of a little extra verbosity.
+
+
+### 0.9.1
+
+My bad everyone, `0.9.0` wasn't loading the cache, so I am publishing this quick
+fix.
+
+### 0.9.0
+
+#### BREAKING CHANGES
+
+MSRV is now 1.74.0.
+
+#### Deprecated
+
+`swww init` is now considered deprecated. Use `swww-daemon` instead. To run it
+in the background, simply do `swww-daemon &`.
+
+#### Fixes
+
+  * fix the `let_underscore_lock` error. Note that all 0.8.* will probably no
+  longer build with newer Rust versions due to that error. By @akida32
+  * fixed webp and gifs that are only a static image
+  * fixed busy waiting for WlBuffers to be released. This was a big one, and it
+  involved rewriting a ton of stuff. We've implemented our own memory pool and
+  are using frame callbacks to know when to draw now. A big thanks to @YaLTeR,
+  @jeLee6gi for their patience and help with debugging and testing this thing.
+  * properly removing all cache contents on `clean-cache`
+  * always center images that are larger than the monitor
+  * animations no longer overlap when sending two animated images in succession
+  * fix randomize script trying to use directories as images. Fix was suggested
+  by @MRSS02
+  * waiting for child swww process when loading the cache, preventing zombie
+  processes
+  * waiting for daemon initialization before certain requests. By @musjj
+
+#### Improvements
+
+  * New, better compression function implementations. We are now using some
+  SIMD code to accelerate the frame compression functions, leading to some nice
+  speedups in some cases. Thanks to @Akida31 for their help in verying my unsafe
+  code.
+  * We are using 3 channel color formats for some nice perf and memory
+  improvements. Unfortunately, it seems to not work for some people on some
+  notebooks (see [Known Issues](#known-issues)).
+  * Implemented a way to force the use of a specific wayland_shm format, as a
+  workaround for [Known Issues](#known-issues). Also went ahead and implemented
+  some cli options for the daemon.
+  * Support for animated pngs
+  * Support for animations when piping images from standard input
+  * Fps is now a `u16`, so we can support newest monitors framerates
+  * Created a `restore` command to manually restore the cache. By @musjj
+  * GitHub actions! Big thanks to @MichaelOultram!
+
+#### Known Issues
+
+Some people are having some problems with the 3 channel color formats (see issue
+#233). Currently, initializing the daemon with `swww-daemon --format xrgb` is a
+workaround to that.
 
 ### 0.8.2
+
+NOTE ALL 0.8.* VERSIONS WILL PROBABLY NO LONGER BUILD WITH NEWER RUST VERSIONS.
+This is because Rust promoted `let_underscore_lock` to a hard error, which
+wasn't the case at the time we've published these versions.
 
 #### **ATTENTION PACKAGE MAINTAINERS** 
 

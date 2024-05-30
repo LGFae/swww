@@ -3,10 +3,10 @@
 //! Our compression strategy is documented in `comp/mod.rs`
 
 use comp::pack_bytes;
-use decomp::unpack_bytes;
+use decomp::{unpack_bytes_3channels, unpack_bytes_4channels};
 use std::ffi::{c_char, c_int};
 
-use rkyv::{Archive, Deserialize, Serialize};
+use crate::ipc::{ImageRequestBuilder, Mmap, MmappedBytes, PixelFormat};
 mod comp;
 mod cpu;
 mod decomp;
@@ -42,15 +42,59 @@ extern "C" {
     fn LZ4_compressBound(input_size: c_int) -> c_int;
 }
 
+enum Inner {
+    Boxed(Box<[u8]>),
+    Mmapped(MmappedBytes),
+}
+
 /// This struct represents the cached difference between the previous frame and the next
-#[derive(Archive, Serialize, Deserialize)]
 pub struct BitPack {
-    inner: Box<[u8]>,
-    /// This field will ensure we won't ever try to unpack the images on a buffer of the wrong size,
-    /// which ultimately is what allows us to use unsafe in the unpack_bytes function
-    expected_buf_size: usize,
+    inner: Inner,
+    /// This field will ensure we won't ever try to unpack the images on a buffer of the wrong
+    /// size, which ultimately is what allows us to use unsafe in the unpack_bytes function
+    expected_buf_size: u32,
 
     compressed_size: i32,
+}
+
+impl BitPack {
+    pub(crate) fn serialize(&self, buf: &mut ImageRequestBuilder) {
+        let Self {
+            expected_buf_size,
+            compressed_size,
+            ..
+        } = self;
+        buf.extend(&(self.bytes().len() as u32).to_ne_bytes());
+        buf.extend(&(expected_buf_size).to_ne_bytes());
+        buf.extend(&(compressed_size).to_ne_bytes());
+        buf.extend(self.bytes());
+    }
+
+    #[must_use]
+    pub(crate) fn deserialize(map: &Mmap, bytes: &[u8]) -> (Self, usize) {
+        assert!(bytes.len() > 12);
+        let len = u32::from_ne_bytes(bytes[0..4].try_into().unwrap()) as usize;
+        let expected_buf_size = u32::from_ne_bytes(bytes[4..8].try_into().unwrap());
+        let compressed_size = i32::from_ne_bytes(bytes[8..12].try_into().unwrap());
+        let inner = Inner::Mmapped(MmappedBytes::new_with_len(map, &bytes[12..12 + len], len));
+        (
+            Self {
+                inner,
+                expected_buf_size,
+                compressed_size,
+            },
+            12 + len,
+        )
+    }
+
+    #[inline]
+    #[must_use]
+    fn bytes(&self) -> &[u8] {
+        match &self.inner {
+            Inner::Boxed(b) => b.as_ref(),
+            Inner::Mmapped(m) => m.bytes(),
+        }
+    }
 }
 
 /// Struct responsible for compressing our data. We use it to cache vector extensions that might
@@ -79,7 +123,12 @@ impl Compressor {
     ///   * the len of the diff buffer is larger than 0x7E000000. In practice, this can only
     ///   happen for 64k monitors and beyond
     #[inline]
-    pub fn compress(&mut self, prev: &[u8], cur: &[u8]) -> Option<BitPack> {
+    pub fn compress(
+        &mut self,
+        prev: &[u8],
+        cur: &[u8],
+        pixel_format: PixelFormat,
+    ) -> Option<BitPack> {
         assert_eq!(
             prev.len(),
             cur.len(),
@@ -94,7 +143,8 @@ impl Compressor {
             return None;
         }
 
-        // This should only be a problem with 64k monitors and beyond, (hopefully) far into the future
+        // This should only be a problem with 64k monitors and beyond, (hopefully) far into the
+        // future
         assert!(
             self.buf.len() <= LZ4_MAX_INPUT_SIZE,
             "frame is too large! cannot compress with LZ4!"
@@ -114,9 +164,16 @@ impl Compressor {
             ) as usize
         };
         v.truncate(n);
+
+        let expected_buf_size = if pixel_format.channels() == 3 {
+            cur.len() as u32
+        } else {
+            ((cur.len() / 3) * 4) as u32
+        };
+
         Some(BitPack {
-            inner: v.into_boxed_slice(),
-            expected_buf_size: (cur.len() / 3) * 4,
+            inner: Inner::Boxed(v.into_boxed_slice()),
+            expected_buf_size,
             compressed_size: self.buf.len() as i32,
         })
     }
@@ -180,25 +237,36 @@ impl Decompressor {
     ///returns whether unpacking was successful. Note it can only fail if `buf.len() !=
     ///expected_buf_size`
     #[inline]
-    pub fn decompress(&mut self, bitpack: &BitPack, buf: &mut [u8]) -> Result<(), String> {
-        if buf.len() != bitpack.expected_buf_size {
+    pub fn decompress(
+        &mut self,
+        bitpack: &BitPack,
+        buf: &mut [u8],
+        pixel_format: PixelFormat,
+    ) -> Result<(), String> {
+        if buf.len() != bitpack.expected_buf_size as usize {
             return Err(format!(
                 "buf has len {}, but expected len is {}",
                 buf.len(),
                 bitpack.expected_buf_size
             ));
         }
+
         self.ensure_capacity(bitpack.compressed_size as usize);
 
         // SAFETY: errors will never happen because BitPacked is *always* only produced
-        // with correct lz4 compression
-        unsafe {
+        // with correct lz4 compression, and ptr has the necessary capacity
+        let size = unsafe {
+            let bytes = bitpack.bytes();
             LZ4_decompress_safe(
-                bitpack.inner.as_ptr() as _,
+                bytes.as_ptr() as _,
                 self.ptr.as_ptr() as _,
-                bitpack.inner.len() as c_int,
+                bytes.len() as c_int,
                 bitpack.compressed_size as c_int,
-            );
+            )
+        };
+
+        if size != bitpack.compressed_size {
+            return Err("BitPack is malformed!".to_string());
         }
 
         // SAFETY: the call to self.ensure_capacity guarantees the pointer has the necessary size
@@ -206,53 +274,12 @@ impl Decompressor {
         let v = unsafe {
             std::slice::from_raw_parts_mut(self.ptr.as_ptr(), bitpack.compressed_size as usize)
         };
-        unpack_bytes(buf, v);
 
-        Ok(())
-    }
-
-    ///returns whether unpacking was successful. Note it can only fail if `buf.len() !=
-    ///expected_buf_size`
-    ///This function is identical to its non-archived counterpart
-    #[inline]
-    pub fn decompress_archived(
-        &mut self,
-        archived: &ArchivedBitPack,
-        buf: &mut [u8],
-    ) -> Result<(), String> {
-        let expected_len: usize = archived
-            .expected_buf_size
-            .deserialize(&mut rkyv::Infallible)
-            .unwrap();
-        if buf.len() != expected_len {
-            return Err(format!(
-                "buf has len {}, but expected len is {}",
-                buf.len(),
-                expected_len
-            ));
+        if pixel_format.can_copy_directly_onto_wl_buffer() {
+            unpack_bytes_3channels(buf, v);
+        } else {
+            unpack_bytes_4channels(buf, v);
         }
-
-        let cap: i32 = archived
-            .compressed_size
-            .deserialize(&mut rkyv::Infallible)
-            .unwrap();
-        self.ensure_capacity(cap as usize);
-
-        // SAFETY: errors will never happen because BitPacked is *always* only produced
-        // with correct lz4 compression
-        unsafe {
-            LZ4_decompress_safe(
-                archived.inner.as_ptr() as _,
-                self.ptr.as_ptr() as _,
-                archived.inner.len() as c_int,
-                cap as c_int,
-            );
-        }
-
-        // SAFETY: the call to self.ensure_capacity guarantees the pointer has the necessary size
-        // to hold all the data
-        let v = unsafe { std::slice::from_raw_parts_mut(self.ptr.as_ptr(), cap as usize) };
-        unpack_bytes(buf, v);
 
         Ok(())
     }
@@ -263,7 +290,12 @@ mod tests {
     use super::*;
     use rand::prelude::random;
 
-    fn buf_from(slice: &[u8]) -> Vec<u8> {
+    const FORMATS: [PixelFormat; 2] = [PixelFormat::Xrgb, PixelFormat::Rgb];
+
+    fn buf_from(slice: &[u8], original_channels: usize) -> Vec<u8> {
+        if original_channels == 3 {
+            return slice.to_vec();
+        }
         let mut v = Vec::new();
         for pix in slice.chunks_exact(3) {
             v.extend_from_slice(pix);
@@ -275,65 +307,77 @@ mod tests {
     #[test]
     //Use this when annoying problems show up
     fn small() {
-        let frame1 = [1, 2, 3, 4, 5, 6];
-        let frame2 = [1, 2, 3, 6, 5, 4];
-        let compressed = Compressor::new().compress(&frame1, &frame2).unwrap();
+        for format in FORMATS {
+            let frame1 = [1, 2, 3, 4, 5, 6];
+            let frame2 = [1, 2, 3, 6, 5, 4];
+            let compressed = Compressor::new()
+                .compress(&frame1, &frame2, format)
+                .unwrap();
 
-        let mut buf = buf_from(&frame1);
-        assert!(Decompressor::new()
-            .decompress(&compressed, &mut buf)
-            .is_ok());
-        for i in 0..2 {
-            for j in 0..3 {
-                assert_eq!(
-                    frame2[i * 3 + j],
-                    buf[i * 4 + j],
-                    "\nframe2: {frame2:?}, buf: {buf:?}\n"
-                );
+            let mut buf = buf_from(&frame1, format.channels().into());
+            Decompressor::new()
+                .decompress(&compressed, &mut buf, format)
+                .unwrap();
+            for i in 0..2 {
+                for j in 0..3 {
+                    assert_eq!(
+                        frame2[i * 3 + j],
+                        buf[i * format.channels() as usize + j],
+                        "\nframe2: {frame2:?}, buf: {buf:?}\n"
+                    );
+                }
             }
         }
     }
 
     #[test]
     fn total_random() {
-        for _ in 0..10 {
-            let mut original = Vec::with_capacity(20);
-            for _ in 0..20 {
-                let mut v = Vec::with_capacity(3000);
-                for _ in 0..3000 {
-                    v.push(random::<u8>());
-                }
-                original.push(v);
-            }
-
-            let mut compressed = Vec::with_capacity(20);
-            let mut compressor = Compressor::new();
-            let mut decompressor = Decompressor::new();
-            compressed.push(
-                compressor
-                    .compress(original.last().unwrap(), &original[0])
-                    .unwrap(),
-            );
-            for i in 1..20 {
-                compressed.push(compressor.compress(&original[i - 1], &original[i]).unwrap());
-            }
-
-            let mut buf = buf_from(original.last().unwrap());
-            for i in 0..20 {
-                assert!(decompressor.decompress(&compressed[i], &mut buf).is_ok());
-                let mut j = 0;
-                let mut l = 0;
-                while j < 3000 {
-                    for k in 0..3 {
-                        assert_eq!(
-                            buf[j + l + k],
-                            original[i][j + k],
-                            "Failed at index: {}",
-                            j + k
-                        );
+        for format in FORMATS.into_iter() {
+            for _ in 0..10 {
+                let mut original = Vec::with_capacity(20);
+                for _ in 0..20 {
+                    let mut v = Vec::with_capacity(3000);
+                    for _ in 0..3000 {
+                        v.push(random::<u8>());
                     }
-                    j += 3;
-                    l += 1;
+                    original.push(v);
+                }
+
+                let mut compressed = Vec::with_capacity(20);
+                let mut compressor = Compressor::new();
+                let mut decompressor = Decompressor::new();
+                compressed.push(
+                    compressor
+                        .compress(original.last().unwrap(), &original[0], format)
+                        .unwrap(),
+                );
+                for i in 1..20 {
+                    compressed.push(
+                        compressor
+                            .compress(&original[i - 1], &original[i], format)
+                            .unwrap(),
+                    );
+                }
+
+                let mut buf = buf_from(original.last().unwrap(), format.channels().into());
+                for i in 0..20 {
+                    decompressor
+                        .decompress(&compressed[i], &mut buf, format)
+                        .unwrap();
+                    let mut j = 0;
+                    let mut l = 0;
+                    while j < 3000 {
+                        for k in 0..3 {
+                            assert_eq!(
+                                buf[j + l + k],
+                                original[i][j + k],
+                                "Failed at index: {}",
+                                j + k
+                            );
+                        }
+                        j += 3;
+                        l += !format.can_copy_directly_onto_wl_buffer() as usize;
+                    }
                 }
             }
         }
@@ -341,53 +385,61 @@ mod tests {
 
     #[test]
     fn full() {
-        for _ in 0..10 {
-            let mut original = Vec::with_capacity(20);
-            for _ in 0..20 {
-                let mut v = Vec::with_capacity(3000);
-                for _ in 0..750 {
-                    v.push(random::<u8>());
-                }
-                for i in 0..750 {
-                    v.push((i % 255) as u8);
-                }
-                for _ in 0..750 {
-                    v.push(random::<u8>());
-                }
-                for i in 0..750 {
-                    v.push((i % 255) as u8);
-                }
-                original.push(v);
-            }
-
-            let mut compressor = Compressor::new();
-            let mut decompressor = Decompressor::new();
-            let mut compressed = Vec::with_capacity(20);
-            compressed.push(
-                compressor
-                    .compress(original.last().unwrap(), &original[0])
-                    .unwrap(),
-            );
-            for i in 1..20 {
-                compressed.push(compressor.compress(&original[i - 1], &original[i]).unwrap());
-            }
-
-            let mut buf = buf_from(original.last().unwrap());
-            for i in 0..20 {
-                assert!(decompressor.decompress(&compressed[i], &mut buf).is_ok());
-                let mut j = 0;
-                let mut l = 0;
-                while j < 3000 {
-                    for k in 0..3 {
-                        assert_eq!(
-                            buf[j + l + k],
-                            original[i][j + k],
-                            "Failed at index: {}",
-                            j + k
-                        );
+        for format in FORMATS {
+            for _ in 0..10 {
+                let mut original = Vec::with_capacity(20);
+                for _ in 0..20 {
+                    let mut v = Vec::with_capacity(3000);
+                    for _ in 0..750 {
+                        v.push(random::<u8>());
                     }
-                    j += 3;
-                    l += 1;
+                    for i in 0..750 {
+                        v.push((i % 255) as u8);
+                    }
+                    for _ in 0..750 {
+                        v.push(random::<u8>());
+                    }
+                    for i in 0..750 {
+                        v.push((i % 255) as u8);
+                    }
+                    original.push(v);
+                }
+
+                let mut compressor = Compressor::new();
+                let mut decompressor = Decompressor::new();
+                let mut compressed = Vec::with_capacity(20);
+                compressed.push(
+                    compressor
+                        .compress(original.last().unwrap(), &original[0], format)
+                        .unwrap(),
+                );
+                for i in 1..20 {
+                    compressed.push(
+                        compressor
+                            .compress(&original[i - 1], &original[i], format)
+                            .unwrap(),
+                    );
+                }
+
+                let mut buf = buf_from(original.last().unwrap(), format.channels().into());
+                for i in 0..20 {
+                    decompressor
+                        .decompress(&compressed[i], &mut buf, format)
+                        .unwrap();
+                    let mut j = 0;
+                    let mut l = 0;
+                    while j < 3000 {
+                        for k in 0..3 {
+                            assert_eq!(
+                                buf[j + l + k],
+                                original[i][j + k],
+                                "Failed at index: {}",
+                                j + k
+                            );
+                        }
+                        j += 3;
+                        l += !format.can_copy_directly_onto_wl_buffer() as usize;
+                    }
                 }
             }
         }

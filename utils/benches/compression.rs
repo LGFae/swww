@@ -42,17 +42,27 @@ pub fn compression_and_decompression(c: &mut Criterion) {
     let mut compressor = Compressor::new();
     let mut comp = c.benchmark_group("compression");
     comp.bench_function("Full", |b| {
-        b.iter(|| black_box(compressor.compress(&prev, &cur).is_some()))
+        b.iter(|| {
+            black_box(
+                compressor
+                    .compress(&prev, &cur, utils::ipc::PixelFormat::Xrgb)
+                    .is_some(),
+            )
+        })
     });
     comp.finish();
 
-    let mut decomp = c.benchmark_group("decompression");
-    let bitpack = compressor.compress(&prev, &cur).unwrap();
+    let mut decomp = c.benchmark_group("decompression 4 channels");
+    let bitpack = compressor
+        .compress(&prev, &cur, utils::ipc::PixelFormat::Xrgb)
+        .unwrap();
     let mut canvas = buf_from(&prev);
 
     let mut decompressor = Decompressor::new();
     decomp.bench_function("Full", |b| {
-        b.iter(|| black_box(decompressor.decompress(&bitpack, &mut canvas)))
+        b.iter(|| {
+            black_box(decompressor.decompress(&bitpack, &mut canvas, utils::ipc::PixelFormat::Xrgb))
+        })
     });
 
     decomp.finish();

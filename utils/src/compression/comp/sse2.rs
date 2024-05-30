@@ -4,6 +4,9 @@
 #[inline]
 #[target_feature(enable = "sse2")]
 unsafe fn count_equals(s1: &[u8], s2: &[u8], mut i: usize) -> usize {
+    #[cfg(target_arch = "x86")]
+    use std::arch::x86 as intr;
+    #[cfg(target_arch = "x86_64")]
     use std::arch::x86_64 as intr;
     let mut equals = 0;
     while i + 15 < s1.len() {
@@ -39,6 +42,9 @@ unsafe fn count_equals(s1: &[u8], s2: &[u8], mut i: usize) -> usize {
 #[inline]
 #[target_feature(enable = "sse2")]
 unsafe fn count_different(s1: &[u8], s2: &[u8], mut i: usize) -> usize {
+    #[cfg(target_arch = "x86")]
+    use std::arch::x86 as intr;
+    #[cfg(target_arch = "x86_64")]
     use std::arch::x86_64 as intr;
     let mut diff = 0;
     while i + 15 < s1.len() {
@@ -102,15 +108,16 @@ pub(super) unsafe fn pack_bytes(cur: &[u8], goal: &[u8], v: &mut Vec<u8>) {
     }
 
     if !v.is_empty() {
-        // add one extra zero to prevent access out of bounds later during decompression
-        v.push(0)
+        // add two extra bytes to prevent access out of bounds later during decompression
+        v.push(0);
+        v.push(0);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compression::unpack_bytes;
+    use crate::compression::unpack_bytes_4channels;
     use rand::prelude::random;
 
     #[test]
@@ -157,7 +164,7 @@ mod tests {
         unsafe { pack_bytes(&frame1, &frame2, &mut compressed) };
 
         let mut buf = buf_from(&frame1);
-        unpack_bytes(&mut buf, &compressed);
+        unpack_bytes_4channels(&mut buf, &compressed);
         for i in 0..2 {
             for j in 0..3 {
                 assert_eq!(
@@ -196,7 +203,7 @@ mod tests {
 
             let mut buf = buf_from(original.last().unwrap());
             for i in 0..20 {
-                unpack_bytes(&mut buf, &compressed[i]);
+                unpack_bytes_4channels(&mut buf, &compressed[i]);
                 let mut j = 0;
                 let mut l = 0;
                 while j < 3000 {
@@ -252,7 +259,7 @@ mod tests {
 
             let mut buf = buf_from(original.last().unwrap());
             for i in 0..20 {
-                unpack_bytes(&mut buf, &compressed[i]);
+                unpack_bytes_4channels(&mut buf, &compressed[i]);
                 let mut j = 0;
                 let mut l = 0;
                 while j < 3000 {

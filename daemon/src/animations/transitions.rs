@@ -3,66 +3,39 @@ use std::{
     time::{Duration, Instant},
 };
 
-use rayon::prelude::*;
-
 use log::debug;
-use utils::ipc::{ArchivedPosition, ArchivedTransitionType};
+use utils::ipc::{Position, TransitionType};
 
-use crate::wallpaper::{AnimationToken, Wallpaper};
+use crate::{
+    wallpaper::{AnimationToken, Wallpaper},
+    wayland::globals,
+};
 
 use keyframe::{
     functions::BezierCurve, keyframes, mint::Vector2, num_traits::Pow, AnimationSequence,
 };
 
-macro_rules! change_cols {
-    ($step:ident, $old:ident, $new:ident, $done:ident) => {
-        for (old_col, new_col) in $old.iter_mut().zip($new) {
-            if old_col.abs_diff(*new_col) < $step {
-                *old_col = *new_col;
-            } else if *old_col > *new_col {
-                *old_col -= $step;
-                $done = false;
-            } else {
-                *old_col += $step;
-                $done = false;
-            }
-        }
-    };
-
-    ($step:ident, $old:ident, $new:ident) => {
-        for (old_col, new_col) in $old.iter_mut().zip($new) {
-            if old_col.abs_diff(*new_col) < $step {
-                *old_col = *new_col;
-            } else if *old_col > *new_col {
-                *old_col -= $step;
-            } else {
-                *old_col += $step;
-            }
-        }
-    };
-}
-
-pub(super) struct Transition {
+pub(super) struct Transition<'a> {
     animation_tokens: Vec<AnimationToken>,
-    wallpapers: Vec<Arc<Wallpaper>>,
+    wallpapers: &'a mut Vec<Arc<Wallpaper>>,
     dimensions: (u32, u32),
-    transition_type: ArchivedTransitionType,
+    transition_type: TransitionType,
     duration: f32,
     step: u8,
     fps: Duration,
     angle: f64,
-    pos: ArchivedPosition,
+    pos: Position,
     bezier: BezierCurve,
     wave: (f32, f32),
     invert_y: bool,
 }
 
 /// All transitions return whether or not they completed
-impl Transition {
+impl<'a> Transition<'a> {
     pub(super) fn new(
-        wallpapers: Vec<Arc<Wallpaper>>,
+        wallpapers: &'a mut Vec<Arc<Wallpaper>>,
         dimensions: (u32, u32),
-        transition: utils::ipc::ArchivedTransition,
+        transition: &utils::ipc::Transition,
     ) -> Self {
         Transition {
             animation_tokens: wallpapers
@@ -73,10 +46,10 @@ impl Transition {
             dimensions,
             transition_type: transition.transition_type,
             duration: transition.duration,
-            step: transition.step,
+            step: transition.step.get(),
             fps: Duration::from_nanos(1_000_000_000 / transition.fps as u64),
             angle: transition.angle,
-            pos: transition.pos,
+            pos: transition.pos.clone(),
             bezier: BezierCurve::from(
                 Vector2 {
                     x: transition.bezier.0,
@@ -95,21 +68,18 @@ impl Transition {
     pub(super) fn execute(mut self, new_img: &[u8]) {
         debug!("Starting transitions");
         match self.transition_type {
-            ArchivedTransitionType::Simple => self.simple(new_img),
-            ArchivedTransitionType::Wipe => self.wipe(new_img),
-            ArchivedTransitionType::Grow => self.grow(new_img),
-            ArchivedTransitionType::Outer => self.outer(new_img),
-            ArchivedTransitionType::Wave => self.wave(new_img),
-            ArchivedTransitionType::Fade => self.fade(new_img),
+            TransitionType::None => self.none(new_img),
+            TransitionType::Simple => self.simple(new_img),
+            TransitionType::Wipe => self.wipe(new_img),
+            TransitionType::Grow => self.grow(new_img),
+            TransitionType::Outer => self.outer(new_img),
+            TransitionType::Wave => self.wave(new_img),
+            TransitionType::Fade => self.fade(new_img),
         };
         debug!("Transitions finished");
-        for (wallpaper, token) in self.wallpapers.iter().zip(self.animation_tokens) {
-            token.set_transition_done(wallpaper);
-        }
     }
 
-    fn send_frame(&mut self, now: &mut Instant) {
-        let fps = self.fps;
+    fn updt_wallpapers(&mut self, now: &mut Instant) {
         let mut i = 0;
         while i < self.wallpapers.len() {
             let token = &self.animation_tokens[i];
@@ -120,9 +90,10 @@ impl Transition {
             }
             i += 1;
         }
-        let timeout = fps.saturating_sub(now.elapsed());
-        spin_sleep::sleep(timeout);
-        crate::wake_poll();
+        crate::wallpaper::attach_buffers_and_damange_surfaces(self.wallpapers);
+        let timeout = self.fps.saturating_sub(now.elapsed());
+        crate::spin_sleep(timeout);
+        crate::wallpaper::commit_wallpapers(self.wallpapers);
         *now = Instant::now();
     }
 
@@ -133,46 +104,49 @@ impl Transition {
         )
     }
 
+    fn none(&mut self, new: &[u8]) {
+        self.wallpapers
+            .iter()
+            .for_each(|w| w.canvas_change(|canvas| canvas.copy_from_slice(new)));
+        crate::wallpaper::attach_buffers_and_damange_surfaces(self.wallpapers);
+        crate::wallpaper::commit_wallpapers(self.wallpapers);
+    }
+
     fn simple(&mut self, new_img: &[u8]) {
         let step = self.step;
         let mut now = Instant::now();
         let mut done = false;
         while !done {
             done = true;
-            for wallpaper in self.wallpapers.iter_mut() {
+            for wallpaper in self.wallpapers.iter() {
                 wallpaper.canvas_change(|canvas| {
-                    for (old, new) in canvas.chunks_exact_mut(4).zip(new_img.chunks_exact(3)) {
-                        change_cols!(step, old, new, done);
+                    for (old, new) in canvas.iter_mut().zip(new_img) {
+                        change_byte(step, old, new);
                     }
+                    done = canvas == new_img;
                 });
-                wallpaper.draw();
             }
-            self.send_frame(&mut now);
+            self.updt_wallpapers(&mut now);
         }
     }
 
     fn fade(&mut self, new_img: &[u8]) {
-        let mut step = 0.0;
+        let mut step = 0;
         let (mut seq, start) = self.bezier_seq(0.0, 1.0);
 
         let mut now = Instant::now();
         while start.elapsed().as_secs_f64() < seq.duration() {
-            for wallpaper in self.wallpapers.iter_mut() {
+            for wallpaper in self.wallpapers.iter() {
                 wallpaper.canvas_change(|canvas| {
-                    canvas
-                        .par_chunks_exact_mut(4)
-                        .zip(new_img.par_chunks_exact(3))
-                        .for_each(|(old_pix, new_pix)| {
-                            for (old_col, new_col) in old_pix.iter_mut().zip(new_pix) {
-                                *old_col =
-                                    (*old_col as f64 * (1.0 - step) + *new_col as f64 * step) as u8;
-                            }
-                        });
+                    for (old, new) in canvas.iter_mut().zip(new_img) {
+                        let x = *old as u16 * (256 - step);
+                        let y = *new as u16 * step;
+                        *old = ((x + y) >> 8) as u8;
+                    }
                 });
-                wallpaper.draw();
             }
-            self.send_frame(&mut now);
-            step = seq.now() as f64;
+            self.updt_wallpapers(&mut now);
+            step = (256.0 * seq.now() as f64).trunc() as u16;
             seq.advance_to(start.elapsed().as_secs_f64());
         }
         self.step = 4 + self.step / 4;
@@ -187,11 +161,10 @@ impl Transition {
         let screen_diag = ((width.pow(2) + height.pow(2)) as f64).sqrt();
 
         let angle = self.angle.to_radians();
+        let (sin, cos) = angle.sin_cos();
         let (scale_x, scale_y) = (self.wave.0 as f64, self.wave.1 as f64);
 
         let circle_radius = screen_diag / 2.0;
-
-        let f = |x: f64| (x / scale_x).sin() * scale_y;
 
         // graph: https://www.desmos.com/calculator/wunde042es
         //
@@ -200,52 +173,76 @@ impl Transition {
             let x = x - center.0 as f64;
             let y = y - center.1 as f64;
 
-            let lhs = y * angle.cos() - x * angle.sin();
-            let rhs = f(x * angle.cos() + y * angle.sin()) + circle_radius - offset;
-            lhs >= rhs
+            let lhs = y * sin - x * cos;
+
+            let f = ((x * sin + y * cos) / scale_x).sin() * scale_y;
+            let rhs = f - circle_radius + offset / circle_radius;
+            lhs <= rhs
         };
 
-        // find the offset to start the transition at
-        let mut offset = {
-            let mut offset = 0.0;
-            for x in 0..width {
-                for y in 0..height {
-                    if is_low(x as f64, y as f64, offset) {
-                        offset += 1.0;
-                        break;
-                    }
-                }
-            }
-            offset
-        };
-        let max_offset = 2.0 * circle_radius - offset;
+        let mut offset = (sin.abs() * width as f64 + cos.abs() * height as f64) * 2.0;
+        let a = circle_radius * cos;
+        let b = circle_radius * sin;
+        let max_offset = circle_radius.pow(2) * 2.0;
         let (width, height) = (width as usize, height as usize);
 
         let (mut seq, start) = self.bezier_seq(offset as f32, max_offset as f32);
 
         let step = self.step;
-
+        let channels = globals::pixel_format().channels() as usize;
+        let stride = width * channels;
         while start.elapsed().as_secs_f64() < seq.duration() {
-            for wallpaper in self.wallpapers.iter_mut() {
-                wallpaper.canvas_change(|canvas| {
-                    canvas
-                        .par_chunks_exact_mut(4)
-                        .zip(new_img.par_chunks_exact(3))
-                        .enumerate()
-                        .for_each(|(i, (old, new))| {
-                            let pix_x = i % width;
-                            let pix_y = height - i / width;
-                            if is_low(pix_x as f64, pix_y as f64, offset) {
-                                change_cols!(step, old, new);
-                            }
-                        });
-                });
-                wallpaper.draw();
-            }
-            self.send_frame(&mut now);
-
             offset = seq.now() as f64;
             seq.advance_to(start.elapsed().as_secs_f64());
+
+            for wallpaper in self.wallpapers.iter() {
+                wallpaper.canvas_change(|canvas| {
+                    // divide in 3 sections: the one we know will not be drawn to, the one we know
+                    // WILL be drawn to, and the one we need to do a more expensive check on.
+                    // We do this by creating 2 lines: the first tangential to the wave's peaks,
+                    // the second to its valeys. In-between is where we have to do the more
+                    // expensive checks
+                    for line in 0..height {
+                        let y = ((height - line) as f64 - center.1 as f64 - scale_y * sin) * b;
+                        let x = (circle_radius.powi(2) - y - offset) / a
+                            + center.0 as f64
+                            + scale_y * cos;
+                        let x = x.min(width as f64);
+                        let (col_begin, col_end) = if a.is_sign_negative() {
+                            (0usize, x as usize * channels)
+                        } else {
+                            (x as usize * channels, stride)
+                        };
+                        for col in col_begin..col_end {
+                            let old = unsafe { canvas.get_unchecked_mut(line * stride + col) };
+                            let new = unsafe { new_img.get_unchecked(line * stride + col) };
+                            change_byte(step, old, new);
+                        }
+                        let old_x = x;
+                        let y = ((height - line) as f64 - center.1 as f64 + scale_y * sin) * b;
+                        let x = (circle_radius.powi(2) - y - offset) / a + center.0 as f64
+                            - scale_y * cos;
+                        let x = x.min(width as f64);
+                        let (col_begin, col_end) = if old_x < x {
+                            (old_x as usize, x as usize)
+                        } else {
+                            (x as usize, old_x as usize)
+                        };
+                        for col in col_begin..col_end {
+                            if is_low(col as f64, line as f64, offset) {
+                                let i = line * stride + col * channels;
+                                for j in 0..channels {
+                                    let old = unsafe { canvas.get_unchecked_mut(i + j) };
+                                    let new = unsafe { new_img.get_unchecked(i + j) };
+                                    change_byte(step, old, new);
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+
+            self.updt_wallpapers(&mut now);
         }
         self.step = 4 + self.step / 4;
         self.simple(new_img)
@@ -265,49 +262,43 @@ impl Transition {
 
         let mut offset = {
             let (x, y) = angle.sin_cos();
-            (x.abs() * width as f64 / 2.0 + y.abs() * height as f64 / 2.0).abs()
+            (x.abs() * width as f64 + y.abs() * height as f64) * 2.0
         };
 
-        // line formula: (x-h)*a + (y-k)*b + C = r^2
-        // https://www.desmos.com/calculator/vpvzk12yar
-        //
-        // checks if a pixel is to the left or right of the line
-        let is_low = |pix_x: f64, pix_y: f64, offset: f64, radius: f64| {
-            let a = radius * angle.cos();
-            let b = radius * angle.sin();
-            let x = pix_x - center.0 as f64;
-            let y = pix_y - center.1 as f64;
-            let res = x * a + y * b + offset;
-
-            res >= radius.pow(2)
-        };
+        let a = circle_radius * angle.cos();
+        let b = circle_radius * angle.sin();
 
         let (width, height) = (width as usize, height as usize);
-        let (mut seq, start) = self.bezier_seq(0.0, max_offset as f32);
+        let (mut seq, start) = self.bezier_seq(offset as f32, max_offset as f32);
 
         let step = self.step;
-
+        let channels = globals::pixel_format().channels() as usize;
+        let stride = width * channels;
         while start.elapsed().as_secs_f64() < seq.duration() {
-            for wallpaper in self.wallpapers.iter_mut() {
-                wallpaper.canvas_change(|canvas| {
-                    canvas
-                        .par_chunks_exact_mut(4)
-                        .zip(new_img.par_chunks_exact(3))
-                        .enumerate()
-                        .for_each(|(i, (old, new))| {
-                            let pix_x = i % width;
-                            let pix_y = height - i / width;
-                            if is_low(pix_x as f64, pix_y as f64, offset, circle_radius) {
-                                change_cols!(step, old, new);
-                            }
-                        });
-                });
-                wallpaper.draw();
-            }
-            self.send_frame(&mut now);
-
             offset = seq.now() as f64;
             seq.advance_to(start.elapsed().as_secs_f64());
+            for wallpaper in self.wallpapers.iter() {
+                wallpaper.canvas_change(|canvas| {
+                    // line formula: (x-h)*a + (y-k)*b + C = r^2
+                    // https://www.desmos.com/calculator/vpvzk12yar
+                    for line in 0..height {
+                        let y = ((height - line) as f64 - center.1 as f64) * b;
+                        let x = (circle_radius.powi(2) - y - offset) / a + center.0 as f64;
+                        let x = x.min(width as f64);
+                        let (col_begin, col_end) = if a.is_sign_negative() {
+                            (0usize, x as usize * channels)
+                        } else {
+                            (x as usize * channels, stride)
+                        };
+                        for col in col_begin..col_end {
+                            let old = unsafe { canvas.get_unchecked_mut(line * stride + col) };
+                            let new = unsafe { new_img.get_unchecked(line * stride + col) };
+                            change_byte(step, old, new);
+                        }
+                    }
+                });
+            }
+            self.updt_wallpapers(&mut now);
         }
         self.step = 4 + self.step / 4;
         self.simple(new_img)
@@ -332,32 +323,32 @@ impl Transition {
         let (width, height) = (width as usize, height as usize);
         let (center_x, center_y) = (center_x as usize, center_y as usize);
 
+        let step = self.step;
+        let channels = globals::pixel_format().channels() as usize;
+        let stride = width * channels;
         let (mut seq, start) = self.bezier_seq(0.0, dist_end);
         let mut now = Instant::now();
         while start.elapsed().as_secs_f64() < seq.duration() {
-            for wallpaper in self.wallpapers.iter_mut() {
+            for wallpaper in self.wallpapers.iter() {
                 wallpaper.canvas_change(|canvas| {
-                    canvas
-                        .par_chunks_exact_mut(4)
-                        .zip(new_img.par_chunks_exact(3))
-                        .enumerate()
-                        .for_each(|(i, (old, new))| {
-                            let pix_x = i % width;
-                            let pix_y = height - i / width;
-                            let diff_x = pix_x.abs_diff(center_x);
-                            let diff_y = pix_y.abs_diff(center_y);
-                            let pix_center_dist = f32::sqrt((diff_x.pow(2) + diff_y.pow(2)) as f32);
-                            if pix_center_dist <= dist_center {
-                                let step = self
-                                    .step
-                                    .saturating_add((dist_center - pix_center_dist).log2() as u8);
-                                change_cols!(step, old, new);
-                            }
-                        });
+                    let line_begin = center_y.saturating_sub(dist_center as usize);
+                    let line_end = height.min(center_y + dist_center as usize);
+
+                    // to plot half a circle with radius r, we do sqrt(r^2 - x^2)
+                    for line in line_begin..line_end {
+                        let offset = (dist_center.powi(2) - (center_y as f32 - line as f32).powi(2))
+                            .sqrt() as usize;
+                        let col_begin = center_x.saturating_sub(offset) * channels;
+                        let col_end = width.min(center_x + offset) * channels;
+                        for col in col_begin..col_end {
+                            let old = unsafe { canvas.get_unchecked_mut(line * stride + col) };
+                            let new = unsafe { new_img.get_unchecked(line * stride + col) };
+                            change_byte(step, old, new);
+                        }
+                    }
                 });
-                wallpaper.draw();
             }
-            self.send_frame(&mut now);
+            self.updt_wallpapers(&mut now);
 
             dist_center = seq.now();
             seq.advance_to(start.elapsed().as_secs_f64());
@@ -383,37 +374,50 @@ impl Transition {
         let (width, height) = (width as usize, height as usize);
         let (center_x, center_y) = (center_x as usize, center_y as usize);
 
+        let step = self.step;
+        let channels = globals::pixel_format().channels() as usize;
+        let stride = width * channels;
         let (mut seq, start) = self.bezier_seq(dist_center, 0.0);
         let mut now = Instant::now();
         while start.elapsed().as_secs_f64() < seq.duration() {
-            for wallpaper in self.wallpapers.iter_mut() {
+            for wallpaper in self.wallpapers.iter() {
                 wallpaper.canvas_change(|canvas| {
-                    canvas
-                        .par_chunks_exact_mut(4)
-                        .zip(new_img.par_chunks_exact(3))
-                        .enumerate()
-                        .for_each(|(i, (old, new))| {
-                            let pix_x = i % width;
-                            let pix_y = height - i / width;
-                            let diff_x = pix_x.abs_diff(center_x);
-                            let diff_y = pix_y.abs_diff(center_y);
-                            let pix_center_dist = f32::sqrt((diff_x.pow(2) + diff_y.pow(2)) as f32);
-                            if pix_center_dist >= dist_center {
-                                let step = self
-                                    .step
-                                    .saturating_add((pix_center_dist - dist_center).log2() as u8);
-                                change_cols!(step, old, new);
-                            }
-                        });
+                    // to plot half a circle with radius r, we do sqrt(r^2 - x^2)
+                    for line in 0..height {
+                        let offset = (dist_center.powi(2) - (center_y as f32 - line as f32).powi(2))
+                            .sqrt() as usize;
+                        let col_begin = center_x.saturating_sub(offset) * channels;
+                        let col_end = width.min(center_x + offset) * channels;
+                        for col in 0..col_begin {
+                            let old = unsafe { canvas.get_unchecked_mut(line * stride + col) };
+                            let new = unsafe { new_img.get_unchecked(line * stride + col) };
+                            change_byte(step, old, new);
+                        }
+                        for col in col_end..stride {
+                            let old = unsafe { canvas.get_unchecked_mut(line * stride + col) };
+                            let new = unsafe { new_img.get_unchecked(line * stride + col) };
+                            change_byte(step, old, new);
+                        }
+                    }
                 });
-                wallpaper.draw();
             }
-            self.send_frame(&mut now);
+            self.updt_wallpapers(&mut now);
 
             dist_center = seq.now();
             seq.advance_to(start.elapsed().as_secs_f64());
         }
         self.step = 4 + self.step / 4;
         self.simple(new_img)
+    }
+}
+
+#[inline(always)]
+fn change_byte(step: u8, old: &mut u8, new: &u8) {
+    if old.abs_diff(*new) < step {
+        *old = *new;
+    } else if *old > *new {
+        *old -= step;
+    } else {
+        *old += step;
     }
 }

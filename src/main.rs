@@ -1,9 +1,9 @@
 use clap::Parser;
-use std::{os::unix::net::UnixStream, path::PathBuf, process::Stdio, time::Duration};
+use std::{path::PathBuf, process::Stdio, time::Duration};
 
 use utils::{
     cache,
-    ipc::{self, get_socket_path, read_socket, AnimationRequest, Answer, ArchivedAnswer, Request},
+    ipc::{self, connect_to_socket, get_socket_path, read_socket, Answer, RequestSend},
 };
 
 mod imgproc;
@@ -14,7 +14,13 @@ use cli::{ResizeStrategy, Swww};
 
 fn main() -> Result<(), String> {
     let swww = Swww::parse();
-    if let Swww::Init { no_daemon, .. } = &swww {
+    if let Swww::Init {
+        no_daemon, format, ..
+    } = &swww
+    {
+        eprintln!(
+            "DEPRECATION WARNING: `swww init` IS DEPRECATED. Call `swww-daemon` directly instead"
+        );
         match is_daemon_running() {
             Ok(false) => {
                 let socket_path = get_socket_path();
@@ -43,33 +49,32 @@ fn main() -> Result<(), String> {
                 }
             }
         }
-        spawn_daemon(*no_daemon)?;
+        spawn_daemon(*no_daemon, format)?;
         if *no_daemon {
             return Ok(());
         }
     }
 
     if let Swww::ClearCache = &swww {
-        return cache::clean();
+        return cache::clean().map_err(|e| format!("failed to clean the cache: {e}"));
     }
 
-    let mut configured = false;
-    while !configured {
-        let socket = connect_to_socket(5, 100)?;
-        Request::Ping.send(&socket)?;
+    loop {
+        let socket = connect_to_socket(&get_socket_path(), 5, 100)?;
+        RequestSend::Ping.send(&socket)?;
         let bytes = read_socket(&socket)?;
-        let answer = Answer::receive(&bytes);
-        if let ArchivedAnswer::Ping(c) = answer {
-            configured = *c;
+        let answer = Answer::receive(bytes);
+        if let Answer::Ping(configured) = answer {
+            if configured {
+                break;
+            }
         } else {
             return Err("Daemon did not return Answer::Ping, as expected".to_string());
         }
         std::thread::sleep(Duration::from_millis(1));
     }
 
-    process_swww_args(&swww)?;
-
-    Ok(())
+    process_swww_args(&swww)
 }
 
 fn process_swww_args(args: &Swww) -> Result<(), String> {
@@ -77,14 +82,14 @@ fn process_swww_args(args: &Swww) -> Result<(), String> {
         Some(request) => request,
         None => return Ok(()),
     };
-    let socket = connect_to_socket(5, 100)?;
+    let socket = connect_to_socket(&get_socket_path(), 5, 100)?;
     request.send(&socket)?;
     let bytes = read_socket(&socket)?;
     drop(socket);
-    match Answer::receive(&bytes) {
-        ArchivedAnswer::Err(msg) => return Err(msg.to_string()),
-        ArchivedAnswer::Info(info) => info.iter().for_each(|i| println!("{}", i)),
-        ArchivedAnswer::Ok => {
+    match Answer::receive(bytes) {
+        Answer::Err(msg) => return Err(msg.to_string()),
+        Answer::Info(info) => info.iter().for_each(|i| println!("{}", i)),
+        Answer::Ok => {
             if let Swww::Kill = args {
                 #[cfg(debug_assertions)]
                 let tries = 20;
@@ -102,19 +107,27 @@ fn process_swww_args(args: &Swww) -> Result<(), String> {
                 ));
             }
         }
-        ArchivedAnswer::Ping(_) => {
+        Answer::Ping(_) => {
             return Ok(());
         }
     }
     Ok(())
 }
 
-fn make_request(args: &Swww) -> Result<Option<Request>, String> {
+fn make_request(args: &Swww) -> Result<Option<RequestSend>, String> {
     match args {
-        Swww::Clear(c) => Ok(Some(Request::Clear(ipc::Clear {
-            color: c.color,
-            outputs: split_cmdline_outputs(&c.outputs),
-        }))),
+        Swww::Clear(c) => {
+            let (format, _, _) = get_format_dims_and_outputs(&[])?;
+            let mut color = c.color;
+            if format.must_swap_r_and_b_channels() {
+                color.swap(0, 2);
+            }
+            let clear = ipc::ClearSend {
+                color,
+                outputs: split_cmdline_outputs(&c.outputs),
+            };
+            Ok(Some(RequestSend::Clear(clear.create_request())))
+        }
         Swww::Restore(restore) => {
             let requested_outputs = split_cmdline_outputs(&restore.outputs);
             restore_from_cache(&requested_outputs)?;
@@ -242,8 +255,8 @@ fn make_request(args: &Swww) -> Result<Option<Request>, String> {
             }
             Ok(None)
         }
-        Swww::Kill => Ok(Some(Request::Kill)),
-        Swww::Query => Ok(Some(Request::Query)),
+        Swww::Kill => Ok(Some(RequestSend::Kill)),
+        Swww::Query => Ok(Some(RequestSend::Query)),
     }
 }
 
@@ -256,50 +269,49 @@ fn make_img_request(
 }
 
 #[allow(clippy::type_complexity)]
-fn get_dimensions_and_outputs(
+fn get_format_dims_and_outputs(
     requested_outputs: &[String],
-) -> Result<(Vec<(u32, u32)>, Vec<Vec<String>>), String> {
+) -> Result<(ipc::PixelFormat, Vec<(u32, u32)>, Vec<Vec<String>>), String> {
     let mut outputs: Vec<Vec<String>> = Vec::new();
     let mut dims: Vec<(u32, u32)> = Vec::new();
     let mut imgs: Vec<ipc::BgImg> = Vec::new();
 
-    let socket = connect_to_socket(5, 100)?;
-    Request::Query.send(&socket)?;
+    let socket = connect_to_socket(&get_socket_path(), 5, 100)?;
+    RequestSend::Query.send(&socket)?;
     let bytes = read_socket(&socket)?;
     drop(socket);
-    let answer = Answer::receive(&bytes);
+    let answer = Answer::receive(bytes);
     match answer {
-        ArchivedAnswer::Info(infos) => {
+        Answer::Info(infos) => {
+            let mut format = ipc::PixelFormat::Xrgb;
             for info in infos.iter() {
-                let info_img = info.img.de();
+                format = info.pixel_format;
+                let info_img = &info.img;
                 let name = info.name.to_string();
                 if !requested_outputs.is_empty() && !requested_outputs.contains(&name) {
                     continue;
                 }
-                let real_dim = (
-                    info.dim.0 * info.scale_factor as u32,
-                    info.dim.1 * info.scale_factor as u32,
-                );
+                let real_dim = info.real_dim();
                 if let Some((_, output)) = dims
                     .iter_mut()
                     .zip(&imgs)
                     .zip(&mut outputs)
-                    .find(|((dim, img), _)| real_dim == **dim && info_img == **img)
+                    .find(|((dim, img), _)| real_dim == **dim && info_img == *img)
                 {
                     output.push(name);
                 } else {
                     outputs.push(vec![name]);
                     dims.push(real_dim);
-                    imgs.push(info_img);
+                    imgs.push(info_img.clone());
                 }
             }
             if outputs.is_empty() {
                 Err("none of the requested outputs are valid".to_owned())
             } else {
-                Ok((dims, outputs))
+                Ok((format, dims, outputs))
             }
         }
-        ArchivedAnswer::Err(e) => Err(format!("daemon error when sending query: {e}")),
+        Answer::Err(e) => Err(format!("daemon error when sending query: {e}")),
         _ => unreachable!(),
     }
 }
@@ -349,7 +361,6 @@ fn make_animation_request(
         )),
     }
 }
-
 fn split_cmdline_outputs(outputs: &str) -> Box<[String]> {
     outputs
         .split(',')
@@ -358,8 +369,19 @@ fn split_cmdline_outputs(outputs: &str) -> Box<[String]> {
         .collect()
 }
 
-fn spawn_daemon(no_daemon: bool) -> Result<(), String> {
+fn spawn_daemon(no_daemon: bool, format: &Option<cli::PixelFormat>) -> Result<(), String> {
     let mut cmd = std::process::Command::new("swww-daemon");
+
+    if let Some(format) = format {
+        cmd.arg("--format");
+        cmd.arg(match format {
+            cli::PixelFormat::Xrgb => "xrgb",
+            cli::PixelFormat::Xbgr => "xbgr",
+            cli::PixelFormat::Rgb => "rgb",
+            cli::PixelFormat::Bgr => "bgr",
+        });
+    }
+
     if no_daemon {
         match cmd.status() {
             Ok(_) => Ok(()),
@@ -373,79 +395,28 @@ fn spawn_daemon(no_daemon: bool) -> Result<(), String> {
     }
 }
 
-/// We make sure the Stream is always set to blocking mode
-///
-/// * `tries` -  how make times to attempt the connection
-/// * `interval` - how long to wait between attempts, in milliseconds
-fn connect_to_socket(tries: u8, interval: u64) -> Result<UnixStream, String> {
-    //Make sure we try at least once
-    let tries = if tries == 0 { 1 } else { tries };
-    let path = get_socket_path();
-    let mut error = None;
-    for _ in 0..tries {
-        match UnixStream::connect(&path) {
-            Ok(socket) => {
-                if let Err(e) = socket.set_nonblocking(false) {
-                    return Err(format!("Failed to set blocking connection: {e}"));
-                }
-                #[cfg(debug_assertions)]
-                let timeout = Duration::from_secs(30); //Some operations take a while to respond in debug mode
-                #[cfg(not(debug_assertions))]
-                let timeout = Duration::from_secs(5);
-
-                if let Err(e) = socket.set_read_timeout(Some(timeout)) {
-                    return Err(format!("failed to set read timeout for socket: {e}"));
-                }
-
-                return Ok(socket);
-            }
-            Err(e) => error = Some(e),
-        }
-        std::thread::sleep(Duration::from_millis(interval));
-    }
-    let error = error.unwrap();
-    if error.kind() == std::io::ErrorKind::NotFound {
-        return Err("Socket file not found. Are you sure swww-daemon is running?".to_string());
-    }
-
-    Err(format!("Failed to connect to socket: {error}"))
-}
-
 fn is_daemon_running() -> Result<bool, String> {
-    let proc = PathBuf::from("/proc");
-
-    let entries = match proc.read_dir() {
-        Ok(e) => e,
-        Err(e) => return Err(e.to_string()),
+    let socket = match connect_to_socket(&get_socket_path(), 5, 100) {
+        Ok(s) => s,
+        // likely a connection refused; either way, this is a reliable signal there's no surviving
+        // daemon.
+        Err(_) => return Ok(false),
     };
 
-    for entry in entries.flatten() {
-        let dirname = entry.file_name();
-        if let Ok(pid) = dirname.to_string_lossy().parse::<u32>() {
-            if std::process::id() == pid {
-                continue;
-            }
-            let mut entry_path = entry.path();
-            entry_path.push("cmdline");
-            if let Ok(cmd) = std::fs::read_to_string(entry_path) {
-                let mut args = cmd.split(&[' ', '\0']);
-                if let Some(arg0) = args.next() {
-                    if arg0.ends_with("swww-daemon") {
-                        return Ok(true);
-                    }
-                }
-            }
-        }
+    RequestSend::Ping.send(&socket)?;
+    let answer = Answer::receive(read_socket(&socket)?);
+    match answer {
+        Answer::Ping(_) => Ok(true),
+        _ => Err("Daemon did not return Answer::Ping, as expected".to_string()),
     }
-
-    Ok(false)
 }
 
 fn restore_from_cache(requested_outputs: &[String]) -> Result<(), String> {
-    let (_, outputs) = get_dimensions_and_outputs(requested_outputs)?;
+    let (_, _, outputs) = get_format_dims_and_outputs(requested_outputs)?;
 
     for output in outputs.iter().flatten() {
-        let img_path = utils::cache::get_previous_image_path(output)?;
+        let img_path = utils::cache::get_previous_image_path(output)
+            .map_err(|e| format!("failed to get previous image path: {e}"))?;
         #[allow(deprecated)]
         if let Err(e) = process_swww_args(&Swww::Img(cli::Img {
             image: cli::parse_image(&img_path)?,
@@ -455,7 +426,7 @@ fn restore_from_cache(requested_outputs: &[String]) -> Result<(), String> {
             fill_color: [0, 0, 0],
             filter: cli::Filter::Lanczos3,
             transition_type: cli::TransitionType::None,
-            transition_step: u8::MAX,
+            transition_step: std::num::NonZeroU8::MAX,
             transition_duration: 0.0,
             transition_fps: 30,
             transition_angle: 0.0,

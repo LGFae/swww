@@ -1,18 +1,20 @@
 #[inline]
 #[target_feature(enable = "ssse3")]
-pub(super) unsafe fn unpack_bytes(buf: &mut [u8], diff: &[u8]) {
+pub(super) unsafe fn unpack_bytes_4channels(buf: &mut [u8], diff: &[u8]) {
+    #[cfg(target_arch = "x86")]
+    use std::arch::x86 as intr;
+    #[cfg(target_arch = "x86_64")]
     use std::arch::x86_64 as intr;
 
-    // The very final byte is just padding to let us read 4 bytes at once without going out of
-    // bounds
-    let len = diff.len() - 1;
+    // The final bytes are just padding to prevent us from going out of bounds
+    let len = diff.len() - 3;
     let buf_ptr = buf.as_mut_ptr();
     let diff_ptr = diff.as_ptr();
     let mask = intr::_mm_set_epi8(-1, 11, 10, 9, -1, 8, 7, 6, -1, 5, 4, 3, -1, 2, 1, 0);
 
     let mut diff_idx = 0;
     let mut pix_idx = 0;
-    while diff_idx + 1 < len {
+    while diff_idx < len {
         while diff_ptr.add(diff_idx).read() == u8::MAX {
             pix_idx += u8::MAX as usize;
             diff_idx += 1;
@@ -28,6 +30,12 @@ pub(super) unsafe fn unpack_bytes(buf: &mut [u8], diff: &[u8]) {
         to_cpy += diff_ptr.add(diff_idx).read() as usize;
         diff_idx += 1;
 
+        assert!(
+            diff_idx + to_cpy * 3 + 1 < diff.len(),
+            "copying: {}, diff.len(): {}",
+            diff_idx + to_cpy * 3 + 1,
+            diff.len()
+        );
         while to_cpy > 4 {
             let d = intr::_mm_loadu_si128(diff_ptr.add(diff_idx).cast());
             let to_store = intr::_mm_shuffle_epi8(d, mask);
@@ -38,12 +46,6 @@ pub(super) unsafe fn unpack_bytes(buf: &mut [u8], diff: &[u8]) {
             to_cpy -= 4;
         }
         for _ in 0..to_cpy {
-            debug_assert!(
-                diff_idx + 3 < diff.len(),
-                "diff_idx + 3: {}, diff.len(): {}",
-                diff_idx + 3,
-                diff.len()
-            );
             std::ptr::copy_nonoverlapping(diff_ptr.add(diff_idx), buf_ptr.add(pix_idx * 4), 4);
             diff_idx += 3;
             pix_idx += 1;
@@ -78,7 +80,7 @@ mod tests {
         unsafe { pack_bytes(&frame1, &frame2, &mut compressed) }
 
         let mut buf = buf_from(&frame1);
-        unsafe { unpack_bytes(&mut buf, &compressed) }
+        unsafe { unpack_bytes_4channels(&mut buf, &compressed) }
         for i in 0..2 {
             for j in 0..3 {
                 assert_eq!(
@@ -117,7 +119,7 @@ mod tests {
 
             let mut buf = buf_from(original.last().unwrap());
             for i in 0..20 {
-                unsafe { unpack_bytes(&mut buf, &compressed[i]) }
+                unsafe { unpack_bytes_4channels(&mut buf, &compressed[i]) }
                 let mut j = 0;
                 let mut l = 0;
                 while j < 3000 {
@@ -172,7 +174,7 @@ mod tests {
 
             let mut buf = buf_from(original.last().unwrap());
             for i in 0..20 {
-                unsafe { unpack_bytes(&mut buf, &compressed[i]) }
+                unsafe { unpack_bytes_4channels(&mut buf, &compressed[i]) }
                 let mut j = 0;
                 let mut l = 0;
                 while j < 3000 {

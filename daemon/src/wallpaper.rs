@@ -1,4 +1,5 @@
-use utils::ipc::BgImg;
+use log::{debug, error, warn};
+use utils::ipc::{BgImg, BgInfo, Scale};
 
 use std::{
     num::NonZeroI32,
@@ -8,142 +9,340 @@ use std::{
     },
 };
 
-use smithay_client_toolkit::{
-    output::OutputInfo,
-    shell::{
-        wlr_layer::{Anchor, KeyboardInteractivity, LayerSurface},
-        WaylandSurface,
+use crate::wayland::{
+    bump_pool::BumpPool,
+    globals,
+    interfaces::{
+        wl_output, wl_surface, wp_fractional_scale_v1, wp_viewport, zwlr_layer_surface_v1,
     },
-    shm::Shm,
+    ObjectId, WlDynObj,
 };
-
-use wayland_client::{protocol::wl_surface::WlSurface, QueueHandle};
-
-use crate::{bump_pool::BumpPool, Daemon};
 
 #[derive(Debug)]
 struct AnimationState {
     id: AtomicUsize,
-    transition_finished: Arc<AtomicBool>,
 }
 
 #[derive(Debug)]
 pub(super) struct AnimationToken {
     id: usize,
-    transition_done: Arc<AtomicBool>,
-}
-
-impl AnimationToken {
-    pub(super) fn is_transition_done(&self) -> bool {
-        self.transition_done.load(Ordering::Acquire)
-    }
-
-    pub(super) fn set_transition_done(&self, wallpaper: &Wallpaper) {
-        if wallpaper.has_animation_id(self) {
-            self.transition_done.store(true, Ordering::Release);
-        }
-    }
 }
 
 struct FrameCallbackHandler {
     cvar: Condvar,
-    /// This time doesn't really mean anything. We don't really use it for frame timing, but we
-    /// store it for the sake of signaling when the compositor emitted the last frame callback
-    time: Mutex<Option<u32>>,
+    done: Mutex<bool>,
+    callback: Mutex<ObjectId>,
+}
+
+impl FrameCallbackHandler {
+    fn new(surface: ObjectId) -> Self {
+        let callback = globals::object_create(WlDynObj::Callback);
+        wl_surface::req::frame(surface, callback).unwrap();
+        FrameCallbackHandler {
+            cvar: Condvar::new(),
+            done: Mutex::new(true), // we do not have to wait for the first frame
+            callback: Mutex::new(callback),
+        }
+    }
+
+    fn request_frame_callback(&self, surface: ObjectId) {
+        let callback = globals::object_create(WlDynObj::Callback);
+        wl_surface::req::frame(surface, callback).unwrap();
+        *self.callback.lock().unwrap() = callback;
+    }
 }
 
 /// Owns all the necessary information for drawing.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct WallpaperInner {
+    name: Option<String>,
+    desc: Option<String>,
     width: NonZeroI32,
     height: NonZeroI32,
-    scale_factor: NonZeroI32,
+    scale_factor: Scale,
+    transform: u32,
+}
 
-    pool: BumpPool,
-    img: BgImg,
+impl Default for WallpaperInner {
+    fn default() -> Self {
+        Self {
+            name: None,
+            desc: None,
+            width: unsafe { NonZeroI32::new_unchecked(4) },
+            height: unsafe { NonZeroI32::new_unchecked(4) },
+            scale_factor: Scale::Whole(unsafe { NonZeroI32::new_unchecked(1) }),
+            transform: wl_output::transform::NORMAL,
+        }
+    }
 }
 
 pub(super) struct Wallpaper {
-    output_id: u32,
+    output: ObjectId,
+    output_name: u32,
+    wl_surface: ObjectId,
+    wp_viewport: ObjectId,
+    #[allow(unused)]
+    wp_fractional: Option<ObjectId>,
+    layer_surface: ObjectId,
+
     inner: RwLock<WallpaperInner>,
-    layer_surface: LayerSurface,
+    inner_staging: Mutex<WallpaperInner>,
 
     animation_state: AnimationState,
     pub configured: AtomicBool,
-    qh: QueueHandle<Daemon>,
+
     frame_callback_handler: FrameCallbackHandler,
+    img: Mutex<BgImg>,
+    pool: Mutex<BumpPool>,
 }
 
 impl Wallpaper {
     pub(crate) fn new(
-        output_info: OutputInfo,
-        layer_surface: LayerSurface,
-        shm: &Shm,
-        qh: &QueueHandle<Daemon>,
+        output: ObjectId,
+        output_name: u32,
+        wl_surface: ObjectId,
+        wp_viewport: ObjectId,
+        wp_fractional: Option<ObjectId>,
+        layer_surface: ObjectId,
     ) -> Self {
-        let (width, height): (NonZeroI32, NonZeroI32) = if let Some(size) = output_info.logical_size
-        {
-            if size.0 == 0 || size.1 == 0 {
-                (256.try_into().unwrap(), 256.try_into().unwrap())
-            } else {
-                (size.0.try_into().unwrap(), size.1.try_into().unwrap())
-            }
-        } else {
-            (256.try_into().unwrap(), 256.try_into().unwrap())
-        };
-
-        let scale_factor = NonZeroI32::new(output_info.scale_factor).unwrap();
-
-        let frame_callback_handler = FrameCallbackHandler {
-            cvar: Condvar::new(),
-            time: Mutex::new(Some(0)), // we do not have to wait for the first frame
-        };
+        let inner = RwLock::default();
+        let inner_staging = Mutex::default();
 
         // Configure the layer surface
-        layer_surface.set_anchor(Anchor::all());
-        layer_surface.set_exclusive_zone(-1);
-        layer_surface.set_margin(0, 0, 0, 0);
-        layer_surface.set_keyboard_interactivity(KeyboardInteractivity::None);
-        layer_surface.set_size(width.get() as u32, height.get() as u32);
-        layer_surface
-            .set_buffer_scale(scale_factor.get() as u32)
-            .unwrap();
-        // commit so that the compositor send the initial configuration
-        layer_surface.commit();
-        layer_surface
-            .wl_surface()
-            .frame(qh, layer_surface.wl_surface().clone());
+        zwlr_layer_surface_v1::req::set_anchor(layer_surface, 15).unwrap();
+        zwlr_layer_surface_v1::req::set_exclusive_zone(layer_surface, -1).unwrap();
+        zwlr_layer_surface_v1::req::set_margin(layer_surface, 0, 0, 0, 0).unwrap();
+        zwlr_layer_surface_v1::req::set_keyboard_interactivity(
+            layer_surface,
+            zwlr_layer_surface_v1::keyboard_interactivity::NONE,
+        )
+        .unwrap();
+        wl_surface::req::set_buffer_scale(wl_surface, 1).unwrap();
 
-        let w = width.get() * scale_factor.get();
-        let h = height.get() * scale_factor.get();
-        let pool = BumpPool::new(w, h, shm, qh);
+        let frame_callback_handler = FrameCallbackHandler::new(wl_surface);
+        // commit so that the compositor send the initial configuration
+        wl_surface::req::commit(wl_surface).unwrap();
+
+        let pool = Mutex::new(BumpPool::new(256, 256));
 
         Self {
-            output_id: output_info.id,
+            output,
+            output_name,
+            wl_surface,
+            wp_viewport,
+            wp_fractional,
             layer_surface,
-            inner: RwLock::new(WallpaperInner {
-                width,
-                height,
-                scale_factor,
-                img: BgImg::Color([0, 0, 0]),
-                pool,
-            }),
+            inner,
+            inner_staging,
             animation_state: AnimationState {
                 id: AtomicUsize::new(0),
-                transition_finished: Arc::new(AtomicBool::new(false)),
             },
             configured: AtomicBool::new(false),
-            qh: qh.clone(),
             frame_callback_handler,
+            img: Mutex::new(BgImg::Color([0, 0, 0])),
+            pool,
         }
     }
 
-    #[inline]
-    pub(super) fn has_id(&self, id: u32) -> bool {
-        self.output_id == id
+    pub fn get_bg_info(&self) -> BgInfo {
+        let inner = self.inner.read().unwrap();
+        BgInfo {
+            name: inner.name.clone().unwrap_or("?".to_string()),
+            dim: (inner.width.get() as u32, inner.height.get() as u32),
+            scale_factor: inner.scale_factor,
+            img: self.img.lock().unwrap().clone(),
+            pixel_format: globals::pixel_format(),
+        }
     }
 
-    #[inline]
+    pub fn set_name(&self, name: String) {
+        debug!("Output {} name: {name}", self.output_name);
+        self.inner_staging.lock().unwrap().name = Some(name);
+    }
+
+    pub fn set_desc(&self, desc: String) {
+        debug!("Output {} description: {desc}", self.output_name);
+        self.inner_staging.lock().unwrap().desc = Some(desc)
+    }
+
+    pub fn set_dimensions(&self, width: i32, height: i32) {
+        let mut lock = self.inner_staging.lock().unwrap();
+        let (width, height) = lock.scale_factor.div_dim(width, height);
+
+        match NonZeroI32::new(width) {
+            Some(width) => lock.width = width,
+            None => {
+                error!(
+                    "dividing width {width} by scale_factor {} results in width 0!",
+                    lock.scale_factor
+                )
+            }
+        }
+
+        match NonZeroI32::new(height) {
+            Some(height) => lock.height = height,
+            None => {
+                error!(
+                    "dividing height {height} by scale_factor {} results in height 0!",
+                    lock.scale_factor
+                )
+            }
+        }
+    }
+
+    pub fn set_transform(&self, transform: u32) {
+        self.inner_staging.lock().unwrap().transform = transform;
+    }
+
+    pub fn set_scale(&self, scale: Scale) {
+        let mut lock = self.inner_staging.lock().unwrap();
+        if matches!(lock.scale_factor, Scale::Fractional(_)) && matches!(scale, Scale::Whole(_)) {
+            return;
+        }
+
+        let (old_width, old_height) = lock
+            .scale_factor
+            .mul_dim(lock.width.get(), lock.height.get());
+
+        lock.scale_factor = scale;
+        let (width, height) = lock.scale_factor.div_dim(old_width, old_height);
+        match NonZeroI32::new(width) {
+            Some(width) => lock.width = width,
+            None => {
+                error!(
+                    "dividing width {width} by scale_factor {} results in width 0!",
+                    lock.scale_factor
+                )
+            }
+        }
+
+        match NonZeroI32::new(height) {
+            Some(height) => lock.height = height,
+            None => {
+                error!(
+                    "dividing height {height} by scale_factor {} results in height 0!",
+                    lock.scale_factor
+                )
+            }
+        }
+    }
+
+    pub fn commit_surface_changes(&self, use_cache: bool) {
+        use wl_output::transform;
+        let mut inner = self.inner.write().unwrap();
+        let staging = self.inner_staging.lock().unwrap();
+
+        if inner.name != staging.name && use_cache {
+            let name = staging.name.clone().unwrap_or("".to_string());
+            std::thread::Builder::new()
+                .name("cache loader".to_string())
+                .stack_size(1 << 14)
+                .spawn(move || {
+                    if let Err(e) = utils::cache::load(&name) {
+                        warn!("failed to load cache: {e}");
+                    }
+                })
+                .unwrap(); // builder only fails if `name` contains null bytes
+        }
+
+        let (width, height) = if matches!(
+            staging.transform,
+            transform::_90 | transform::_270 | transform::FLIPPED_90 | transform::FLIPPED_270
+        ) {
+            (staging.height, staging.width)
+        } else {
+            (staging.width, staging.height)
+        };
+
+        if staging.scale_factor != inner.scale_factor || staging.transform != inner.transform {
+            match staging.scale_factor {
+                Scale::Whole(i) => {
+                    // unset destination
+                    wp_viewport::req::set_destination(self.wp_viewport, -1, -1).unwrap();
+                    wl_surface::req::set_buffer_scale(self.wl_surface, i.get()).unwrap();
+                }
+                Scale::Fractional(_) => {
+                    wl_surface::req::set_buffer_scale(self.wl_surface, 1).unwrap();
+                    wp_viewport::req::set_destination(self.wp_viewport, width.get(), height.get())
+                        .unwrap();
+                }
+            }
+        }
+
+        inner.scale_factor = staging.scale_factor;
+        inner.transform = staging.transform;
+        inner.name.clone_from(&staging.name);
+        inner.desc.clone_from(&staging.desc);
+        if (inner.width, inner.height) == (width, height) {
+            return;
+        }
+        self.stop_animations();
+        inner.width = width;
+        inner.height = height;
+
+        let scale_factor = staging.scale_factor;
+        drop(inner);
+        drop(staging);
+
+        zwlr_layer_surface_v1::req::set_size(
+            self.layer_surface,
+            width.get() as u32,
+            height.get() as u32,
+        )
+        .unwrap();
+
+        let (w, h) = scale_factor.mul_dim(width.get(), height.get());
+        self.pool.lock().unwrap().resize(w, h);
+
+        self.frame_callback_handler
+            .request_frame_callback(self.wl_surface);
+        wl_surface::req::commit(self.wl_surface).unwrap();
+        self.configured
+            .store(true, std::sync::atomic::Ordering::Release);
+    }
+
+    pub(super) fn has_name(&self, name: &str) -> bool {
+        match self.inner.read().unwrap().name.as_ref() {
+            Some(n) => n == name,
+            None => false,
+        }
+    }
+
+    pub(super) fn has_output(&self, output: ObjectId) -> bool {
+        self.output == output
+    }
+
+    pub(super) fn has_output_name(&self, name: u32) -> bool {
+        self.output_name == name
+    }
+
+    pub(super) fn has_surface(&self, wl_surface: ObjectId) -> bool {
+        self.wl_surface == wl_surface
+    }
+
+    pub(super) fn has_layer_surface(&self, layer_surface: ObjectId) -> bool {
+        self.layer_surface == layer_surface
+    }
+
+    pub(super) fn try_set_buffer_release_flag(
+        &self,
+        buffer: ObjectId,
+        arc_strong_count: usize,
+    ) -> bool {
+        self.pool
+            .lock()
+            .unwrap()
+            .set_buffer_release_flag(buffer, arc_strong_count != 1)
+    }
+
+    pub(super) fn has_callback(&self, callback: ObjectId) -> bool {
+        *self.frame_callback_handler.callback.lock().unwrap() == callback
+    }
+
+    pub(super) fn has_fractional_scale(&self, fractional_scale: ObjectId) -> bool {
+        self.wp_fractional.is_some_and(|f| f == fractional_scale)
+    }
+
     pub(super) fn has_animation_id(&self, token: &AnimationToken) -> bool {
         self.animation_state
             .id
@@ -151,134 +350,167 @@ impl Wallpaper {
             == token.id
     }
 
-    #[inline]
-    pub(super) fn has_surface(&self, surface: &WlSurface) -> bool {
-        self.layer_surface.wl_surface() == surface
-    }
-
     pub(super) fn get_dimensions(&self) -> (u32, u32) {
         let inner = self.inner.read().unwrap();
-        let width = inner.width.get() as u32;
-        let height = inner.height.get() as u32;
-        let scale_factor = inner.scale_factor.get() as u32;
-        (width * scale_factor, height * scale_factor)
+        let dim = inner
+            .scale_factor
+            .mul_dim(inner.width.get(), inner.height.get());
+        (dim.0 as u32, dim.1 as u32)
     }
 
     pub(super) fn canvas_change<F, T>(&self, f: F) -> T
     where
         F: FnOnce(&mut [u8]) -> T,
     {
-        let mut inner = self.inner.write().unwrap();
-        f(inner.pool.get_drawable(&self.qh))
+        f(self.pool.lock().unwrap().get_drawable())
     }
 
-    #[inline]
-    pub(super) fn get_img_info(&self) -> BgImg {
-        self.inner.read().unwrap().img.clone()
-    }
-
-    #[inline]
     pub(super) fn create_animation_token(&self) -> AnimationToken {
         let id = self.animation_state.id.load(Ordering::Acquire);
-        AnimationToken {
-            id,
-            transition_done: Arc::clone(&self.animation_state.transition_finished),
-        }
+        AnimationToken { id }
     }
 
-    #[inline]
-    pub(super) fn frame_callback_completed(&self, time: u32) {
-        *self.frame_callback_handler.time.lock().unwrap() = Some(time);
+    pub(super) fn frame_callback_completed(&self) {
+        *self.frame_callback_handler.done.lock().unwrap() = true;
         self.frame_callback_handler.cvar.notify_all();
     }
 
-    /// Stops all animations with the current id, by increasing that id
-    #[inline]
-    pub(super) fn stop_animations(&self) {
+    fn stop_animations(&self) {
         self.animation_state.id.fetch_add(1, Ordering::AcqRel);
-        self.animation_state
-            .transition_finished
-            .store(false, Ordering::Release);
     }
 
     pub(super) fn clear(&self, color: [u8; 3]) {
         self.canvas_change(|canvas| {
-            for pixel in canvas.chunks_exact_mut(4) {
-                pixel[2] = color[0];
-                pixel[1] = color[1];
-                pixel[0] = color[2];
+            for pixel in canvas.chunks_exact_mut(globals::pixel_format().channels().into()) {
+                pixel[0..3].copy_from_slice(&color);
             }
         })
     }
 
     pub(super) fn set_img_info(&self, img_info: BgImg) {
-        log::debug!("output {} - drawing: {}", self.output_id, img_info);
-        self.inner.write().unwrap().img = img_info;
-    }
-
-    pub(super) fn draw(&self) {
-        {
-            let mut time = self.frame_callback_handler.time.lock().unwrap();
-            while time.is_none() {
-                log::debug!("waiting for condvar");
-                time = self.frame_callback_handler.cvar.wait(time).unwrap();
-            }
-            *time = None;
-        }
-        let inner = self.inner.read().unwrap();
-        if let Some(buf) = inner.pool.get_commitable_buffer() {
-            let width = inner.width.get() * inner.scale_factor.get();
-            let height = inner.height.get() * inner.scale_factor.get();
-            let surface = self.layer_surface.wl_surface();
-            surface.attach(Some(buf), 0, 0);
-            drop(inner);
-            surface.damage_buffer(0, 0, width, height);
-            surface.commit();
-            surface.frame(&self.qh, surface.clone());
-        } else {
-            drop(inner);
-            // commit and send another frame request, since we consumed the previous one
-            let surface = self.layer_surface.wl_surface();
-            surface.commit();
-            surface.frame(&self.qh, surface.clone());
-        }
-    }
-
-    pub(super) fn resize(
-        &self,
-        width: Option<NonZeroI32>,
-        height: Option<NonZeroI32>,
-        scale_factor: Option<NonZeroI32>,
-    ) {
-        if let Some(s) = scale_factor {
-            self.layer_surface.set_buffer_scale(s.get() as u32).unwrap();
-        }
-        let mut inner = self.inner.write().unwrap();
-        let width = width.unwrap_or(inner.width);
-        let height = height.unwrap_or(inner.height);
-        let scale_factor = scale_factor.unwrap_or(inner.scale_factor);
-        if (width, height, scale_factor) == (inner.width, inner.height, inner.scale_factor) {
-            return;
-        }
-        self.stop_animations();
-
-        inner.width = width;
-        inner.height = height;
-        inner.scale_factor = scale_factor;
-        inner.img = BgImg::Color([0, 0, 0]);
-
-        let w = width.get() * scale_factor.get();
-        let h = height.get() * scale_factor.get();
-        inner.pool.resize(w, h, &self.qh);
-        drop(inner);
-
-        *self.frame_callback_handler.time.lock().unwrap() = Some(0);
-        self.layer_surface
-            .set_size(width.get() as u32, height.get() as u32);
-        self.layer_surface.commit();
-        self.layer_surface
-            .wl_surface()
-            .frame(&self.qh, self.layer_surface.wl_surface().clone());
-        self.configured.store(false, Ordering::Release);
+        debug!(
+            "output {:?} - drawing: {}",
+            self.inner.read().unwrap().name,
+            img_info
+        );
+        *self.img.lock().unwrap() = img_info;
     }
 }
+
+/// stops all animations for the passed wallpapers
+pub(crate) fn stop_animations(wallpapers: &[Arc<Wallpaper>]) {
+    wallpapers
+        .iter()
+        .for_each(|wallpaper| wallpaper.stop_animations());
+}
+
+/// attaches all pending buffers and damages all surfaces with one single request
+pub(crate) fn attach_buffers_and_damange_surfaces(wallpapers: &[Arc<Wallpaper>]) {
+    #[rustfmt::skip]
+    // Note this is little-endian specific
+    const MSG: [u8; 56] = [
+        0, 0, 0, 0,             // wl_surface object id (to be filled)
+        1, 0,                   // attach opcode
+        20, 0,                  // msg length
+        0, 0, 0, 0,             // attach buffer id (to be filled)
+        0, 0, 0, 0, 0, 0, 0, 0, // attach arguments
+        0, 0, 0, 0,             // wl_surface object id (to be filled)
+        9, 0,                   // damage opcode
+        24, 0,                  // msg length
+        0, 0, 0, 0, 0, 0, 0, 0, // damage first arguments
+        0, 0, 0, 0, 0, 0, 0, 0, // damage second arguments (to be filled)
+        0, 0, 0, 0,             // wl_surface object id (to be filled)
+        3, 0,                   // frame opcode
+        12, 0,                  // msg length
+        0, 0, 0, 0,             // wl_callback object id (to be filled)
+    ];
+    let msg: Box<[u8]> = wallpapers
+        .iter()
+        .flat_map(|wallpaper| {
+            let mut done = wallpaper.frame_callback_handler.done.lock().unwrap();
+            while !*done {
+                //debug!("waiting for frame callback");
+                done = wallpaper.frame_callback_handler.cvar.wait(done).unwrap();
+            }
+            *done = false;
+            drop(done);
+
+            let mut msg = MSG;
+
+            let buf = wallpaper.pool.lock().unwrap().get_commitable_buffer();
+            let inner = wallpaper.inner.read().unwrap();
+            let (width, height) = inner
+                .scale_factor
+                .mul_dim(inner.width.get(), inner.height.get());
+            drop(inner);
+
+            // attach
+            msg[0..4].copy_from_slice(&wallpaper.wl_surface.get().to_ne_bytes());
+            msg[8..12].copy_from_slice(&buf.get().to_ne_bytes());
+
+            //damage buffer
+            msg[20..24].copy_from_slice(&wallpaper.wl_surface.get().to_ne_bytes());
+            msg[36..40].copy_from_slice(&width.to_ne_bytes());
+            msg[40..44].copy_from_slice(&height.to_ne_bytes());
+
+            // frame callback
+            let callback = globals::object_create(WlDynObj::Callback);
+            *wallpaper.frame_callback_handler.callback.lock().unwrap() = callback;
+            msg[44..48].copy_from_slice(&wallpaper.wl_surface.get().to_ne_bytes());
+            msg[52..56].copy_from_slice(&callback.get().to_ne_bytes());
+            msg
+        })
+        .collect();
+    unsafe { crate::wayland::wire::send_unchecked(msg.as_ref(), &[]).unwrap() }
+}
+
+/// commits multiple wallpapers at once with a single message through the socket
+pub(crate) fn commit_wallpapers(wallpapers: &[Arc<Wallpaper>]) {
+    // Note this is little-endian specific
+    #[rustfmt::skip]
+    const MSG: [u8; 8] = [
+        0, 0, 0, 0, // wl_surface object id (to be filled)
+        6, 0,       // commit opcode
+        8, 0,       // msg length
+    ];
+    let msg: Box<[u8]> = wallpapers
+        .iter()
+        .flat_map(|wallpaper| {
+            let mut msg = MSG;
+            msg[0..4].copy_from_slice(&wallpaper.wl_surface.get().to_ne_bytes());
+            msg
+        })
+        .collect();
+    unsafe { crate::wayland::wire::send_unchecked(msg.as_ref(), &[]).unwrap() }
+}
+
+impl Drop for Wallpaper {
+    fn drop(&mut self) {
+        // note we shouldn't panic in a drop implementation
+        if let Err(e) = wl_surface::req::destroy(self.wl_surface) {
+            error!("error destroying wl_surface: {e:?}");
+        }
+        if let Err(e) = wp_viewport::req::destroy(self.wp_viewport) {
+            error!("error destroying wp_viewport: {e:?}");
+        }
+        if let Some(fractional) = self.wp_fractional {
+            if let Err(e) = wp_fractional_scale_v1::req::destroy(fractional) {
+                error!("error destroying wp_fractional_scale_v1: {e:?}");
+            }
+        }
+        if let Err(e) = zwlr_layer_surface_v1::req::destroy(self.layer_surface) {
+            error!("error destroying zwlr_layer_surface_v1: {e:?}");
+        }
+
+        if let Ok(read) = self.inner.read() {
+            debug!(
+                "Destroyed output {} - {}",
+                read.name.as_ref().unwrap_or(&"?".to_string()),
+                read.desc.as_ref().unwrap_or(&"?".to_string())
+            );
+        }
+    }
+}
+
+unsafe impl Sync for Wallpaper {}
+unsafe impl Send for Wallpaper {}
