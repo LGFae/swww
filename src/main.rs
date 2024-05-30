@@ -1,5 +1,5 @@
 use clap::Parser;
-use std::{path::PathBuf, process::Stdio, time::Duration};
+use std::{process::Stdio, time::Duration};
 
 use utils::{
     cache,
@@ -10,7 +10,7 @@ mod imgproc;
 use imgproc::*;
 
 mod cli;
-use cli::{ResizeStrategy, Swww};
+use cli::{CliImage, ResizeStrategy, Swww};
 
 fn main() -> Result<(), String> {
     let swww = Swww::parse();
@@ -136,118 +136,12 @@ fn make_request(args: &Swww) -> Result<Option<RequestSend>, String> {
         Swww::ClearCache => unreachable!("there is no request for clear-cache"),
         Swww::Img(img) => {
             let requested_outputs = split_cmdline_outputs(&img.outputs);
-            let (dims, outputs) = get_dimensions_and_outputs(&requested_outputs)?;
-            match &img.image {
-                cli::CliImage::Path(path) => {
-                    let imgbuf = ImgBuf::new(path)?;
-                    if imgbuf.is_animated() {
-                        match std::thread::scope::<_, Result<_, String>>(|s1| {
-                            let animations =
-                                s1.spawn(|| make_animation_request(img, &dims, &outputs));
-                            let first_frame = imgbuf
-                                .into_frames()?
-                                .next()
-                                .ok_or("missing first frame".to_owned())?
-                                .map_err(|e| format!("unable to decode first frame: {e}"))?;
+            let (format, dims, outputs) = get_format_dims_and_outputs(&requested_outputs)?;
+            // let imgbuf = ImgBuf::new(&img.path)?;
 
-                            let img_raw = frame_to_rgb(first_frame);
+            let img_request = make_img_request(img, &dims, format, &outputs)?;
 
-
-                            // resize imgs
-                            let mut img_for_dims = Vec::with_capacity(dims.len());
-
-                            for (dim, outputs) in dims.iter().zip(&outputs) {
-                                let ipc_img = ipc::Img {
-                                    img: match img.resize {
-                                        ResizeStrategy::No => img_pad(img_raw.clone(), *dim, &img.fill_color)?,
-                                        ResizeStrategy::Crop => img_resize_crop(img_raw.clone(), *dim, make_filter(&img.filter))?,
-                                        ResizeStrategy::Fit => img_resize_fit(img_raw.clone(), *dim, make_filter(&img.filter), &img.fill_color)?,
-                                    }
-                                    .into_boxed_slice(),
-                                    path: match path.canonicalize() {
-                                        Ok(p) => p.to_string_lossy().to_string(),
-                                        Err(e) => {
-                                            if let Some("-") = path.to_str() {
-                                                "STDIN".to_string()
-                                            } else {
-                                                return Err(format!("failed no canonicalize image path: {e}"));
-                                            }
-                                        }
-                                    },
-                                };
-                                img_for_dims.push((ipc_img, outputs.to_owned().into_boxed_slice()));
-                            }
-
-                            let img_request = make_img_request(
-                                img,
-                                img_for_dims,
-                            )?;
-
-                            let animations =
-                                animations.join().unwrap_or_else(|e| Err(format!("{e:?}")));
-
-                            let socket = connect_to_socket(5, 100)?;
-                            Request::Img(img_request).send(&socket)?;
-                            let bytes = read_socket(&socket)?;
-                            drop(socket);
-                            if let ArchivedAnswer::Err(e) = Answer::receive(&bytes) {
-                                return Err(format!("daemon error when sending image: {e}"));
-                            }
-                            animations
-                        }) {
-                            Ok(animations) => Ok(Some(Request::Animation(animations))),
-                            Err(e) => Err(format!("failed to create animated request: {e}")),
-                        }
-                    } else {
-                        let img_raw = imgbuf.decode()?;
-                        let mut img_for_dims = Vec::with_capacity(dims.len());
-                        for (dim, outputs) in dims.iter().zip(&outputs) {
-                            let ipc_img = ipc::Img {
-                                img: match img.resize {
-                                    ResizeStrategy::No => img_pad(img_raw.clone(), *dim, &img.fill_color)?,
-                                    ResizeStrategy::Crop => img_resize_crop(img_raw.clone(), *dim, make_filter(&img.filter))?,
-                                    ResizeStrategy::Fit => img_resize_fit(img_raw.clone(), *dim, make_filter(&img.filter), &img.fill_color)?,
-                                }
-                                .into_boxed_slice(),
-                                path: match path.canonicalize() {
-                                    Ok(p) => p.to_string_lossy().to_string(),
-                                    Err(e) => {
-                                        if let Some("-") = path.to_str() {
-                                            "STDIN".to_string()
-                                        } else {
-                                            return Err(format!("failed no canonicalize image path: {e}"));
-                                        }
-                                    }
-                                },
-                            };
-                            img_for_dims.push((ipc_img, outputs.to_owned().into_boxed_slice()));
-                        }
-                        Ok(Some(Request::Img(make_img_request(
-                            img,
-                            img_for_dims,
-                        )?)))
-                    }
-                }
-                cli::CliImage::Color(color) => {
-                    
-                    let mut img_for_dims = Vec::with_capacity(dims.len());
-                    
-                    for (dim, outputs) in dims.iter().zip(&outputs) {
-                        let ipc_img = ipc::Img {
-                            img: image::RgbImage::from_pixel(dim.0, dim.1, image::Rgb(*color))
-                            .to_vec()
-                            .into_boxed_slice(),
-                            path: format!("0x{:02x}{:02x}{:02x}", color[0], color[1], color[2]),
-                        };
-                        img_for_dims.push((ipc_img, outputs.to_owned().into_boxed_slice()));
-                    }
-
-                    Ok(Some(Request::Img(make_img_request(
-                        img,
-                        img_for_dims,
-                    )?)))
-                },
-            }
+            Ok(Some(RequestSend::Img(img_request)))
         }
         Swww::Init { no_cache, .. } => {
             if !*no_cache {
@@ -262,10 +156,100 @@ fn make_request(args: &Swww) -> Result<Option<RequestSend>, String> {
 
 fn make_img_request(
     img: &cli::Img,
-    img_for_dims: Vec<(ipc::Img, Box<[String]>)>,
-) -> Result<ipc::ImageRequest, String> {
+    dims: &[(u32, u32)],
+    pixel_format: ipc::PixelFormat,
+    outputs: &[Vec<String>],
+) -> Result<ipc::Mmap, String> {
     let transition = make_transition(img);
-    Ok((transition, img_for_dims.into_boxed_slice()))
+    let mut img_req_builder = ipc::ImageRequestBuilder::new(transition);
+
+    match &img.image {
+        CliImage::Color(color) => {
+            for (&dim, outputs) in dims.iter().zip(outputs) {
+                img_req_builder.push(
+                    ipc::ImgSend {
+                        img: image::RgbImage::from_pixel(dim.0, dim.1, image::Rgb(*color))
+                            .to_vec()
+                            .into_boxed_slice(),
+                        path: format!("0x{:02x}{:02x}{:02x}", color[0], color[1], color[2]),
+                        dim,
+                        format: pixel_format,
+                    },
+                    outputs,
+                    None,
+                );
+            }
+        }
+        CliImage::Path(img_path) => {
+            let imgbuf = ImgBuf::new(img_path)?;
+            let img_raw = imgbuf.decode(pixel_format)?;
+
+            for (&dim, outputs) in dims.iter().zip(outputs) {
+                let path = match img_path.canonicalize() {
+                    Ok(p) => p.to_string_lossy().to_string(),
+                    Err(e) => {
+                        if let Some("-") = img_path.to_str() {
+                            "STDIN".to_string()
+                        } else {
+                            return Err(format!("failed no canonicalize image path: {e}"));
+                        }
+                    }
+                };
+
+                let animation = if !imgbuf.is_animated() {
+                    None
+                } else if img.resize == ResizeStrategy::Crop {
+                    match cache::load_animation_frames(img_path, dim, pixel_format) {
+                        Ok(Some(animation)) => Some(animation),
+                        otherwise => {
+                            if let Err(e) = otherwise {
+                                eprintln!("Error loading cache for {:?}: {e}", img_path);
+                            }
+
+                            Some({
+                                ipc::Animation {
+                                    animation: compress_frames(
+                                        imgbuf.as_frames()?,
+                                        dim,
+                                        pixel_format,
+                                        make_filter(&img.filter),
+                                        img.resize,
+                                        &img.fill_color,
+                                    )?
+                                    .into_boxed_slice(),
+                                }
+                            })
+                        }
+                    }
+                } else {
+                    None
+                };
+
+                let img = match img.resize {
+                    ResizeStrategy::No => img_pad(&img_raw, dim, &img.fill_color)?,
+                    ResizeStrategy::Crop => {
+                        img_resize_crop(&img_raw, dim, make_filter(&img.filter))?
+                    }
+                    ResizeStrategy::Fit => {
+                        img_resize_fit(&img_raw, dim, make_filter(&img.filter), &img.fill_color)?
+                    }
+                };
+
+                img_req_builder.push(
+                    ipc::ImgSend {
+                        img,
+                        path,
+                        dim,
+                        format: pixel_format,
+                    },
+                    outputs,
+                    animation,
+                );
+            }
+        }
+    }
+
+    Ok(img_req_builder.build())
 }
 
 #[allow(clippy::type_complexity)]
@@ -316,51 +300,6 @@ fn get_format_dims_and_outputs(
     }
 }
 
-fn make_animation_request(
-    img: &cli::Img,
-    dims: &[(u32, u32)],
-    outputs: &[Vec<String>],
-) -> Result<AnimationRequest, String> {
-    match &img.image {
-        cli::CliImage::Path(path) => {
-            let filter = make_filter(&img.filter);
-            let mut animations = Vec::with_capacity(dims.len());
-            for (dim, outputs) in dims.iter().zip(outputs) {
-                //TODO: make cache work for all resize strategies
-                if img.resize == ResizeStrategy::Crop {
-                    match cache::load_animation_frames(path, *dim) {
-                        Ok(Some(animation)) => {
-                            animations.push((animation, outputs.to_owned().into_boxed_slice()));
-                            continue;
-                        }
-                        Ok(None) => (),
-                        Err(e) => eprintln!("Error loading cache for {:?}: {e}", path),
-                    }
-                }
-
-                let imgbuf = ImgBuf::new(path)?;
-                let animation = ipc::Animation {
-                    path: path.to_string_lossy().to_string(),
-                    dimensions: *dim,
-                    animation: compress_frames(
-                        imgbuf.into_frames()?,
-                        *dim,
-                        filter,
-                        img.resize,
-                        &img.fill_color,
-                    )?
-                    .into_boxed_slice(),
-                };
-                animations.push((animation, outputs.to_owned().into_boxed_slice()));
-            }
-            Ok(animations.into_boxed_slice())
-        }
-        cli::CliImage::Color(color) => Err(format!(
-            "colors are not supported for animations: {:?}",
-            color
-        )),
-    }
-}
 fn split_cmdline_outputs(outputs: &str) -> Box<[String]> {
     outputs
         .split(',')
