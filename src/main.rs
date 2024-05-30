@@ -137,12 +137,39 @@ fn make_request(args: &Swww) -> Result<Option<Request>, String> {
                                 .ok_or("missing first frame".to_owned())?
                                 .map_err(|e| format!("unable to decode first frame: {e}"))?;
 
+                            let img_raw = frame_to_rgb(first_frame);
+
+
+                            // resize imgs
+                            let mut img_for_dims = Vec::with_capacity(dims.len());
+
+                            for (dim, outputs) in dims.iter().zip(&outputs) {
+                                let ipc_img = ipc::Img {
+                                    img: match img.resize {
+                                        ResizeStrategy::No => img_pad(img_raw.clone(), *dim, &img.fill_color)?,
+                                        ResizeStrategy::Crop => img_resize_crop(img_raw.clone(), *dim, make_filter(&img.filter))?,
+                                        ResizeStrategy::Fit => img_resize_fit(img_raw.clone(), *dim, make_filter(&img.filter), &img.fill_color)?,
+                                    }
+                                    .into_boxed_slice(),
+                                    path: match path.canonicalize() {
+                                        Ok(p) => p.to_string_lossy().to_string(),
+                                        Err(e) => {
+                                            if let Some("-") = path.to_str() {
+                                                "STDIN".to_string()
+                                            } else {
+                                                return Err(format!("failed no canonicalize image path: {e}"));
+                                            }
+                                        }
+                                    },
+                                };
+                                img_for_dims.push((ipc_img, outputs.to_owned().into_boxed_slice()));
+                            }
+
                             let img_request = make_img_request(
                                 img,
-                                Some(frame_to_rgb(first_frame)),
-                                &dims,
-                                &outputs,
+                                img_for_dims,
                             )?;
+
                             let animations =
                                 animations.join().unwrap_or_else(|e| Err(format!("{e:?}")));
 
@@ -160,17 +187,53 @@ fn make_request(args: &Swww) -> Result<Option<Request>, String> {
                         }
                     } else {
                         let img_raw = imgbuf.decode()?;
+                        let mut img_for_dims = Vec::with_capacity(dims.len());
+                        for (dim, outputs) in dims.iter().zip(&outputs) {
+                            let ipc_img = ipc::Img {
+                                img: match img.resize {
+                                    ResizeStrategy::No => img_pad(img_raw.clone(), *dim, &img.fill_color)?,
+                                    ResizeStrategy::Crop => img_resize_crop(img_raw.clone(), *dim, make_filter(&img.filter))?,
+                                    ResizeStrategy::Fit => img_resize_fit(img_raw.clone(), *dim, make_filter(&img.filter), &img.fill_color)?,
+                                }
+                                .into_boxed_slice(),
+                                path: match path.canonicalize() {
+                                    Ok(p) => p.to_string_lossy().to_string(),
+                                    Err(e) => {
+                                        if let Some("-") = path.to_str() {
+                                            "STDIN".to_string()
+                                        } else {
+                                            return Err(format!("failed no canonicalize image path: {e}"));
+                                        }
+                                    }
+                                },
+                            };
+                            img_for_dims.push((ipc_img, outputs.to_owned().into_boxed_slice()));
+                        }
                         Ok(Some(Request::Img(make_img_request(
                             img,
-                            Some(img_raw),
-                            &dims,
-                            &outputs,
+                            img_for_dims,
                         )?)))
                     }
                 }
-                cli::CliImage::Color(_) => Ok(Some(Request::Img(make_img_request(
-                    img, None, &dims, &outputs,
-                )?))),
+                cli::CliImage::Color(color) => {
+                    
+                    let mut img_for_dims = Vec::with_capacity(dims.len());
+                    
+                    for (dim, outputs) in dims.iter().zip(&outputs) {
+                        let ipc_img = ipc::Img {
+                            img: image::RgbImage::from_pixel(dim.0, dim.1, image::Rgb(*color))
+                            .to_vec()
+                            .into_boxed_slice(),
+                            path: format!("0x{:02x}{:02x}{:02x}", color[0], color[1], color[2]),
+                        };
+                        img_for_dims.push((ipc_img, outputs.to_owned().into_boxed_slice()));
+                    }
+
+                    Ok(Some(Request::Img(make_img_request(
+                        img,
+                        img_for_dims,
+                    )?)))
+                },
             }
         }
         Swww::Init { no_cache, .. } => {
@@ -186,55 +249,10 @@ fn make_request(args: &Swww) -> Result<Option<Request>, String> {
 
 fn make_img_request(
     img: &cli::Img,
-    img_raw: Option<image::RgbImage>,
-    dims: &[(u32, u32)],
-    outputs: &[Vec<String>],
+    img_for_dims: Vec<(ipc::Img, Box<[String]>)>,
 ) -> Result<ipc::ImageRequest, String> {
     let transition = make_transition(img);
-    let mut unique_requests = Vec::with_capacity(dims.len());
-    for (dim, outputs) in dims.iter().zip(outputs) {
-        unique_requests.push((
-            match &img.image {
-                cli::CliImage::Path(path) => ipc::Img {
-                    img: match img_raw {
-                        Some(ref img_raw) => match img.resize {
-                            ResizeStrategy::No => img_pad(img_raw.clone(), *dim, &img.fill_color)?,
-                            ResizeStrategy::Crop => {
-                                img_resize_crop(img_raw.clone(), *dim, make_filter(&img.filter))?
-                            }
-                            ResizeStrategy::Fit => img_resize_fit(
-                                img_raw.clone(),
-                                *dim,
-                                make_filter(&img.filter),
-                                &img.fill_color,
-                            )?,
-                        },
-                        None => Err("missing img_raw".to_owned())?,
-                    }
-                    .into_boxed_slice(),
-                    path: match path.canonicalize() {
-                        Ok(p) => p.to_string_lossy().to_string(),
-                        Err(e) => {
-                            if let Some("-") = path.to_str() {
-                                "STDIN".to_string()
-                            } else {
-                                return Err(format!("failed no canonicalize image path: {e}"));
-                            }
-                        }
-                    },
-                },
-                cli::CliImage::Color(color) => ipc::Img {
-                    img: image::RgbImage::from_pixel(dim.0, dim.1, image::Rgb(*color))
-                        .to_vec()
-                        .into_boxed_slice(),
-                    path: format!("0x{:02x}{:02x}{:02x}", color[0], color[1], color[2]),
-                },
-            },
-            outputs.to_owned().into_boxed_slice(),
-        ));
-    }
-
-    Ok((transition, unique_requests.into_boxed_slice()))
+    Ok((transition, img_for_dims.into_boxed_slice()))
 }
 
 #[allow(clippy::type_complexity)]
