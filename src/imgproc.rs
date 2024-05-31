@@ -482,10 +482,10 @@ pub fn make_transition(img: &cli::Img) -> ipc::Transition {
         }
         cli::TransitionType::Any => {
             pos = Position::new(
-                Coord::Percent(rand::random::<f32>()),
-                Coord::Percent(rand::random::<f32>()),
+                Coord::Percent(fastrand::f32()),
+                Coord::Percent(fastrand::f32()),
             );
-            if rand::random::<u8>() % 2 == 0 {
+            if fastrand::bool() {
                 ipc::TransitionType::Grow
             } else {
                 ipc::TransitionType::Outer
@@ -493,11 +493,11 @@ pub fn make_transition(img: &cli::Img) -> ipc::Transition {
         }
         cli::TransitionType::Random => {
             pos = Position::new(
-                Coord::Percent(rand::random::<f32>()),
-                Coord::Percent(rand::random::<f32>()),
+                Coord::Percent(fastrand::f32()),
+                Coord::Percent(fastrand::f32()),
             );
-            angle = rand::random();
-            match rand::random::<u8>() % 4 {
+            angle = fastrand::f64();
+            match fastrand::u8(0..4) {
                 0 => ipc::TransitionType::Simple,
                 1 => ipc::TransitionType::Wipe,
                 2 => ipc::TransitionType::Outer,

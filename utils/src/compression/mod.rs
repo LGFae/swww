@@ -288,7 +288,6 @@ impl Decompressor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::prelude::random;
 
     const FORMATS: [PixelFormat; 2] = [PixelFormat::Xrgb, PixelFormat::Rgb];
 
@@ -338,7 +337,7 @@ mod tests {
                 for _ in 0..20 {
                     let mut v = Vec::with_capacity(3000);
                     for _ in 0..3000 {
-                        v.push(random::<u8>());
+                        v.push(fastrand::u8(..));
                     }
                     original.push(v);
                 }
@@ -391,13 +390,13 @@ mod tests {
                 for _ in 0..20 {
                     let mut v = Vec::with_capacity(3000);
                     for _ in 0..750 {
-                        v.push(random::<u8>());
+                        v.push(fastrand::u8(..));
                     }
                     for i in 0..750 {
                         v.push((i % 255) as u8);
                     }
                     for _ in 0..750 {
-                        v.push(random::<u8>());
+                        v.push(fastrand::u8(..));
                     }
                     for i in 0..750 {
                         v.push((i % 255) as u8);

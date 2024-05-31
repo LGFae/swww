@@ -50,7 +50,7 @@ image = { version = "0.25", default-features = false, features = [
 ]}
 fast_image_resize = "4.0"
 clap = { version = "4.5", features = ["derive", "wrap_help", "env"] }
-rand = "0.8"
+fastrand = { version = "2.1", default-features = false, features = [ "std" ] }
 utils = { version = "0.9.5-masterV2", path = "utils" }
 
 [dev-dependencies]
