@@ -74,17 +74,19 @@ impl WireMsg {
 
         let mut payload = vec![0u32; size >> 2];
 
-        // this should not fail with INTR, because otherwise our socket's internal buffer will
-        // be left in an inconsistent state (a message without a header)
-        rustix::io::retry_on_intr(|| {
-            let iov = io::IoSliceMut::new(u32_slice_to_u8_mut(&mut payload));
-            net::recvmsg(
-                wayland_fd(),
-                &mut [iov],
-                &mut control,
-                net::RecvFlags::WAITALL,
-            )
-        })?;
+        if size > 0 {
+            // this should not fail with INTR, because otherwise our socket's internal buffer will
+            // be left in an inconsistent state (a message without a header)
+            rustix::io::retry_on_intr(|| {
+                let iov = io::IoSliceMut::new(u32_slice_to_u8_mut(&mut payload));
+                net::recvmsg(
+                    wayland_fd(),
+                    &mut [iov],
+                    &mut control,
+                    net::RecvFlags::WAITALL,
+                )
+            })?;
+        }
 
         Ok((
             Self {
