@@ -118,7 +118,6 @@ pub(super) unsafe fn pack_bytes(cur: &[u8], goal: &[u8], v: &mut Vec<u8>) {
 mod tests {
     use super::*;
     use crate::compression::unpack_bytes_4channels;
-    use rand::prelude::random;
 
     #[test]
     fn count_equal_test() {
@@ -186,7 +185,7 @@ mod tests {
             for _ in 0..20 {
                 let mut v = Vec::with_capacity(3000);
                 for _ in 0..3000 {
-                    v.push(random::<u8>());
+                    v.push(fastrand::u8(..));
                 }
                 original.push(v);
             }
@@ -233,13 +232,13 @@ mod tests {
                 let mut v = Vec::with_capacity(3006);
                 v.extend([j, 0, 0, 0, 0, j]);
                 for _ in 0..750 {
-                    v.push(random::<u8>());
+                    v.push(fastrand::u8(..));
                 }
                 for i in 0..750 {
                     v.push((i % 255) as u8);
                 }
                 for _ in 0..750 {
-                    v.push(random::<u8>());
+                    v.push(fastrand::u8(..));
                 }
                 for i in 0..750 {
                     v.push((i % 255) as u8);

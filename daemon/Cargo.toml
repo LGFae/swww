@@ -17,5 +17,3 @@ keyframe = "1.1"
 sd-notify = { version = "0.4.1" }
 
 utils = { version = "0.9.5-masterV2", path = "../utils" }
-[dev-dependencies]
-rand = "0.8"

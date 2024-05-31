@@ -58,7 +58,6 @@ pub(super) unsafe fn unpack_bytes_4channels(buf: &mut [u8], diff: &[u8]) {
 mod tests {
     use super::*;
     use crate::compression::pack_bytes;
-    use rand::prelude::random;
 
     fn buf_from(slice: &[u8]) -> Vec<u8> {
         let mut v = Vec::new();
@@ -102,7 +101,7 @@ mod tests {
             for _ in 0..20 {
                 let mut v = Vec::with_capacity(3000);
                 for _ in 0..3000 {
-                    v.push(random::<u8>());
+                    v.push(fastrand::u8(..));
                 }
                 original.push(v);
             }
@@ -148,13 +147,13 @@ mod tests {
             for _ in 0..20 {
                 let mut v = Vec::with_capacity(3000);
                 for _ in 0..750 {
-                    v.push(random::<u8>());
+                    v.push(fastrand::u8(..));
                 }
                 for i in 0..750 {
                     v.push((i % 255) as u8);
                 }
                 for _ in 0..750 {
-                    v.push(random::<u8>());
+                    v.push(fastrand::u8(..));
                 }
                 for i in 0..750 {
                     v.push((i % 255) as u8);
