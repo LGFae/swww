@@ -16,6 +16,7 @@ rustix = { version = "0.38", default-features = false, features = [
   "shm",
   "mm",
   "param",
+  "process",
 ] }
 
 [build-dependencies]

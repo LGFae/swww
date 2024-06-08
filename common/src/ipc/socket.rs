@@ -38,11 +38,25 @@ impl<T> IpcSocket<T> {
     }
 
     fn socket_file() -> String {
-        let runtime = env::var("XDG_RUNTIME_DIR");
-        let display = env::var("WAYLAND_DISPLAY");
+        let runtime = env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| {
+            let uid = rustix::process::getuid();
+            format!("/run/user/{}", uid.as_raw())
+        });
 
-        let runtime = runtime.as_deref().unwrap_or("/tmp/swww");
-        let display = display.as_deref().unwrap_or("wayland-0");
+        let display = if let Ok(wayland_socket) = std::env::var("WAYLAND_DISPLAY") {
+            let mut i = 0;
+            // if WAYLAND_DISPLAY is a full path, use only its final component
+            for (j, ch) in wayland_socket.bytes().enumerate().rev() {
+                if ch == b'/' {
+                    i = j + 1;
+                    break;
+                }
+            }
+            format!("{}.sock", &wayland_socket[i..])
+        } else {
+            eprintln!("WARNING: WAYLAND_DISPLAY variable not set. Defaulting to wayland-0");
+            "wayland-0.sock".to_string()
+        };
 
         format!("{runtime}/swww-{display}.socket")
     }

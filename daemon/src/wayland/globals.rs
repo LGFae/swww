@@ -203,7 +203,7 @@ pub fn init(pixel_format: Option<PixelFormat>) -> Initializer {
     initializer
 }
 
-/// copy-pasted from `wayland-client.rs`
+/// mostly copy-pasted from `wayland-client.rs`
 fn connect() -> OwnedFd {
     if let Ok(txt) = std::env::var("WAYLAND_SOCKET") {
         // We should connect to the provided WAYLAND_SOCKET
@@ -211,15 +211,6 @@ fn connect() -> OwnedFd {
             .parse::<i32>()
             .expect("invalid fd in WAYLAND_SOCKET env var");
         let fd = unsafe { OwnedFd::from_raw_fd(fd) };
-        // remove the variable so any child processes don't see it
-        std::env::remove_var("WAYLAND_SOCKET");
-
-        // set the CLOEXEC flag on this FD
-        let flags = rustix::io::fcntl_getfd(&fd);
-        flags
-            .map(|f| f | rustix::io::FdFlags::CLOEXEC)
-            .and_then(|f| rustix::io::fcntl_setfd(&fd, f))
-            .expect("failed to set flags on socket");
 
         let socket_addr =
             rustix::net::getsockname(&fd).expect("failed to get wayland socket address");
@@ -227,29 +218,35 @@ fn connect() -> OwnedFd {
             rustix::net::connect_unix(&fd, &addr).expect("failed to connect to unix socket");
             fd
         } else {
-            panic!("socket address is not a unix socket");
+            panic!("socket address {:?} is not a unix socket", socket_addr);
         }
     } else {
-        let socket_name = std::env::var_os("WAYLAND_DISPLAY")
-            .map(Into::<PathBuf>::into)
-            .expect("failed to detect wayland compositor: WAYLAND_DISPLAY not set");
+        let socket_name: PathBuf = std::env::var_os("WAYLAND_DISPLAY")
+            .unwrap_or_else(|| {
+                log::warn!("WAYLAND_DISPLAY is not set! Defaulting to wayland-0");
+                std::ffi::OsString::from("wayland-0")
+            })
+            .into();
 
         let socket_path = if socket_name.is_absolute() {
             socket_name
         } else {
-            let mut socket_path = std::env::var_os("XDG_RUNTIME_DIR")
-                .map(Into::<PathBuf>::into)
-                .expect("failed to detect wayland compositor: XDG_RUNTIME_DIR not set");
-            if !socket_path.is_absolute() {
-                panic!("failed to detect wayland compositor: socket_path is not absolute");
-            }
+            let mut socket_path: PathBuf = std::env::var_os("XDG_RUNTIME_DIR")
+                .unwrap_or_else(|| {
+                    log::warn!("XDG_RUNTIME_DIR is not set! Defaulting to /run/user/UID");
+                    let uid = rustix::process::getuid();
+                    std::ffi::OsString::from(format!("/run/user/{}", uid.as_raw()))
+                })
+                .into();
+
             socket_path.push(socket_name);
             socket_path
         };
 
-        std::os::unix::net::UnixStream::connect(socket_path)
-            .expect("failed to connect to socket")
-            .into()
+        match std::os::unix::net::UnixStream::connect(&socket_path) {
+            Ok(stream) => stream.into(),
+            Err(e) => panic!("failed to connect to wayland socket at {socket_path:?}: {e}"),
+        }
     }
 }
 
