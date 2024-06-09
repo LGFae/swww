@@ -251,12 +251,14 @@ impl<const UTF8: bool> Mmapped<UTF8> {
     const PROT: ProtFlags = ProtFlags::READ;
     const FLAGS: MapFlags = MapFlags::SHARED;
 
+    #[must_use]
     pub(crate) fn new(map: &Mmap, bytes: &[u8]) -> Self {
         let len = u32::from_ne_bytes(bytes[0..4].try_into().unwrap()) as usize;
         let bytes = &bytes[4..];
         Self::new_with_len(map, bytes, len)
     }
 
+    #[must_use]
     pub(crate) fn new_with_len(map: &Mmap, bytes: &[u8], len: usize) -> Self {
         let offset = bytes.as_ptr() as usize - map.ptr.as_ptr() as usize;
         let page_size = rustix::param::page_size();

@@ -139,12 +139,12 @@ impl From<RawMsg> for RequestRecv {
 
                 Self::Img(ImageReq {
                     transition,
-                    imgs: imgs.into(),
-                    outputs: outputs.into(),
+                    imgs,
+                    outputs,
                     animations: if animations.is_empty() {
                         None
                     } else {
-                        Some(animations.into())
+                        Some(animations)
                     },
                 })
             }

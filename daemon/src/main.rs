@@ -709,13 +709,8 @@ impl log::Log for Logger {
                 }
             };
 
-            let thread = std::thread::current();
-            let thread_name = thread.name().unwrap_or("???");
             let msg = record.args();
-
-            let _ = std::io::stderr()
-                .lock()
-                .write_fmt(format_args!("{time:>8}ms {level} ({thread_name}) {msg}\n"));
+            let _ = std::io::stderr().write_fmt(format_args!("{time:>10}ms {level} {msg}\n"));
         }
     }
 
