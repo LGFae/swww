@@ -272,27 +272,18 @@ impl Daemon {
     }
 
     fn stop_animations(&mut self, wallpapers: &[Rc<RefCell<Wallpaper>>]) {
-        for wallpaper in wallpapers {
-            for transition in self.transition_animators.iter_mut() {
-                if let Some(i) = transition
-                    .wallpapers
-                    .iter()
-                    .position(|w| *w.borrow() == *wallpaper.borrow())
-                {
-                    transition.wallpapers.swap_remove(i);
-                }
-            }
-
-            for animator in self.image_animators.iter_mut() {
-                if let Some(i) = animator
-                    .wallpapers
-                    .iter()
-                    .position(|w| *w.borrow() == *wallpaper.borrow())
-                {
-                    animator.wallpapers.swap_remove(i);
-                }
-            }
+        for transition in self.transition_animators.iter_mut() {
+            transition
+                .wallpapers
+                .retain(|w1| !wallpapers.iter().any(|w2| w1.borrow().eq(&w2.borrow())));
         }
+
+        for animator in self.image_animators.iter_mut() {
+            animator
+                .wallpapers
+                .retain(|w1| !wallpapers.iter().any(|w2| w1.borrow().eq(&w2.borrow())));
+        }
+
         self.transition_animators
             .retain(|t| !t.wallpapers.is_empty());
 
@@ -319,9 +310,14 @@ impl wayland::interfaces::wl_registry::EvHandler for Daemon {
     }
 
     fn global_remove(&mut self, name: u32) {
-        self.wallpapers
-            .retain(|w| !w.borrow().has_output_name(name));
-        todo!("ALSO REMOVE FROM ANIMATIONS");
+        if let Some(i) = self
+            .wallpapers
+            .iter()
+            .position(|w| w.borrow().has_output_name(name))
+        {
+            let w = self.wallpapers.remove(i);
+            self.stop_animations(&[w]);
+        }
     }
 }
 
