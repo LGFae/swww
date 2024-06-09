@@ -1,30 +1,11 @@
-use std::sync::atomic::{AtomicBool, Ordering};
-
 use common::mmap::Mmap;
 
 use super::{globals, ObjectId};
 
 #[derive(Debug)]
-pub struct ReleaseFlag(AtomicBool);
-
-impl ReleaseFlag {
-    fn is_released(&self) -> bool {
-        self.0.load(Ordering::Acquire)
-    }
-
-    pub fn set_released(&self) {
-        self.0.store(true, Ordering::Release)
-    }
-
-    fn unset_released(&self) {
-        self.0.store(false, Ordering::Release)
-    }
-}
-
-#[derive(Debug)]
 struct Buffer {
     object_id: ObjectId,
-    released: ReleaseFlag,
+    released: bool,
 }
 
 impl Buffer {
@@ -36,8 +17,7 @@ impl Buffer {
         stride: i32,
         format: u32,
     ) -> Self {
-        let released = ReleaseFlag(AtomicBool::new(true));
-
+        let released = true;
         let object_id = globals::object_create(super::WlDynObj::Buffer);
         super::interfaces::wl_shm_pool::req::create_buffer(
             pool_id, object_id, offset, width, height, stride, format,
@@ -47,6 +27,18 @@ impl Buffer {
             object_id,
             released,
         }
+    }
+
+    fn is_released(&self) -> bool {
+        self.released
+    }
+
+    pub fn set_released(&mut self) {
+        self.released = true;
+    }
+
+    fn unset_released(&mut self) {
+        self.released = false;
     }
 
     fn destroy(self) {
@@ -102,9 +94,9 @@ impl BumpPool {
         buffer_id: ObjectId,
         is_animating: bool,
     ) -> bool {
-        if let Some(b) = self.buffers.iter().find(|b| b.object_id == buffer_id) {
-            b.released.set_released();
-            if !is_animating && self.buffers.iter().all(|b| b.released.is_released()) {
+        if let Some(b) = self.buffers.iter_mut().find(|b| b.object_id == buffer_id) {
+            b.set_released();
+            if !is_animating && self.buffers.iter().all(|b| b.is_released()) {
                 for buffer in self.buffers.drain(..) {
                     buffer.destroy();
                 }
@@ -170,20 +162,20 @@ impl BumpPool {
     pub(crate) fn get_drawable(&mut self) -> &mut [u8] {
         let (i, buf) = match self
             .buffers
-            .iter()
+            .iter_mut()
             .enumerate()
-            .find(|(_, b)| b.released.is_released())
+            .find(|(_, b)| b.is_released())
         {
             Some((i, buf)) => (i, buf),
             None => {
                 self.grow();
-                (self.buffers.len() - 1, self.buffers.last().unwrap())
+                (self.buffers.len() - 1, self.buffers.last_mut().unwrap())
             }
         };
+        buf.unset_released();
 
         let len = self.buffer_len();
         let offset = self.buffer_offset(i);
-        buf.released.unset_released();
 
         if self.last_used_buffer != i {
             let last_offset = self.buffer_offset(self.last_used_buffer);

@@ -21,11 +21,7 @@ use common::ipc::PixelFormat;
 use log::{debug, error, info};
 
 use super::{ObjectId, ObjectManager, WlDynObj};
-use std::{
-    num::NonZeroU32,
-    path::PathBuf,
-    sync::{atomic::AtomicBool, Mutex},
-};
+use std::{cell::RefCell, num::NonZeroU32, path::PathBuf, sync::atomic::AtomicBool};
 
 // all of these objects must always exist for `swww-daemon` to work correctly, so we turn them into
 // global constants
@@ -52,7 +48,7 @@ const VERSIONS: [u32; 4] = [4, 1, 1, 3];
 static mut WAYLAND_FD: OwnedFd = unsafe { std::mem::zeroed() };
 static mut FRACTIONAL_SCALE_SUPPORT: bool = false;
 static mut PIXEL_FORMAT: PixelFormat = PixelFormat::Xrgb;
-static mut OBJECT_MANAGER: Mutex<ObjectManager> = Mutex::new(ObjectManager::new());
+static mut OBJECT_MANAGER: RefCell<ObjectManager> = RefCell::new(ObjectManager::new());
 
 static INITIALIZED: AtomicBool = AtomicBool::new(false);
 
@@ -70,20 +66,18 @@ pub fn fractional_scale_support() -> bool {
 #[must_use]
 pub fn object_type_get(object_id: ObjectId) -> Option<WlDynObj> {
     debug_assert!(INITIALIZED.load(std::sync::atomic::Ordering::Relaxed));
-    unsafe { OBJECT_MANAGER.lock() }.unwrap().get(object_id)
+    unsafe { OBJECT_MANAGER.borrow() }.get(object_id)
 }
 
 #[must_use]
 pub fn object_create(object_type: WlDynObj) -> ObjectId {
     debug_assert!(INITIALIZED.load(std::sync::atomic::Ordering::Relaxed));
-    unsafe { OBJECT_MANAGER.lock() }
-        .unwrap()
-        .create(object_type)
+    unsafe { OBJECT_MANAGER.borrow_mut() }.create(object_type)
 }
 
 pub fn object_remove(object_id: ObjectId) {
     debug_assert!(INITIALIZED.load(std::sync::atomic::Ordering::Relaxed));
-    unsafe { OBJECT_MANAGER.lock() }.unwrap().remove(object_id)
+    unsafe { OBJECT_MANAGER.borrow_mut() }.remove(object_id)
 }
 
 #[must_use]

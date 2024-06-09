@@ -1,7 +1,8 @@
 use log::error;
 
 use std::{
-    sync::Arc,
+    cell::RefCell,
+    rc::Rc,
     time::{Duration, Instant},
 };
 
@@ -17,7 +18,7 @@ mod transitions;
 use transitions::Effect;
 
 pub struct TransitionAnimator {
-    pub wallpapers: Vec<Arc<Wallpaper>>,
+    pub wallpapers: Vec<Rc<RefCell<Wallpaper>>>,
     fps: Duration,
     effect: Effect,
     img: MmappedBytes,
@@ -28,7 +29,7 @@ pub struct TransitionAnimator {
 
 impl TransitionAnimator {
     pub fn new(
-        mut wallpapers: Vec<Arc<Wallpaper>>,
+        mut wallpapers: Vec<Rc<RefCell<Wallpaper>>>,
         transition: &ipc::Transition,
         img_req: ImgReq,
         animation: Option<Animation>,
@@ -38,10 +39,11 @@ impl TransitionAnimator {
             return None;
         }
         for w in wallpapers.iter_mut() {
-            w.set_img_info(BgImg::Img(path.str().to_string()));
+            w.borrow_mut()
+                .set_img_info(BgImg::Img(path.str().to_string()));
         }
 
-        let expect = wallpapers[0].get_dimensions();
+        let expect = wallpapers[0].borrow().get_dimensions();
         if dim != expect {
             error!("image has wrong dimensions! Expect {expect:?}, actual {dim:?}");
             return None;
@@ -102,7 +104,7 @@ impl TransitionAnimator {
 
 pub struct ImageAnimator {
     now: Instant,
-    pub wallpapers: Vec<Arc<Wallpaper>>,
+    pub wallpapers: Vec<Rc<RefCell<Wallpaper>>>,
     animation: Animation,
     decompressor: Decompressor,
     i: usize,
@@ -132,7 +134,7 @@ impl ImageAnimator {
 
         let mut j = 0;
         while j < wallpapers.len() {
-            let result = wallpapers[j].canvas_change(|canvas| {
+            let result = wallpapers[j].borrow_mut().canvas_change(|canvas| {
                 decompressor.decompress(frame, canvas, globals::pixel_format())
             });
 

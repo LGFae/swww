@@ -1,10 +1,7 @@
 use common::ipc::{BgImg, BgInfo, Scale};
 use log::{debug, error, warn};
 
-use std::{
-    num::NonZeroI32,
-    sync::{atomic::AtomicBool, Arc, Condvar, Mutex, RwLock},
-};
+use std::{cell::RefCell, num::NonZeroI32, rc::Rc, sync::atomic::AtomicBool};
 
 use crate::wayland::{
     bump_pool::BumpPool,
@@ -16,9 +13,8 @@ use crate::wayland::{
 };
 
 struct FrameCallbackHandler {
-    cvar: Condvar,
-    done: Mutex<bool>,
-    callback: Mutex<ObjectId>,
+    done: bool,
+    callback: ObjectId,
 }
 
 impl FrameCallbackHandler {
@@ -26,16 +22,15 @@ impl FrameCallbackHandler {
         let callback = globals::object_create(WlDynObj::Callback);
         wl_surface::req::frame(surface, callback).unwrap();
         FrameCallbackHandler {
-            cvar: Condvar::new(),
-            done: Mutex::new(true), // we do not have to wait for the first frame
-            callback: Mutex::new(callback),
+            done: true, // we do not have to wait for the first frame
+            callback,
         }
     }
 
-    fn request_frame_callback(&self, surface: ObjectId) {
+    fn request_frame_callback(&mut self, surface: ObjectId) {
         let callback = globals::object_create(WlDynObj::Callback);
         wl_surface::req::frame(surface, callback).unwrap();
-        *self.callback.lock().unwrap() = callback;
+        self.callback = callback;
     }
 }
 
@@ -72,14 +67,14 @@ pub(super) struct Wallpaper {
     wp_fractional: Option<ObjectId>,
     layer_surface: ObjectId,
 
-    inner: RwLock<WallpaperInner>,
-    inner_staging: Mutex<WallpaperInner>,
+    inner: WallpaperInner,
+    inner_staging: WallpaperInner,
 
     pub configured: AtomicBool,
 
     frame_callback_handler: FrameCallbackHandler,
-    img: Mutex<BgImg>,
-    pool: Mutex<BumpPool>,
+    img: BgImg,
+    pool: BumpPool,
 }
 
 impl std::cmp::PartialEq for Wallpaper {
@@ -97,8 +92,8 @@ impl Wallpaper {
         wp_fractional: Option<ObjectId>,
         layer_surface: ObjectId,
     ) -> Self {
-        let inner = RwLock::default();
-        let inner_staging = Mutex::default();
+        let inner = WallpaperInner::default();
+        let inner_staging = WallpaperInner::default();
 
         // Configure the layer surface
         zwlr_layer_surface_v1::req::set_anchor(layer_surface, 15).unwrap();
@@ -115,7 +110,7 @@ impl Wallpaper {
         // commit so that the compositor send the initial configuration
         wl_surface::req::commit(wl_surface).unwrap();
 
-        let pool = Mutex::new(BumpPool::new(256, 256));
+        let pool = BumpPool::new(256, 256);
 
         Self {
             output,
@@ -128,98 +123,101 @@ impl Wallpaper {
             inner_staging,
             configured: AtomicBool::new(false),
             frame_callback_handler,
-            img: Mutex::new(BgImg::Color([0, 0, 0])),
+            img: BgImg::Color([0, 0, 0]),
             pool,
         }
     }
 
     pub fn get_bg_info(&self) -> BgInfo {
-        let inner = self.inner.read().unwrap();
         BgInfo {
-            name: inner.name.clone().unwrap_or("?".to_string()),
-            dim: (inner.width.get() as u32, inner.height.get() as u32),
-            scale_factor: inner.scale_factor,
-            img: self.img.lock().unwrap().clone(),
+            name: self.inner.name.clone().unwrap_or("?".to_string()),
+            dim: (
+                self.inner.width.get() as u32,
+                self.inner.height.get() as u32,
+            ),
+            scale_factor: self.inner.scale_factor,
+            img: self.img.clone(),
             pixel_format: globals::pixel_format(),
         }
     }
 
-    pub fn set_name(&self, name: String) {
+    pub fn set_name(&mut self, name: String) {
         debug!("Output {} name: {name}", self.output_name);
-        self.inner_staging.lock().unwrap().name = Some(name);
+        self.inner_staging.name = Some(name);
     }
 
-    pub fn set_desc(&self, desc: String) {
+    pub fn set_desc(&mut self, desc: String) {
         debug!("Output {} description: {desc}", self.output_name);
-        self.inner_staging.lock().unwrap().desc = Some(desc)
+        self.inner_staging.desc = Some(desc)
     }
 
-    pub fn set_dimensions(&self, width: i32, height: i32) {
-        let mut lock = self.inner_staging.lock().unwrap();
-        let (width, height) = lock.scale_factor.div_dim(width, height);
+    pub fn set_dimensions(&mut self, width: i32, height: i32) {
+        let staging = &mut self.inner_staging;
+        let (width, height) = staging.scale_factor.div_dim(width, height);
 
         match NonZeroI32::new(width) {
-            Some(width) => lock.width = width,
+            Some(width) => staging.width = width,
             None => {
                 error!(
                     "dividing width {width} by scale_factor {} results in width 0!",
-                    lock.scale_factor
+                    staging.scale_factor
                 )
             }
         }
 
         match NonZeroI32::new(height) {
-            Some(height) => lock.height = height,
+            Some(height) => staging.height = height,
             None => {
                 error!(
                     "dividing height {height} by scale_factor {} results in height 0!",
-                    lock.scale_factor
+                    staging.scale_factor
                 )
             }
         }
     }
 
-    pub fn set_transform(&self, transform: u32) {
-        self.inner_staging.lock().unwrap().transform = transform;
+    pub fn set_transform(&mut self, transform: u32) {
+        self.inner_staging.transform = transform;
     }
 
-    pub fn set_scale(&self, scale: Scale) {
-        let mut lock = self.inner_staging.lock().unwrap();
-        if matches!(lock.scale_factor, Scale::Fractional(_)) && matches!(scale, Scale::Whole(_)) {
+    pub fn set_scale(&mut self, scale: Scale) {
+        let staging = &mut self.inner_staging;
+        if matches!(staging.scale_factor, Scale::Fractional(_)) && matches!(scale, Scale::Whole(_))
+        {
             return;
         }
 
-        let (old_width, old_height) = lock
+        let (old_width, old_height) = staging
             .scale_factor
-            .mul_dim(lock.width.get(), lock.height.get());
+            .mul_dim(staging.width.get(), staging.height.get());
 
-        lock.scale_factor = scale;
-        let (width, height) = lock.scale_factor.div_dim(old_width, old_height);
+        staging.scale_factor = scale;
+        let (width, height) = staging.scale_factor.div_dim(old_width, old_height);
         match NonZeroI32::new(width) {
-            Some(width) => lock.width = width,
+            Some(width) => staging.width = width,
             None => {
                 error!(
                     "dividing width {width} by scale_factor {} results in width 0!",
-                    lock.scale_factor
+                    staging.scale_factor
                 )
             }
         }
 
         match NonZeroI32::new(height) {
-            Some(height) => lock.height = height,
+            Some(height) => staging.height = height,
             None => {
                 error!(
                     "dividing height {height} by scale_factor {} results in height 0!",
-                    lock.scale_factor
+                    staging.scale_factor
                 )
             }
         }
     }
 
-    pub fn commit_surface_changes(&self, use_cache: bool) -> bool {
+    pub fn commit_surface_changes(&mut self, use_cache: bool) -> bool {
         use wl_output::transform;
-        let mut inner = self.inner.write().unwrap();
-        let staging = self.inner_staging.lock().unwrap();
+        let inner = &mut self.inner;
+        let staging = &self.inner_staging;
 
         if inner.name != staging.name && use_cache {
             let name = staging.name.clone().unwrap_or("".to_string());
@@ -269,8 +267,6 @@ impl Wallpaper {
         inner.height = height;
 
         let scale_factor = staging.scale_factor;
-        drop(inner);
-        drop(staging);
 
         zwlr_layer_surface_v1::req::set_size(
             self.layer_surface,
@@ -280,7 +276,7 @@ impl Wallpaper {
         .unwrap();
 
         let (w, h) = scale_factor.mul_dim(width.get(), height.get());
-        self.pool.lock().unwrap().resize(w, h);
+        self.pool.resize(w, h);
 
         self.frame_callback_handler
             .request_frame_callback(self.wl_surface);
@@ -291,7 +287,7 @@ impl Wallpaper {
     }
 
     pub(super) fn has_name(&self, name: &str) -> bool {
-        match self.inner.read().unwrap().name.as_ref() {
+        match self.inner.name.as_ref() {
             Some(n) => n == name,
             None => false,
         }
@@ -314,22 +310,20 @@ impl Wallpaper {
     }
 
     pub(super) fn try_set_buffer_release_flag(
-        &self,
+        &mut self,
         buffer: ObjectId,
-        arc_strong_count: usize,
+        rc_strong_count: usize,
     ) -> bool {
         self.pool
-            .lock()
-            .unwrap()
-            .set_buffer_release_flag(buffer, arc_strong_count != 1)
+            .set_buffer_release_flag(buffer, rc_strong_count != 1)
     }
 
     pub fn is_draw_ready(&self) -> bool {
-        *self.frame_callback_handler.done.lock().unwrap()
+        self.frame_callback_handler.done
     }
 
     pub(super) fn has_callback(&self, callback: ObjectId) -> bool {
-        *self.frame_callback_handler.callback.lock().unwrap() == callback
+        self.frame_callback_handler.callback == callback
     }
 
     pub(super) fn has_fractional_scale(&self, fractional_scale: ObjectId) -> bool {
@@ -337,26 +331,25 @@ impl Wallpaper {
     }
 
     pub(super) fn get_dimensions(&self) -> (u32, u32) {
-        let inner = self.inner.read().unwrap();
-        let dim = inner
+        let dim = self
+            .inner
             .scale_factor
-            .mul_dim(inner.width.get(), inner.height.get());
+            .mul_dim(self.inner.width.get(), self.inner.height.get());
         (dim.0 as u32, dim.1 as u32)
     }
 
-    pub(super) fn canvas_change<F, T>(&self, f: F) -> T
+    pub(super) fn canvas_change<F, T>(&mut self, f: F) -> T
     where
         F: FnOnce(&mut [u8]) -> T,
     {
-        f(self.pool.lock().unwrap().get_drawable())
+        f(self.pool.get_drawable())
     }
 
-    pub(super) fn frame_callback_completed(&self) {
-        *self.frame_callback_handler.done.lock().unwrap() = true;
-        self.frame_callback_handler.cvar.notify_all();
+    pub(super) fn frame_callback_completed(&mut self) {
+        self.frame_callback_handler.done = true;
     }
 
-    pub(super) fn clear(&self, color: [u8; 3]) {
+    pub(super) fn clear(&mut self, color: [u8; 3]) {
         self.canvas_change(|canvas| {
             for pixel in canvas.chunks_exact_mut(globals::pixel_format().channels().into()) {
                 pixel[0..3].copy_from_slice(&color);
@@ -364,18 +357,14 @@ impl Wallpaper {
         })
     }
 
-    pub(super) fn set_img_info(&self, img_info: BgImg) {
-        debug!(
-            "output {:?} - drawing: {}",
-            self.inner.read().unwrap().name,
-            img_info
-        );
-        *self.img.lock().unwrap() = img_info;
+    pub(super) fn set_img_info(&mut self, img_info: BgImg) {
+        debug!("output {:?} - drawing: {}", self.inner.name, img_info);
+        self.img = img_info;
     }
 }
 
 /// attaches all pending buffers and damages all surfaces with one single request
-pub(crate) fn attach_buffers_and_damage_surfaces(wallpapers: &[Arc<Wallpaper>]) {
+pub(crate) fn attach_buffers_and_damage_surfaces(wallpapers: &[Rc<RefCell<Wallpaper>>]) {
     #[rustfmt::skip]
     // Note this is little-endian specific
     const MSG: [u8; 56] = [
@@ -397,22 +386,14 @@ pub(crate) fn attach_buffers_and_damage_surfaces(wallpapers: &[Arc<Wallpaper>]) 
     let msg: Box<[u8]> = wallpapers
         .iter()
         .flat_map(|wallpaper| {
-            let mut done = wallpaper.frame_callback_handler.done.lock().unwrap();
-            while !*done {
-                //debug!("waiting for frame callback");
-                done = wallpaper.frame_callback_handler.cvar.wait(done).unwrap();
-            }
-            *done = false;
-            drop(done);
-
+            let mut wallpaper = wallpaper.borrow_mut();
             let mut msg = MSG;
 
-            let buf = wallpaper.pool.lock().unwrap().get_commitable_buffer();
-            let inner = wallpaper.inner.read().unwrap();
+            let buf = wallpaper.pool.get_commitable_buffer();
+            let inner = &wallpaper.inner;
             let (width, height) = inner
                 .scale_factor
                 .mul_dim(inner.width.get(), inner.height.get());
-            drop(inner);
 
             // attach
             msg[0..4].copy_from_slice(&wallpaper.wl_surface.get().to_ne_bytes());
@@ -425,7 +406,7 @@ pub(crate) fn attach_buffers_and_damage_surfaces(wallpapers: &[Arc<Wallpaper>]) 
 
             // frame callback
             let callback = globals::object_create(WlDynObj::Callback);
-            *wallpaper.frame_callback_handler.callback.lock().unwrap() = callback;
+            wallpaper.frame_callback_handler.callback = callback;
             msg[44..48].copy_from_slice(&wallpaper.wl_surface.get().to_ne_bytes());
             msg[52..56].copy_from_slice(&callback.get().to_ne_bytes());
             msg
@@ -435,7 +416,7 @@ pub(crate) fn attach_buffers_and_damage_surfaces(wallpapers: &[Arc<Wallpaper>]) 
 }
 
 /// commits multiple wallpapers at once with a single message through the socket
-pub(crate) fn commit_wallpapers(wallpapers: &[Arc<Wallpaper>]) {
+pub(crate) fn commit_wallpapers(wallpapers: &[Rc<RefCell<Wallpaper>>]) {
     // Note this is little-endian specific
     #[rustfmt::skip]
     const MSG: [u8; 8] = [
@@ -447,7 +428,7 @@ pub(crate) fn commit_wallpapers(wallpapers: &[Arc<Wallpaper>]) {
         .iter()
         .flat_map(|wallpaper| {
             let mut msg = MSG;
-            msg[0..4].copy_from_slice(&wallpaper.wl_surface.get().to_ne_bytes());
+            msg[0..4].copy_from_slice(&wallpaper.borrow().wl_surface.get().to_ne_bytes());
             msg
         })
         .collect();
@@ -470,17 +451,11 @@ impl Drop for Wallpaper {
             error!("error destroying zwlr_layer_surface_v1: {e:?}");
         }
 
-        if let Err(e) = wl_surface::req::destroy(self.wl_surface) {
-            error!("error destroying wl_surface: {e:?}");
-        }
-
-        if let Ok(read) = self.inner.read() {
-            debug!(
-                "Destroyed output {} - {}",
-                read.name.as_ref().unwrap_or(&"?".to_string()),
-                read.desc.as_ref().unwrap_or(&"?".to_string())
-            );
-        }
+        debug!(
+            "Destroyed output {} - {}",
+            self.inner.name.as_ref().unwrap_or(&"?".to_string()),
+            self.inner.desc.as_ref().unwrap_or(&"?".to_string())
+        );
     }
 }
 
