@@ -19,7 +19,7 @@ mod anim_barrier;
 mod transitions;
 use transitions::Transition;
 
-use self::anim_barrier::ArcAnimBarrier;
+use self::{anim_barrier::ArcAnimBarrier, transitions::Effect};
 
 ///The default thread stack size of 2MiB is way too overkill for our purposes
 const STACK_SIZE: usize = 1 << 17; //128KiB
@@ -63,7 +63,9 @@ impl Animator {
                     return;
                 }
 
-                Transition::new(wallpapers, dim, transition).execute(img);
+                let transition = Transition::new(wallpapers, dim, transition);
+                let mut effect = Effect::new(&transition);
+                transition.execute(&mut effect, img);
             })
             .unwrap(); // builder only fails if name contains null bytes
     }
