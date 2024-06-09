@@ -28,12 +28,13 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
+    time::Duration,
 };
 
 use common::ipc::{Answer, BgInfo, ImageReq, IpcSocket, RequestRecv, RequestSend, Scale, Server};
 use common::mmap::MmappedStr;
 
-use animations::Animator;
+use animations::{ImageAnimator, TransitionAnimator};
 
 // We need this because this might be set by signals, so we can't keep it in the daemon
 static EXIT: AtomicBool = AtomicBool::new(false);
@@ -52,9 +53,11 @@ extern "C" fn signal_handler(_s: libc::c_int) {
 
 struct Daemon {
     wallpapers: Vec<Arc<Wallpaper>>,
-    animator: Animator,
+    transition_animators: Vec<TransitionAnimator>,
+    image_animators: Vec<ImageAnimator>,
     use_cache: bool,
     fractional_scale_manager: Option<(ObjectId, NonZeroU32)>,
+    poll_time: i32,
 }
 
 impl Daemon {
@@ -69,9 +72,11 @@ impl Daemon {
 
         Self {
             wallpapers,
-            animator: Animator::new(),
+            transition_animators: Vec::new(),
+            image_animators: Vec::new(),
             use_cache: !no_cache,
             fractional_scale_manager,
+            poll_time: -1,
         }
     }
 
@@ -135,19 +140,13 @@ impl Daemon {
         let answer = match request {
             RequestRecv::Clear(clear) => {
                 let wallpapers = self.find_wallpapers_by_names(&clear.outputs);
-                std::thread::Builder::new()
-                    .stack_size(1 << 15)
-                    .name("clear".to_string())
-                    .spawn(move || {
-                        crate::wallpaper::stop_animations(&wallpapers);
-                        for wallpaper in &wallpapers {
-                            wallpaper.set_img_info(common::ipc::BgImg::Color(clear.color));
-                            wallpaper.clear(clear.color);
-                        }
-                        crate::wallpaper::attach_buffers_and_damange_surfaces(&wallpapers);
-                        crate::wallpaper::commit_wallpapers(&wallpapers);
-                    })
-                    .unwrap(); // builder only failed if the name contains null bytes
+                self.stop_animations(&wallpapers);
+                for wallpaper in &wallpapers {
+                    wallpaper.set_img_info(common::ipc::BgImg::Color(clear.color));
+                    wallpaper.clear(clear.color);
+                }
+                crate::wallpaper::attach_buffers_and_damage_surfaces(&wallpapers);
+                crate::wallpaper::commit_wallpapers(&wallpapers);
                 Answer::Ok
             }
             RequestRecv::Ping => Answer::Ping(
@@ -162,18 +161,29 @@ impl Daemon {
             RequestRecv::Query => Answer::Info(self.wallpapers_info()),
             RequestRecv::Img(ImageReq {
                 transition,
-                imgs,
-                outputs,
-                animations,
+                mut imgs,
+                mut outputs,
+                mut animations,
             }) => {
-                let mut used_wallpapers = Vec::new();
-                for names in outputs.iter() {
-                    let wallpapers = self.find_wallpapers_by_names(names);
-                    crate::wallpaper::stop_animations(&wallpapers);
-                    used_wallpapers.push(wallpapers);
+                while !imgs.is_empty() && !outputs.is_empty() {
+                    let names = outputs.pop().unwrap();
+                    let img = imgs.pop().unwrap();
+                    let animation = if let Some(ref mut animations) = animations {
+                        animations.pop()
+                    } else {
+                        None
+                    };
+                    let wallpapers = self.find_wallpapers_by_names(&names);
+                    self.stop_animations(&wallpapers);
+                    if let Some(mut transition) =
+                        TransitionAnimator::new(wallpapers, &transition, img, animation)
+                    {
+                        transition.frame();
+                        self.transition_animators.push(transition);
+                    }
+                    self.poll_time = 0;
                 }
-                self.animator
-                    .transition(transition, imgs, animations, used_wallpapers)
+                Answer::Ok
             }
         };
         if let Err(e) = answer.send(&stream) {
@@ -198,6 +208,72 @@ impl Daemon {
                 None
             })
             .collect()
+    }
+
+    fn draw(&mut self) {
+        self.poll_time = -1;
+
+        let mut i = 0;
+        while i < self.transition_animators.len() {
+            let animator = &mut self.transition_animators[i];
+            if animator.wallpapers.iter().all(|w| w.is_draw_ready()) {
+                let time = animator.time_to_draw();
+                if time > Duration::from_micros(1200) {
+                    self.poll_time = 1;
+                    i += 1;
+                    continue;
+                }
+
+                if !time.is_zero() {
+                    spin_sleep(time);
+                }
+
+                wallpaper::attach_buffers_and_damage_surfaces(&animator.wallpapers);
+                wallpaper::commit_wallpapers(&animator.wallpapers);
+                animator.updt_time();
+                if animator.frame() {
+                    let animator = self.transition_animators.swap_remove(i);
+                    if let Some(anim) = animator.into_image_animator() {
+                        self.image_animators.push(anim);
+                    }
+                    continue;
+                }
+            }
+            i += 1;
+        }
+
+        self.image_animators.retain(|a| !a.wallpapers.is_empty());
+        for animator in &mut self.image_animators {
+            if animator.wallpapers.iter().all(|w| w.is_draw_ready()) {
+                let time = animator.time_to_draw();
+                if time > Duration::from_micros(1200) {
+                    self.poll_time = 1;
+                    continue;
+                }
+
+                if !time.is_zero() {
+                    spin_sleep(time);
+                }
+
+                wallpaper::attach_buffers_and_damage_surfaces(&animator.wallpapers);
+                wallpaper::commit_wallpapers(&animator.wallpapers);
+                animator.updt_time();
+                animator.frame();
+            }
+        }
+    }
+
+    fn stop_animations(&mut self, wallpapers: &[Arc<Wallpaper>]) {
+        self.transition_animators
+            .iter_mut()
+            .for_each(|t| t.wallpapers.retain(|w| !wallpapers.contains(w)));
+        self.transition_animators
+            .retain(|t| !t.wallpapers.is_empty());
+
+        self.image_animators
+            .iter_mut()
+            .for_each(|t| t.wallpapers.retain(|w| !wallpapers.contains(w)));
+        self.image_animators.retain(|a| !a.wallpapers.is_empty());
     }
 }
 
@@ -270,6 +346,7 @@ impl wayland::interfaces::wl_output::EvHandler for Daemon {
         for wallpaper in self.wallpapers.iter() {
             if wallpaper.has_output(sender_id) {
                 wallpaper.commit_surface_changes(self.use_cache);
+                self.stop_animations(&[wallpaper.clone()]);
                 break;
             }
         }
@@ -347,6 +424,7 @@ impl wayland::interfaces::wl_callback::EvHandler for Daemon {
         for wallpaper in self.wallpapers.iter() {
             if wallpaper.has_callback(sender_id) {
                 wallpaper.frame_callback_completed();
+                self.draw();
                 break;
             }
         }
@@ -376,7 +454,9 @@ impl wayland::interfaces::wp_fractional_scale_v1::EvHandler for Daemon {
                 match NonZeroI32::new(scale as i32) {
                     Some(factor) => {
                         wallpaper.set_scale(Scale::Fractional(factor));
-                        wallpaper.commit_surface_changes(self.use_cache);
+                        if wallpaper.commit_surface_changes(self.use_cache) {
+                            self.stop_animations(&[wallpaper.clone()]);
+                        }
                     }
                     None => error!("received scale factor of 0 from compositor"),
                 }
@@ -423,7 +503,7 @@ fn main() -> Result<(), String> {
     while !should_daemon_exit() {
         use wayland::{interfaces::*, wire, WlDynObj};
 
-        if let Err(e) = poll(&mut fds, -1) {
+        if let Err(e) = poll(&mut fds, daemon.poll_time) {
             match e {
                 rustix::io::Errno::INTR => continue,
                 _ => return Err(format!("failed to poll file descriptors: {e:?}")),
@@ -474,20 +554,10 @@ fn main() -> Result<(), String> {
                 Err(e) => return Err(format!("failed to accept incoming connection: {e}")),
             }
         }
-    }
-    crate::wallpaper::stop_animations(&daemon.wallpapers);
 
-    // wait for the animation threads to finish.
-    while !daemon.wallpapers.is_empty() {
-        // When all animations finish, Arc's strong count will be exactly 1
-        daemon.wallpapers.retain(|w| Arc::strong_count(w) > 1);
-        // set all frame callbacks as completed, otherwise the animation threads might deadlock on
-        // the conditional variable
-        for wallpaper in &daemon.wallpapers {
-            wallpaper.frame_callback_completed();
+        if daemon.poll_time > -1 {
+            daemon.draw();
         }
-        // yield to waste less cpu
-        std::thread::yield_now();
     }
 
     drop(daemon);

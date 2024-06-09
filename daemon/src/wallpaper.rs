@@ -3,10 +3,7 @@ use log::{debug, error, warn};
 
 use std::{
     num::NonZeroI32,
-    sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
-        Arc, Condvar, Mutex, RwLock,
-    },
+    sync::{atomic::AtomicBool, Arc, Condvar, Mutex, RwLock},
 };
 
 use crate::wayland::{
@@ -17,16 +14,6 @@ use crate::wayland::{
     },
     ObjectId, WlDynObj,
 };
-
-#[derive(Debug)]
-struct AnimationState {
-    id: AtomicUsize,
-}
-
-#[derive(Debug)]
-pub(super) struct AnimationToken {
-    id: usize,
-}
 
 struct FrameCallbackHandler {
     cvar: Condvar,
@@ -88,12 +75,17 @@ pub(super) struct Wallpaper {
     inner: RwLock<WallpaperInner>,
     inner_staging: Mutex<WallpaperInner>,
 
-    animation_state: AnimationState,
     pub configured: AtomicBool,
 
     frame_callback_handler: FrameCallbackHandler,
     img: Mutex<BgImg>,
     pool: Mutex<BumpPool>,
+}
+
+impl std::cmp::PartialEq for Wallpaper {
+    fn eq(&self, other: &Self) -> bool {
+        self.output_name == other.output_name
+    }
 }
 
 impl Wallpaper {
@@ -134,9 +126,6 @@ impl Wallpaper {
             layer_surface,
             inner,
             inner_staging,
-            animation_state: AnimationState {
-                id: AtomicUsize::new(0),
-            },
             configured: AtomicBool::new(false),
             frame_callback_handler,
             img: Mutex::new(BgImg::Color([0, 0, 0])),
@@ -227,7 +216,7 @@ impl Wallpaper {
         }
     }
 
-    pub fn commit_surface_changes(&self, use_cache: bool) {
+    pub fn commit_surface_changes(&self, use_cache: bool) -> bool {
         use wl_output::transform;
         let mut inner = self.inner.write().unwrap();
         let staging = self.inner_staging.lock().unwrap();
@@ -274,9 +263,8 @@ impl Wallpaper {
         inner.name.clone_from(&staging.name);
         inner.desc.clone_from(&staging.desc);
         if (inner.width, inner.height) == (width, height) {
-            return;
+            return false;
         }
-        self.stop_animations();
         inner.width = width;
         inner.height = height;
 
@@ -299,6 +287,7 @@ impl Wallpaper {
         wl_surface::req::commit(self.wl_surface).unwrap();
         self.configured
             .store(true, std::sync::atomic::Ordering::Release);
+        true
     }
 
     pub(super) fn has_name(&self, name: &str) -> bool {
@@ -335,19 +324,16 @@ impl Wallpaper {
             .set_buffer_release_flag(buffer, arc_strong_count != 1)
     }
 
+    pub fn is_draw_ready(&self) -> bool {
+        *self.frame_callback_handler.done.lock().unwrap()
+    }
+
     pub(super) fn has_callback(&self, callback: ObjectId) -> bool {
         *self.frame_callback_handler.callback.lock().unwrap() == callback
     }
 
     pub(super) fn has_fractional_scale(&self, fractional_scale: ObjectId) -> bool {
         self.wp_fractional.is_some_and(|f| f == fractional_scale)
-    }
-
-    pub(super) fn has_animation_id(&self, token: &AnimationToken) -> bool {
-        self.animation_state
-            .id
-            .load(std::sync::atomic::Ordering::Acquire)
-            == token.id
     }
 
     pub(super) fn get_dimensions(&self) -> (u32, u32) {
@@ -365,18 +351,9 @@ impl Wallpaper {
         f(self.pool.lock().unwrap().get_drawable())
     }
 
-    pub(super) fn create_animation_token(&self) -> AnimationToken {
-        let id = self.animation_state.id.load(Ordering::Acquire);
-        AnimationToken { id }
-    }
-
     pub(super) fn frame_callback_completed(&self) {
         *self.frame_callback_handler.done.lock().unwrap() = true;
         self.frame_callback_handler.cvar.notify_all();
-    }
-
-    fn stop_animations(&self) {
-        self.animation_state.id.fetch_add(1, Ordering::AcqRel);
     }
 
     pub(super) fn clear(&self, color: [u8; 3]) {
@@ -397,15 +374,8 @@ impl Wallpaper {
     }
 }
 
-/// stops all animations for the passed wallpapers
-pub(crate) fn stop_animations(wallpapers: &[Arc<Wallpaper>]) {
-    wallpapers
-        .iter()
-        .for_each(|wallpaper| wallpaper.stop_animations());
-}
-
 /// attaches all pending buffers and damages all surfaces with one single request
-pub(crate) fn attach_buffers_and_damange_surfaces(wallpapers: &[Arc<Wallpaper>]) {
+pub(crate) fn attach_buffers_and_damage_surfaces(wallpapers: &[Arc<Wallpaper>]) {
     #[rustfmt::skip]
     // Note this is little-endian specific
     const MSG: [u8; 56] = [

@@ -1,108 +1,27 @@
-use std::{
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{sync::Arc, time::Instant};
 
-use common::ipc::{Position, TransitionType};
-use log::debug;
-
-use crate::{
-    wallpaper::{AnimationToken, Wallpaper},
-    wayland::globals,
-};
+use crate::{wallpaper::Wallpaper, wayland::globals};
+use common::ipc::{Transition, TransitionType};
 
 use keyframe::{
     functions::BezierCurve, keyframes, mint::Vector2, num_traits::Pow, AnimationSequence,
 };
 
-pub(super) struct Transition<'a> {
-    animation_tokens: Vec<AnimationToken>,
-    wallpapers: &'a mut Vec<Arc<Wallpaper>>,
-    dimensions: (u32, u32),
-    transition_type: TransitionType,
-    duration: f32,
-    step: u8,
-    fps: Duration,
-    angle: f64,
-    pos: Position,
-    bezier: BezierCurve,
-    wave: (f32, f32),
-    invert_y: bool,
-}
-
-/// All transitions return whether or not they completed
-impl<'a> Transition<'a> {
-    pub(super) fn new(
-        wallpapers: &'a mut Vec<Arc<Wallpaper>>,
-        dimensions: (u32, u32),
-        transition: &common::ipc::Transition,
-    ) -> Self {
-        Transition {
-            animation_tokens: wallpapers
-                .iter()
-                .map(|w| w.create_animation_token())
-                .collect(),
-            wallpapers,
-            dimensions,
-            transition_type: transition.transition_type,
-            duration: transition.duration,
-            step: transition.step.get(),
-            fps: Duration::from_nanos(1_000_000_000 / transition.fps as u64),
-            angle: transition.angle,
-            pos: transition.pos.clone(),
-            bezier: BezierCurve::from(
-                Vector2 {
-                    x: transition.bezier.0,
-                    y: transition.bezier.1,
-                },
-                Vector2 {
-                    x: transition.bezier.2,
-                    y: transition.bezier.3,
-                },
-            ),
-            wave: transition.wave,
-            invert_y: transition.invert_y,
-        }
-    }
-
-    pub(super) fn execute(mut self, effect: &mut Effect, new_img: &[u8]) {
-        debug!("Starting transitions");
-
-        while !effect.run(&mut self, new_img) {}
-        if !matches!(
-            self.transition_type,
-            TransitionType::None | TransitionType::Simple
-        ) {
-            self.step = 4 + self.step / 4;
-            Simple::new().run(&mut self, new_img);
-        }
-        debug!("Transitions finished");
-    }
-
-    fn updt_wallpapers(&mut self, now: &mut Instant) {
-        let mut i = 0;
-        while i < self.wallpapers.len() {
-            let token = &self.animation_tokens[i];
-            if !self.wallpapers[i].has_animation_id(token) {
-                self.wallpapers.swap_remove(i);
-                self.animation_tokens.swap_remove(i);
-                continue;
-            }
-            i += 1;
-        }
-        crate::wallpaper::attach_buffers_and_damange_surfaces(self.wallpapers);
-        let timeout = self.fps.saturating_sub(now.elapsed());
-        crate::spin_sleep(timeout);
-        crate::wallpaper::commit_wallpapers(self.wallpapers);
-        *now = Instant::now();
-    }
-
-    fn bezier_seq(&self, start: f32, end: f32) -> (AnimationSequence<f32>, Instant) {
-        (
-            keyframes![(start, 0.0, self.bezier), (end, self.duration, self.bezier)],
-            Instant::now(),
-        )
-    }
+fn bezier_seq(transition: &Transition, start: f32, end: f32) -> (AnimationSequence<f32>, Instant) {
+    let bezier = BezierCurve::from(
+        Vector2 {
+            x: transition.bezier.0,
+            y: transition.bezier.1,
+        },
+        Vector2 {
+            x: transition.bezier.2,
+            y: transition.bezier.3,
+        },
+    );
+    (
+        keyframes![(start, 0.0, bezier), (end, transition.duration, bezier)],
+        Instant::now(),
+    )
 }
 
 #[inline(always)]
@@ -122,13 +41,10 @@ impl None {
     fn new() -> Self {
         Self
     }
-    fn run(&mut self, transition: &mut Transition, img: &[u8]) -> bool {
-        transition
-            .wallpapers
+    fn run(&mut self, wallpapers: &mut [Arc<Wallpaper>], img: &[u8]) -> bool {
+        wallpapers
             .iter()
             .for_each(|w| w.canvas_change(|canvas| canvas.copy_from_slice(img)));
-        crate::wallpaper::attach_buffers_and_damange_surfaces(transition.wallpapers);
-        crate::wallpaper::commit_wallpapers(transition.wallpapers);
         true
     }
 }
@@ -145,59 +61,68 @@ pub enum Effect {
 }
 
 impl Effect {
-    pub fn new(transition: &Transition) -> Self {
+    pub fn new(transition: &Transition, dimensions: (u32, u32)) -> Self {
         match transition.transition_type {
-            TransitionType::Simple => Self::Simple(Simple::new()),
+            TransitionType::Simple => Self::Simple(Simple::new(transition.step.get())),
             TransitionType::Fade => Self::Fade(Fade::new(transition)),
-            TransitionType::Outer => Self::Outer(Outer::new(transition)),
-            TransitionType::Wipe => Self::Wipe(Wipe::new(transition)),
-            TransitionType::Grow => Self::Grow(Grow::new(transition)),
-            TransitionType::Wave => Self::Wave(Wave::new(transition)),
+            TransitionType::Outer => Self::Outer(Outer::new(transition, dimensions)),
+            TransitionType::Wipe => Self::Wipe(Wipe::new(transition, dimensions)),
+            TransitionType::Grow => Self::Grow(Grow::new(transition, dimensions)),
+            TransitionType::Wave => Self::Wave(Wave::new(transition, dimensions)),
             TransitionType::None => Self::None(None::new()),
         }
     }
 
-    fn run(&mut self, transition: &mut Transition, img: &[u8]) -> bool {
-        match self {
-            Effect::None(effect) => effect.run(transition, img),
-            Effect::Simple(effect) => effect.run(transition, img),
-            Effect::Fade(effect) => effect.run(transition, img),
-            Effect::Wave(effect) => effect.run(transition, img),
-            Effect::Wipe(effect) => effect.run(transition, img),
-            Effect::Grow(effect) => effect.run(transition, img),
-            Effect::Outer(effect) => effect.run(transition, img),
+    pub fn execute(&mut self, wallpapers: &mut [Arc<Wallpaper>], img: &[u8]) -> bool {
+        let done = match self {
+            Effect::None(effect) => effect.run(wallpapers, img),
+            Effect::Simple(effect) => effect.run(wallpapers, img),
+            Effect::Fade(effect) => effect.run(wallpapers, img),
+            Effect::Wave(effect) => effect.run(wallpapers, img),
+            Effect::Wipe(effect) => effect.run(wallpapers, img),
+            Effect::Grow(effect) => effect.run(wallpapers, img),
+            Effect::Outer(effect) => effect.run(wallpapers, img),
+        };
+        // we only finish for real if we are doing a None or a Simple transition
+        if done {
+            *self = match self {
+                Effect::None(_) | Effect::Simple(_) => return true,
+                Effect::Fade(t) => Effect::Simple(Simple::new((t.step / 4 + 4) as u8)),
+                Effect::Wave(t) => Effect::Simple(Simple::new(t.step / 4 + 4)),
+                Effect::Wipe(t) => Effect::Simple(Simple::new(t.step / 4 + 4)),
+                Effect::Grow(t) => Effect::Simple(Simple::new(t.step / 4 + 4)),
+                Effect::Outer(t) => Effect::Simple(Simple::new(t.step / 4 + 4)),
+            };
+            return false;
         }
+        done
     }
 }
 
 struct Simple {
-    now: Instant,
+    step: u8,
 }
 
 impl Simple {
-    fn new() -> Self {
-        Self {
-            now: Instant::now(),
-        }
+    fn new(step: u8) -> Self {
+        Self { step }
     }
-    fn run(&mut self, transition: &mut Transition, img: &[u8]) -> bool {
-        let step = transition.step;
-        let mut done = false;
-        for wallpaper in transition.wallpapers.iter() {
+    fn run(&mut self, wallpapers: &mut [Arc<Wallpaper>], img: &[u8]) -> bool {
+        let step = self.step;
+        let mut done = true;
+        for wallpaper in wallpapers.iter() {
             wallpaper.canvas_change(|canvas| {
                 for (old, new) in canvas.iter_mut().zip(img) {
                     change_byte(step, old, new);
                 }
-                done = canvas == img;
+                done = done && canvas == img;
             });
         }
-        transition.updt_wallpapers(&mut self.now);
         done
     }
 }
 
 struct Fade {
-    now: Instant,
     start: Instant,
     seq: AnimationSequence<f32>,
     step: u16,
@@ -205,18 +130,12 @@ struct Fade {
 
 impl Fade {
     fn new(transition: &Transition) -> Self {
-        let (seq, start) = transition.bezier_seq(0.0, 1.0);
-        let now = Instant::now();
+        let (seq, start) = bezier_seq(transition, 0.0, 1.0);
         let step = 0;
-        Self {
-            now,
-            start,
-            seq,
-            step,
-        }
+        Self { start, seq, step }
     }
-    fn run(&mut self, transition: &mut Transition, img: &[u8]) -> bool {
-        for wallpaper in transition.wallpapers.iter() {
+    fn run(&mut self, wallpapers: &mut [Arc<Wallpaper>], img: &[u8]) -> bool {
+        for wallpaper in wallpapers.iter() {
             wallpaper.canvas_change(|canvas| {
                 for (old, new) in canvas.iter_mut().zip(img) {
                     let x = *old as u16 * (256 - self.step);
@@ -225,7 +144,6 @@ impl Fade {
                 }
             });
         }
-        transition.updt_wallpapers(&mut self.now);
         self.step = (256.0 * self.seq.now() as f64).trunc() as u16;
         self.seq.advance_to(self.start.elapsed().as_secs_f64());
         self.start.elapsed().as_secs_f64() > self.seq.duration()
@@ -233,7 +151,6 @@ impl Fade {
 }
 
 struct Wave {
-    now: Instant,
     start: Instant,
     seq: AnimationSequence<f32>,
     width: usize,
@@ -247,13 +164,13 @@ struct Wave {
     circle_radius: f64,
     a: f64,
     b: f64,
+    step: u8,
 }
 
 impl Wave {
-    fn new(transition: &Transition) -> Self {
-        let width = transition.dimensions.0;
-        let height = transition.dimensions.1;
-        let now = Instant::now();
+    fn new(transition: &Transition, dimensions: (u32, u32)) -> Self {
+        let width = dimensions.0;
+        let height = dimensions.1;
         let center = (width / 2, height / 2);
         let screen_diag = ((width.pow(2) + height.pow(2)) as f64).sqrt();
 
@@ -269,12 +186,12 @@ impl Wave {
         let max_offset = circle_radius.pow(2) * 2.0;
         let (width, height) = (width as usize, height as usize);
 
-        let (seq, start) = transition.bezier_seq(offset as f32, max_offset as f32);
+        let (seq, start) = bezier_seq(transition, offset as f32, max_offset as f32);
 
+        let step = transition.step.get();
         let channels = globals::pixel_format().channels() as usize;
         let stride = width * channels;
         Self {
-            now,
             start,
             seq,
             width,
@@ -288,9 +205,10 @@ impl Wave {
             scale_x,
             scale_y,
             circle_radius,
+            step,
         }
     }
-    fn run(&mut self, transition: &mut Transition, img: &[u8]) -> bool {
+    fn run(&mut self, wallpapers: &mut [Arc<Wallpaper>], img: &[u8]) -> bool {
         let Self {
             width,
             height,
@@ -303,6 +221,7 @@ impl Wave {
             circle_radius,
             a,
             b,
+            step,
             ..
         } = *self;
         // graph: https://www.desmos.com/calculator/wunde042es
@@ -319,12 +238,11 @@ impl Wave {
             lhs <= rhs
         };
 
-        let step = transition.step;
         let channels = globals::pixel_format().channels() as usize;
         let offset = self.seq.now() as f64;
         self.seq.advance_to(self.start.elapsed().as_secs_f64());
 
-        for wallpaper in transition.wallpapers.iter() {
+        for wallpaper in wallpapers.iter() {
             wallpaper.canvas_change(|canvas| {
                 // divide in 3 sections: the one we know will not be drawn to, the one we know
                 // WILL be drawn to, and the one we need to do a more expensive check on.
@@ -370,13 +288,11 @@ impl Wave {
             });
         }
 
-        transition.updt_wallpapers(&mut self.now);
         self.start.elapsed().as_secs_f64() > self.seq.duration()
     }
 }
 
 struct Wipe {
-    now: Instant,
     start: Instant,
     seq: AnimationSequence<f32>,
     width: usize,
@@ -386,13 +302,13 @@ struct Wipe {
     circle_radius: f64,
     a: f64,
     b: f64,
+    step: u8,
 }
 
 impl Wipe {
-    fn new(transition: &Transition) -> Self {
-        let width = transition.dimensions.0;
-        let height = transition.dimensions.1;
-        let now = Instant::now();
+    fn new(transition: &Transition, dimensions: (u32, u32)) -> Self {
+        let width = dimensions.0;
+        let height = dimensions.1;
         let center = (width / 2, height / 2);
         let screen_diag = ((width.pow(2) + height.pow(2)) as f64).sqrt();
 
@@ -410,12 +326,12 @@ impl Wipe {
         let b = circle_radius * angle.sin();
 
         let (width, height) = (width as usize, height as usize);
-        let (seq, start) = transition.bezier_seq(offset as f32, max_offset as f32);
+        let (seq, start) = bezier_seq(transition, offset as f32, max_offset as f32);
 
+        let step = transition.step.get();
         let channels = globals::pixel_format().channels() as usize;
         let stride = width * channels;
         Self {
-            now,
             start,
             seq,
             width,
@@ -425,9 +341,10 @@ impl Wipe {
             circle_radius,
             a,
             b,
+            step,
         }
     }
-    fn run(&mut self, transition: &mut Transition, img: &[u8]) -> bool {
+    fn run(&mut self, wallpapers: &mut [Arc<Wallpaper>], img: &[u8]) -> bool {
         let Self {
             width,
             height,
@@ -436,13 +353,13 @@ impl Wipe {
             circle_radius,
             a,
             b,
+            step,
             ..
         } = *self;
-        let step = transition.step;
         let channels = globals::pixel_format().channels() as usize;
         let offset = self.seq.now() as f64;
         self.seq.advance_to(self.start.elapsed().as_secs_f64());
-        for wallpaper in transition.wallpapers.iter() {
+        for wallpaper in wallpapers.iter() {
             wallpaper.canvas_change(|canvas| {
                 // line formula: (x-h)*a + (y-k)*b + C = r^2
                 // https://www.desmos.com/calculator/vpvzk12yar
@@ -463,13 +380,11 @@ impl Wipe {
                 }
             });
         }
-        transition.updt_wallpapers(&mut self.now);
         self.start.elapsed().as_secs_f64() > self.seq.duration()
     }
 }
 
 struct Grow {
-    now: Instant,
     start: Instant,
     seq: AnimationSequence<f32>,
     width: usize,
@@ -478,17 +393,13 @@ struct Grow {
     center_y: usize,
     stride: usize,
     dist_center: f32,
+    step: u8,
 }
 
 impl Grow {
-    fn new(transition: &Transition) -> Self {
-        let (width, height) = (
-            transition.dimensions.0 as f32,
-            transition.dimensions.1 as f32,
-        );
-        let (center_x, center_y) = transition
-            .pos
-            .to_pixel(transition.dimensions, transition.invert_y);
+    fn new(transition: &Transition, dimensions: (u32, u32)) -> Self {
+        let (width, height) = (dimensions.0 as f32, dimensions.1 as f32);
+        let (center_x, center_y) = transition.pos.to_pixel(dimensions, transition.invert_y);
         let dist_center: f32 = 0.0;
         let dist_end: f32 = {
             let mut x = center_x;
@@ -505,12 +416,11 @@ impl Grow {
         let (width, height) = (width as usize, height as usize);
         let (center_x, center_y) = (center_x as usize, center_y as usize);
 
+        let step = transition.step.get();
         let channels = globals::pixel_format().channels() as usize;
         let stride = width * channels;
-        let (seq, start) = transition.bezier_seq(0.0, dist_end);
-        let now = Instant::now();
+        let (seq, start) = bezier_seq(transition, 0.0, dist_end);
         Self {
-            now,
             start,
             seq,
             width,
@@ -519,9 +429,10 @@ impl Grow {
             center_y,
             stride,
             dist_center,
+            step,
         }
     }
-    fn run(&mut self, transition: &mut Transition, img: &[u8]) -> bool {
+    fn run(&mut self, wallpapers: &mut [Arc<Wallpaper>], img: &[u8]) -> bool {
         let Self {
             width,
             height,
@@ -529,12 +440,12 @@ impl Grow {
             center_y,
             stride,
             dist_center,
+            step,
             ..
         } = *self;
-        let step = transition.step;
         let channels = globals::pixel_format().channels() as usize;
 
-        for wallpaper in transition.wallpapers.iter() {
+        for wallpaper in wallpapers.iter() {
             wallpaper.canvas_change(|canvas| {
                 let line_begin = center_y.saturating_sub(dist_center as usize);
                 let line_end = height.min(center_y + dist_center as usize);
@@ -554,7 +465,6 @@ impl Grow {
             });
         }
 
-        transition.updt_wallpapers(&mut self.now);
         self.dist_center = self.seq.now();
         self.seq.advance_to(self.start.elapsed().as_secs_f64());
         self.start.elapsed().as_secs_f64() > self.seq.duration()
@@ -562,7 +472,6 @@ impl Grow {
 }
 
 struct Outer {
-    now: Instant,
     start: Instant,
     seq: AnimationSequence<f32>,
     width: usize,
@@ -571,17 +480,13 @@ struct Outer {
     center_y: usize,
     stride: usize,
     dist_center: f32,
+    step: u8,
 }
 
 impl Outer {
-    fn new(transition: &Transition) -> Self {
-        let (width, height) = (
-            transition.dimensions.0 as f32,
-            transition.dimensions.1 as f32,
-        );
-        let (center_x, center_y) = transition
-            .pos
-            .to_pixel(transition.dimensions, transition.invert_y);
+    fn new(transition: &Transition, dimensions: (u32, u32)) -> Self {
+        let (width, height) = (dimensions.0 as f32, dimensions.1 as f32);
+        let (center_x, center_y) = transition.pos.to_pixel(dimensions, transition.invert_y);
         let dist_center = {
             let mut x = center_x;
             let mut y = center_y;
@@ -596,12 +501,12 @@ impl Outer {
         let (width, height) = (width as usize, height as usize);
         let (center_x, center_y) = (center_x as usize, center_y as usize);
 
+        let step = transition.step.get();
         let channels = globals::pixel_format().channels() as usize;
         let stride = width * channels;
-        let (seq, start) = transition.bezier_seq(dist_center, 0.0);
-        let now = Instant::now();
+        let (seq, start) = bezier_seq(transition, dist_center, 0.0);
         Self {
-            now,
+            step,
             start,
             seq,
             width,
@@ -612,7 +517,7 @@ impl Outer {
             dist_center,
         }
     }
-    fn run(&mut self, transition: &mut Transition, img: &[u8]) -> bool {
+    fn run(&mut self, wallpapers: &mut [Arc<Wallpaper>], img: &[u8]) -> bool {
         let Self {
             width,
             height,
@@ -620,11 +525,11 @@ impl Outer {
             center_y,
             stride,
             dist_center,
+            step,
             ..
         } = *self;
-        let step = transition.step;
         let channels = globals::pixel_format().channels() as usize;
-        for wallpaper in transition.wallpapers.iter() {
+        for wallpaper in wallpapers.iter() {
             wallpaper.canvas_change(|canvas| {
                 // to plot half a circle with radius r, we do sqrt(r^2 - x^2)
                 for line in 0..height {
@@ -645,7 +550,6 @@ impl Outer {
                 }
             });
         }
-        transition.updt_wallpapers(&mut self.now);
         self.dist_center = self.seq.now();
         self.seq.advance_to(self.start.elapsed().as_secs_f64());
         self.start.elapsed().as_secs_f64() > self.seq.duration()
