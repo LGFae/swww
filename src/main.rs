@@ -1,5 +1,5 @@
 use clap::Parser;
-use std::{path::PathBuf, process::Stdio, time::Duration};
+use std::{process::Stdio, time::Duration};
 
 use utils::{
     cache,
@@ -10,7 +10,7 @@ mod imgproc;
 use imgproc::*;
 
 mod cli;
-use cli::{ResizeStrategy, Swww};
+use cli::{CliImage, ResizeStrategy, Swww};
 
 fn main() -> Result<(), String> {
     let swww = Swww::parse();
@@ -137,8 +137,10 @@ fn make_request(args: &Swww) -> Result<Option<RequestSend>, String> {
         Swww::Img(img) => {
             let requested_outputs = split_cmdline_outputs(&img.outputs);
             let (format, dims, outputs) = get_format_dims_and_outputs(&requested_outputs)?;
-            let imgbuf = ImgBuf::new(&img.path)?;
-            let img_request = make_img_request(img, &imgbuf, &dims, format, &outputs)?;
+            // let imgbuf = ImgBuf::new(&img.path)?;
+
+            let img_request = make_img_request(img, &dims, format, &outputs)?;
+
             Ok(Some(RequestSend::Img(img_request)))
         }
         Swww::Init { no_cache, .. } => {
@@ -154,73 +156,97 @@ fn make_request(args: &Swww) -> Result<Option<RequestSend>, String> {
 
 fn make_img_request(
     img: &cli::Img,
-    imgbuf: &ImgBuf,
     dims: &[(u32, u32)],
     pixel_format: ipc::PixelFormat,
     outputs: &[Vec<String>],
 ) -> Result<ipc::Mmap, String> {
-    let img_raw = imgbuf.decode(pixel_format)?;
     let transition = make_transition(img);
     let mut img_req_builder = ipc::ImageRequestBuilder::new(transition);
-    for (&dim, outputs) in dims.iter().zip(outputs) {
-        let path = match img.path.canonicalize() {
-            Ok(p) => p.to_string_lossy().to_string(),
-            Err(e) => {
-                if let Some("-") = img.path.to_str() {
-                    "STDIN".to_string()
-                } else {
-                    return Err(format!("failed no canonicalize image path: {e}"));
-                }
-            }
-        };
 
-        let animation = if !imgbuf.is_animated() {
-            None
-        } else if img.resize == ResizeStrategy::Crop {
-            match cache::load_animation_frames(&img.path, dim, pixel_format) {
-                Ok(Some(animation)) => Some(animation),
-                otherwise => {
-                    if let Err(e) = otherwise {
-                        eprintln!("Error loading cache for {:?}: {e}", img.path);
-                    }
-
-                    Some({
-                        ipc::Animation {
-                            animation: compress_frames(
-                                imgbuf.as_frames()?,
-                                dim,
-                                pixel_format,
-                                make_filter(&img.filter),
-                                img.resize,
-                                &img.fill_color,
-                            )?
+    match &img.image {
+        CliImage::Color(color) => {
+            for (&dim, outputs) in dims.iter().zip(outputs) {
+                img_req_builder.push(
+                    ipc::ImgSend {
+                        img: image::RgbImage::from_pixel(dim.0, dim.1, image::Rgb(*color))
+                            .to_vec()
                             .into_boxed_slice(),
+                        path: format!("0x{:02x}{:02x}{:02x}", color[0], color[1], color[2]),
+                        dim,
+                        format: pixel_format,
+                    },
+                    outputs,
+                    None,
+                );
+            }
+        }
+        CliImage::Path(img_path) => {
+            let imgbuf = ImgBuf::new(img_path)?;
+            let img_raw = imgbuf.decode(pixel_format)?;
+
+            for (&dim, outputs) in dims.iter().zip(outputs) {
+                let path = match img_path.canonicalize() {
+                    Ok(p) => p.to_string_lossy().to_string(),
+                    Err(e) => {
+                        if let Some("-") = img_path.to_str() {
+                            "STDIN".to_string()
+                        } else {
+                            return Err(format!("failed no canonicalize image path: {e}"));
                         }
-                    })
-                }
-            }
-        } else {
-            None
-        };
+                    }
+                };
 
-        let img = match img.resize {
-            ResizeStrategy::No => img_pad(&img_raw, dim, &img.fill_color)?,
-            ResizeStrategy::Crop => img_resize_crop(&img_raw, dim, make_filter(&img.filter))?,
-            ResizeStrategy::Fit => {
-                img_resize_fit(&img_raw, dim, make_filter(&img.filter), &img.fill_color)?
-            }
-        };
+                let animation = if !imgbuf.is_animated() {
+                    None
+                } else if img.resize == ResizeStrategy::Crop {
+                    match cache::load_animation_frames(img_path, dim, pixel_format) {
+                        Ok(Some(animation)) => Some(animation),
+                        otherwise => {
+                            if let Err(e) = otherwise {
+                                eprintln!("Error loading cache for {:?}: {e}", img_path);
+                            }
 
-        img_req_builder.push(
-            ipc::ImgSend {
-                img,
-                path,
-                dim,
-                format: pixel_format,
-            },
-            outputs,
-            animation,
-        );
+                            Some({
+                                ipc::Animation {
+                                    animation: compress_frames(
+                                        imgbuf.as_frames()?,
+                                        dim,
+                                        pixel_format,
+                                        make_filter(&img.filter),
+                                        img.resize,
+                                        &img.fill_color,
+                                    )?
+                                    .into_boxed_slice(),
+                                }
+                            })
+                        }
+                    }
+                } else {
+                    None
+                };
+
+                let img = match img.resize {
+                    ResizeStrategy::No => img_pad(&img_raw, dim, &img.fill_color)?,
+                    ResizeStrategy::Crop => {
+                        img_resize_crop(&img_raw, dim, make_filter(&img.filter))?
+                    }
+                    ResizeStrategy::Fit => {
+                        img_resize_fit(&img_raw, dim, make_filter(&img.filter), &img.fill_color)?
+                    }
+                };
+
+                img_req_builder.push(
+                    ipc::ImgSend {
+                        img,
+                        path,
+                        dim,
+                        format: pixel_format,
+                    },
+                    outputs,
+                    animation,
+                );
+            }
+        }
     }
 
     Ok(img_req_builder.build())
@@ -332,7 +358,7 @@ fn restore_from_cache(requested_outputs: &[String]) -> Result<(), String> {
             .map_err(|e| format!("failed to get previous image path: {e}"))?;
         #[allow(deprecated)]
         if let Err(e) = process_swww_args(&Swww::Img(cli::Img {
-            path: PathBuf::from(img_path),
+            image: cli::parse_image(&img_path)?,
             outputs: output.to_string(),
             no_resize: false,
             resize: ResizeStrategy::Crop,
