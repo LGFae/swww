@@ -217,9 +217,6 @@ to read from stdin instead.
 The images sent will be cached at _$XDG_CACHE_HOME/swww_ or _$HOME/.cache/swww_
 if $XDG_CACHE_HOME does not exist. For each monitor, there will be a file in
 those locations corresponding to the current image/animation being displayed.
-Importantly, **cache will only be loaded during initialization if you use swww
-init**. That is, calling `swww-daemon` directly will **NOT** load the cache, but
-calling `swww-init` will.
 
 The `swww-daemon` will actually wait until the first image has been set before
 trying to load the cache.

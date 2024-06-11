@@ -39,4 +39,4 @@ daemon will take care of both creating and deleting that file when it is
 initialized or killed.
 
 # SEE ALSO
-*swww-init*(1)
+*swww*(1)

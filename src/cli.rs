@@ -174,34 +174,6 @@ pub enum Swww {
     /// Use `-` to read from stdin
     Img(Img),
 
-    /// [DEPRECATED] Initializes the daemon.
-    ///
-    /// Exits if there is already a daemon running. We check that by seeing if
-    /// $XDG_RUNTIME_DIR/swww.socket exists.
-    Init {
-        ///Don't fork the daemon. This will keep it running in the current terminal.
-        ///
-        ///The only advantage of this would be seeing the logging real time. Note that for release
-        ///builds we only log info, warnings and errors, so you won't be seeing much (ideally).
-        #[clap(long)]
-        no_daemon: bool,
-
-        ///Don't load the cache *during initialization* (it still loads on monitor (re)connection)
-        ///
-        ///If want to always pass an image for `swww` to load, this option can help make the
-        ///results some reliable: `swww-daemon --no-cache && swww img <some img>`
-        #[clap(long)]
-        no_cache: bool,
-
-        /// Force the daemon to use a specific wl_shm format
-        ///
-        /// IMPORTANT: make sure this is a value your compositor actually supports! `swww` will
-        /// automatically select the best format for itself during initialization; this is only
-        /// here for fallback, debug, and workaround purposes
-        #[clap(long)]
-        format: Option<PixelFormat>,
-    },
-
     ///Kills the daemon
     Kill,
 

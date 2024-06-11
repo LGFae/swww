@@ -1,5 +1,5 @@
 use clap::Parser;
-use std::{process::Stdio, time::Duration};
+use std::time::Duration;
 
 use utils::{
     cache,
@@ -14,46 +14,6 @@ use cli::{CliImage, ResizeStrategy, Swww};
 
 fn main() -> Result<(), String> {
     let swww = Swww::parse();
-    if let Swww::Init {
-        no_daemon, format, ..
-    } = &swww
-    {
-        eprintln!(
-            "DEPRECATION WARNING: `swww init` IS DEPRECATED. Call `swww-daemon` directly instead"
-        );
-        match is_daemon_running() {
-            Ok(false) => {
-                let socket_path = get_socket_path();
-                if socket_path.exists() {
-                    eprintln!(
-                        "WARNING: socket file {} was not deleted when the previous daemon exited",
-                        socket_path.to_string_lossy()
-                    );
-                    if let Err(e) = std::fs::remove_file(socket_path) {
-                        return Err(format!("failed to delete previous socket: {e}"));
-                    }
-                }
-            }
-            Ok(true) => {
-                return Err("There seems to already be another instance running...".to_string())
-            }
-            Err(e) => {
-                eprintln!("WARNING: failed to read '/proc' directory to determine whether the daemon is running: {e}
-                          Falling back to trying to checking if the socket file exists...");
-                let socket_path = get_socket_path();
-                if socket_path.exists() {
-                    return Err(format!(
-                        "Found socket at {}. There seems to be an instance already running...",
-                        socket_path.to_string_lossy()
-                    ));
-                }
-            }
-        }
-        spawn_daemon(*no_daemon, format)?;
-        if *no_daemon {
-            return Ok(());
-        }
-    }
 
     if let Swww::ClearCache = &swww {
         return cache::clean().map_err(|e| format!("failed to clean the cache: {e}"));
@@ -142,12 +102,6 @@ fn make_request(args: &Swww) -> Result<Option<RequestSend>, String> {
             let img_request = make_img_request(img, &dims, format, &outputs)?;
 
             Ok(Some(RequestSend::Img(img_request)))
-        }
-        Swww::Init { no_cache, .. } => {
-            if !*no_cache {
-                restore_from_cache(&[])?;
-            }
-            Ok(None)
         }
         Swww::Kill => Ok(Some(RequestSend::Kill)),
         Swww::Query => Ok(Some(RequestSend::Query)),
@@ -306,48 +260,6 @@ fn split_cmdline_outputs(outputs: &str) -> Box<[String]> {
         .map(|s| s.to_owned())
         .filter(|s| !s.is_empty())
         .collect()
-}
-
-fn spawn_daemon(no_daemon: bool, format: &Option<cli::PixelFormat>) -> Result<(), String> {
-    let mut cmd = std::process::Command::new("swww-daemon");
-
-    if let Some(format) = format {
-        cmd.arg("--format");
-        cmd.arg(match format {
-            cli::PixelFormat::Xrgb => "xrgb",
-            cli::PixelFormat::Xbgr => "xbgr",
-            cli::PixelFormat::Rgb => "rgb",
-            cli::PixelFormat::Bgr => "bgr",
-        });
-    }
-
-    if no_daemon {
-        match cmd.status() {
-            Ok(_) => Ok(()),
-            Err(e) => Err(format!("error spawning swww-daemon: {e}")),
-        }
-    } else {
-        match cmd.stdout(Stdio::null()).stderr(Stdio::null()).spawn() {
-            Ok(_) => Ok(()),
-            Err(e) => Err(format!("error spawning swww-daemon: {e}")),
-        }
-    }
-}
-
-fn is_daemon_running() -> Result<bool, String> {
-    let socket = match connect_to_socket(&get_socket_path(), 5, 100) {
-        Ok(s) => s,
-        // likely a connection refused; either way, this is a reliable signal there's no surviving
-        // daemon.
-        Err(_) => return Ok(false),
-    };
-
-    RequestSend::Ping.send(&socket)?;
-    let answer = Answer::receive(read_socket(&socket)?);
-    match answer {
-        Answer::Ping(_) => Ok(true),
-        _ => Err("Daemon did not return Answer::Ping, as expected".to_string()),
-    }
 }
 
 fn restore_from_cache(requested_outputs: &[String]) -> Result<(), String> {

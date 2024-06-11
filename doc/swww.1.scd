@@ -20,9 +20,6 @@ swww - A Solution to your Wayland Wallpaper Woes
 *img*
 	Sends an image (or animated gif) for the daemon to display
 
-*init*
-	Initializes the daemon
-
 *kill*
 	Kills the daemon
 
@@ -63,5 +60,5 @@ protocol*. Typically, _wlr-roots_ based compositors.
 	  previous image when a monitor is (re)connected or turned on.
 
 # SEE ALSO
-*swww-daemon*(1) *swww-clear*(1) *swww-img*(1) *swww-init*(1) *swww-kill*(1)
+*swww-daemon*(1) *swww-clear*(1) *swww-img*(1) *swww-kill*(1)
 *swww-query*(1)
