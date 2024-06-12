@@ -487,9 +487,7 @@ pub(crate) fn commit_wallpapers(wallpapers: &[Arc<Wallpaper>]) {
 impl Drop for Wallpaper {
     fn drop(&mut self) {
         // note we shouldn't panic in a drop implementation
-        if let Err(e) = wl_surface::req::destroy(self.wl_surface) {
-            error!("error destroying wl_surface: {e:?}");
-        }
+       
         if let Err(e) = wp_viewport::req::destroy(self.wp_viewport) {
             error!("error destroying wp_viewport: {e:?}");
         }
@@ -500,6 +498,10 @@ impl Drop for Wallpaper {
         }
         if let Err(e) = zwlr_layer_surface_v1::req::destroy(self.layer_surface) {
             error!("error destroying zwlr_layer_surface_v1: {e:?}");
+        }
+
+        if let Err(e) = wl_surface::req::destroy(self.wl_surface) {
+            error!("error destroying wl_surface: {e:?}");
         }
 
         if let Ok(read) = self.inner.read() {
