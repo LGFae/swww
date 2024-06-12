@@ -75,22 +75,26 @@ pub fn get_socket_path() -> PathBuf {
     let runtime_dir = if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
         dir
     } else {
-        "/tmp/swww".to_string()
+        let uid = rustix::process::getuid();
+        format!("/run/user/{}", uid.as_raw())
     };
 
-    let mut socket_path = PathBuf::new();
-    socket_path.push(runtime_dir);
+    let mut socket_path = PathBuf::from(runtime_dir);
 
-    let mut socket_name = String::new();
-    socket_name.push_str("swww-");
-    if let Ok(socket) = std::env::var("WAYLAND_DISPLAY") {
-        socket_name.push_str(socket.as_str());
+    if let Ok(wayland_socket) = std::env::var("WAYLAND_DISPLAY") {
+        let mut i = 0;
+        // if WAYLAND_DISPLAY is a full path, use only its final component
+        for (j, ch) in wayland_socket.bytes().enumerate().rev() {
+            if ch == b'/' {
+                i = j + 1;
+                break;
+            }
+        }
+        socket_path.push(format!("{}.sock", &wayland_socket[i..]));
     } else {
-        socket_name.push_str("wayland-0")
+        eprintln!("WARNING: WAYLAND_DISPLAY variable not set. Defaulting to wayland-0");
+        socket_path.push("wayland-0.sock");
     }
-    socket_name.push_str(".socket");
-
-    socket_path.push(socket_name);
 
     socket_path
 }

@@ -6,7 +6,7 @@ edition = "2021"
 license-file = "../LICENSE"
 
 [dependencies]
-rustix = { version = "0.38", default-features = false, features = [ "std", "net", "shm", "mm", "param" ] }
+rustix = { version = "0.38", default-features = false, features = [ "std", "net", "shm", "mm", "param", "process" ] }
 
 [build-dependencies]
 pkg-config = "0.3"
