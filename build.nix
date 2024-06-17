@@ -8,7 +8,7 @@
   scdoc,
   nix-gitignore,
 }: let
-  version = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).package.version;
+  version = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).workspace.package.version;
   src = nix-gitignore.gitignoreSource [] ./.;
 in
 rustPlatform.buildRustPackage {

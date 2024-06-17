@@ -1,13 +1,22 @@
 [workspace]
-members = [".", "daemon", "utils"]
-default-members = [".", "daemon"]
+resolver = "2"
+members = ["client", "daemon", "utils"]
+default-members = ["client", "daemon"]
 
-[package]
-name = "swww"
+[workspace.package]
 version = "0.9.5-masterV2"
 authors = ["Leonardo Gibrowski Faé <leonardo.fae44@gmail.com>"]
 edition = "2021"
+license-file = "LICENSE"
 rust-version = "1.75"
+
+[workspace.lints.clippy]
+correctness = { level = "deny", priority = -1 }
+suspicious = { level = "deny", priority = -1 }
+perf = { level = "deny", priority = -1 }
+style = { level = "deny", priority = -1 }
+complexity = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
 
 # Enable some optimizations in debug mode. Otherwise, it is a pain to test it
 [profile.dev]
@@ -28,34 +37,3 @@ strip = true
 lto = "thin"
 debug = 1
 strip = false
-
-[dependencies]
-image = { version = "0.25", default-features = false, features = [
-	# all formats, except avif, since avif compiles just rav1d, which is just an
-	# encoder, which we do not care about
-	"bmp",
-	"dds",
-	"exr",
-	"ff",
-	"gif",
-	"hdr",
-	"ico",
-	"jpeg",
-	"png",
-	"pnm",
-	"qoi",
-	"tga",
-	"tiff",
-	"webp",
-]}
-fast_image_resize = "4.0"
-clap = { version = "4.5", features = ["derive", "wrap_help", "env"] }
-fastrand = { version = "2.1", default-features = false, features = [ "std" ] }
-utils = { version = "0.9.5-masterV2", path = "utils" }
-
-[dev-dependencies]
-assert_cmd = "2.0"
-
-[build-dependencies]
-clap = { version = "4.5", features = ["derive", "env"] }
-clap_complete = "4.5"

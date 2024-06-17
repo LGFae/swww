@@ -5,7 +5,7 @@ use clap_complete::{generate_to, Shell};
 
 include!("src/cli.rs");
 
-const COMPLETION_DIR: &str = "completions";
+const COMPLETION_DIR: &str = "../completions";
 const APP_NAME: &str = "swww";
 
 fn main() -> Result<(), Error> {
