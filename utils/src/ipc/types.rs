@@ -467,12 +467,12 @@ impl Transition {
     }
 }
 
-pub struct ClearSend {
+pub struct ClearSend<'a> {
     pub color: [u8; 3],
-    pub outputs: Box<[String]>,
+    pub outputs: Box<[&'a str]>,
 }
 
-impl ClearSend {
+impl<'a> ClearSend<'a> {
     pub fn create_request(self) -> Mmap {
         // 1 - output length
         // 3 - color bytes

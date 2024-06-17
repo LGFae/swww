@@ -10,6 +10,9 @@ edition = "2021"
 license-file = "LICENSE"
 rust-version = "1.75"
 
+[workspace.dependencies]
+utils = { path = "utils" }
+
 [workspace.lints.clippy]
 correctness = { level = "deny", priority = -1 }
 suspicious = { level = "deny", priority = -1 }
@@ -17,6 +20,8 @@ perf = { level = "deny", priority = -1 }
 style = { level = "deny", priority = -1 }
 complexity = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
+
+module-name-repetitions = "allow"
 
 # Enable some optimizations in debug mode. Otherwise, it is a pain to test it
 [profile.dev]

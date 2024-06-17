@@ -57,7 +57,7 @@ impl ImageRequestBuilder {
     }
 
     #[inline]
-    pub fn push(&mut self, img: ImgSend, outputs: &[String], animation: Option<Animation>) {
+    pub fn push(&mut self, img: &ImgSend, outputs: &[String], animation: Option<Animation>) {
         self.img_count += 1;
 
         let ImgSend {
@@ -65,7 +65,7 @@ impl ImageRequestBuilder {
             img,
             dim: dims,
             format,
-        } = &img;
+        } = img;
         self.serialize_bytes(path.as_bytes());
         self.serialize_bytes(img);
         self.extend(&dims.0.to_ne_bytes());
@@ -86,7 +86,7 @@ impl ImageRequestBuilder {
         }
 
         // cache the request
-        for output in outputs.iter() {
+        for output in outputs {
             if let Err(e) = super::cache::store(output, path) {
                 eprintln!("ERROR: failed to store cache: {e}");
             }

@@ -58,7 +58,7 @@ pub(super) fn send_socket_msg(
     let mut ancillary = net::SendAncillaryBuffer::new(&mut ancillary_buf);
 
     let msg_buf;
-    if let Some(mmap) = mmap.as_ref() {
+    if let Some(mmap) = mmap {
         socket_msg[8..].copy_from_slice(&(mmap.len() as u64).to_ne_bytes());
         msg_buf = [mmap.fd()];
         let msg = net::SendAncillaryMessage::ScmRights(&msg_buf);

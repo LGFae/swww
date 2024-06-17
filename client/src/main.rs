@@ -121,7 +121,7 @@ fn make_img_request(
         CliImage::Color(color) => {
             for (&dim, outputs) in dims.iter().zip(outputs) {
                 img_req_builder.push(
-                    ipc::ImgSend {
+                    &ipc::ImgSend {
                         img: image::RgbImage::from_pixel(dim.0, dim.1, image::Rgb(*color))
                             .to_vec()
                             .into_boxed_slice(),
@@ -190,7 +190,7 @@ fn make_img_request(
                 };
 
                 img_req_builder.push(
-                    ipc::ImgSend {
+                    &ipc::ImgSend {
                         img,
                         path,
                         dim,
@@ -208,7 +208,7 @@ fn make_img_request(
 
 #[allow(clippy::type_complexity)]
 fn get_format_dims_and_outputs(
-    requested_outputs: &[String],
+    requested_outputs: &[&str],
 ) -> Result<(ipc::PixelFormat, Vec<(u32, u32)>, Vec<Vec<String>>), String> {
     let mut outputs: Vec<Vec<String>> = Vec::new();
     let mut dims: Vec<(u32, u32)> = Vec::new();
@@ -222,14 +222,14 @@ fn get_format_dims_and_outputs(
     match answer {
         Answer::Info(infos) => {
             let mut format = ipc::PixelFormat::Xrgb;
-            for info in infos.iter() {
+            for info in Vec::from(infos) {
                 format = info.pixel_format;
                 let info_img = &info.img;
-                let name = info.name.to_string();
-                if !requested_outputs.is_empty() && !requested_outputs.contains(&name) {
+                let real_dim = info.real_dim();
+                let name = info.name;
+                if !requested_outputs.is_empty() && !requested_outputs.contains(&name.as_str()) {
                     continue;
                 }
-                let real_dim = info.real_dim();
                 if let Some((_, output)) = dims
                     .iter_mut()
                     .zip(&imgs)
@@ -254,15 +254,11 @@ fn get_format_dims_and_outputs(
     }
 }
 
-fn split_cmdline_outputs(outputs: &str) -> Box<[String]> {
-    outputs
-        .split(',')
-        .map(|s| s.to_owned())
-        .filter(|s| !s.is_empty())
-        .collect()
+fn split_cmdline_outputs(outputs: &str) -> Box<[&str]> {
+    outputs.split(',').filter(|s| !s.is_empty()).collect()
 }
 
-fn restore_from_cache(requested_outputs: &[String]) -> Result<(), String> {
+fn restore_from_cache(requested_outputs: &[&str]) -> Result<(), String> {
     let (_, _, outputs) = get_format_dims_and_outputs(requested_outputs)?;
 
     for output in outputs.iter().flatten() {
