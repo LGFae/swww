@@ -1,15 +1,139 @@
-use std::{path::PathBuf, time::Duration};
+use std::env;
+use std::marker::PhantomData;
+use std::path::PathBuf;
+use std::sync::OnceLock;
+use std::time::Duration;
 
-use rustix::{
-    fd::OwnedFd,
-    net::{self, RecvFlags},
-};
+use rustix::fd::OwnedFd;
+use rustix::io::Errno;
+use rustix::net;
+use rustix::net::RecvFlags;
 
+use super::ErrnoExt;
+use super::IpcError;
+use super::IpcErrorKind;
 use super::Mmap;
 
 pub struct SocketMsg {
     pub(super) code: u8,
     pub(super) shm: Option<Mmap>,
+}
+
+/// Represents client in IPC communication, via typestate pattern in [`IpcSocket`]
+pub struct Client;
+/// Represents server in IPC communication, via typestate pattern in [`IpcSocket`]
+pub struct Server;
+
+/// Typesafe handle for socket facilitating communication between [`Client`] and [`Server`]
+pub struct IpcSocket<T> {
+    fd: OwnedFd,
+    phantom: PhantomData<T>,
+}
+
+impl<T> IpcSocket<T> {
+    /// Creates new [`IpcSocket`] from provided [`OwnedFd`]
+    ///
+    /// TODO: remove external ability to construct [`Self`] from random file descriptors
+    pub fn new(fd: OwnedFd) -> Self {
+        Self {
+            fd,
+            phantom: PhantomData,
+        }
+    }
+
+    fn socket_file() -> String {
+        let runtime = env::var("XDG_RUNTIME_DIR");
+        let display = env::var("WAYLAND_DISPLAY");
+
+        let runtime = runtime.as_deref().unwrap_or("/tmp/swww");
+        let display = display.as_deref().unwrap_or("wayland-0");
+
+        format!("{runtime}/swww-{display}.socket")
+    }
+
+    /// Retreives path to socket file
+    ///
+    /// To treat this as filesystem path, wrap it in [`Path`].
+    /// If you get errors with missing generics, you can shove any type as `T`, but
+    /// [`Client`] or [`Server`] are recommended.
+    ///
+    /// [`Path`]: std::path::Path
+    #[must_use]
+    pub fn path() -> &'static str {
+        static PATH: OnceLock<String> = OnceLock::new();
+        PATH.get_or_init(Self::socket_file)
+    }
+
+    #[must_use]
+    pub fn as_fd(&self) -> &OwnedFd {
+        &self.fd
+    }
+}
+
+impl IpcSocket<Client> {
+    /// Connects to already running `Daemon`, if there is one.
+    pub fn connect() -> Result<Self, IpcError> {
+        // these were hardcoded everywhere, no point in passing them around
+        let tries = 5;
+        let interval = 100;
+
+        let socket = net::socket_with(
+            net::AddressFamily::UNIX,
+            net::SocketType::STREAM,
+            net::SocketFlags::CLOEXEC,
+            None,
+        )
+        .context(IpcErrorKind::Socket)?;
+
+        let addr = net::SocketAddrUnix::new(Self::path()).expect("addr is correct");
+
+        // this will be overwriten, Rust just doesn't know it
+        let mut error = Errno::INVAL;
+        for _ in 0..tries {
+            match net::connect_unix(&socket, &addr) {
+                Ok(()) => {
+                    #[cfg(debug_assertions)]
+                    let timeout = Duration::from_secs(30); //Some operations take a while to respond in debug mode
+                    #[cfg(not(debug_assertions))]
+                    let timeout = Duration::from_secs(5);
+                    return net::sockopt::set_socket_timeout(
+                        &socket,
+                        net::sockopt::Timeout::Recv,
+                        Some(timeout),
+                    )
+                    .context(IpcErrorKind::SetTimeout)
+                    .map(|()| Self::new(socket));
+                }
+                Err(e) => error = e,
+            }
+            std::thread::sleep(Duration::from_millis(interval));
+        }
+
+        let kind = if error.kind() == std::io::ErrorKind::NotFound {
+            IpcErrorKind::NoSocketFile
+        } else {
+            IpcErrorKind::Connect
+        };
+
+        Err(error.context(kind))
+    }
+}
+
+impl IpcSocket<Server> {
+    /// Creates [`IpcSocket`] for use in server (i.e `Daemon`)
+    pub fn server() -> Result<Self, IpcError> {
+        let addr = net::SocketAddrUnix::new(Self::path()).expect("addr is correct");
+        let socket = net::socket_with(
+            net::AddressFamily::UNIX,
+            net::SocketType::STREAM,
+            net::SocketFlags::CLOEXEC.union(rustix::net::SocketFlags::NONBLOCK),
+            None,
+        )
+        .context(IpcErrorKind::Socket)?;
+        net::bind_unix(&socket, &addr).context(IpcErrorKind::Bind)?;
+        net::listen(&socket, 0).context(IpcErrorKind::Listen)?;
+        Ok(Self::new(socket))
+    }
 }
 
 pub fn read_socket(stream: &OwnedFd) -> Result<SocketMsg, String> {
@@ -72,70 +196,15 @@ pub(super) fn send_socket_msg(
 
 #[must_use]
 pub fn get_socket_path() -> PathBuf {
-    let runtime_dir = if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
-        dir
-    } else {
-        "/tmp/swww".to_string()
-    };
-
-    let mut socket_path = PathBuf::new();
-    socket_path.push(runtime_dir);
-
-    let mut socket_name = String::new();
-    socket_name.push_str("swww-");
-    if let Ok(socket) = std::env::var("WAYLAND_DISPLAY") {
-        socket_name.push_str(socket.as_str());
-    } else {
-        socket_name.push_str("wayland-0")
-    }
-    socket_name.push_str(".socket");
-
-    socket_path.push(socket_name);
-
-    socket_path
+    IpcSocket::<Client>::path().into()
 }
 
 /// We make sure the Stream is always set to blocking mode
 ///
 /// * `tries` -  how many times to attempt the connection
 /// * `interval` - how long to wait between attempts, in milliseconds
-pub fn connect_to_socket(addr: &PathBuf, tries: u8, interval: u64) -> Result<OwnedFd, String> {
-    let socket = rustix::net::socket_with(
-        rustix::net::AddressFamily::UNIX,
-        rustix::net::SocketType::STREAM,
-        rustix::net::SocketFlags::CLOEXEC,
-        None,
-    )
-    .expect("failed to create socket file descriptor");
-    let addr = net::SocketAddrUnix::new(addr).unwrap();
-    //Make sure we try at least once
-    let tries = if tries == 0 { 1 } else { tries };
-    let mut error = None;
-    for _ in 0..tries {
-        match net::connect_unix(&socket, &addr) {
-            Ok(()) => {
-                #[cfg(debug_assertions)]
-                let timeout = Duration::from_secs(30); //Some operations take a while to respond in debug mode
-                #[cfg(not(debug_assertions))]
-                let timeout = Duration::from_secs(5);
-                if let Err(e) = net::sockopt::set_socket_timeout(
-                    &socket,
-                    net::sockopt::Timeout::Recv,
-                    Some(timeout),
-                ) {
-                    return Err(format!("failed to set read timeout for socket: {e}"));
-                }
-
-                return Ok(socket);
-            }
-            Err(e) => error = Some(e),
-        }
-        std::thread::sleep(Duration::from_millis(interval));
-    }
-    let error = error.unwrap();
-    if error.kind() == std::io::ErrorKind::NotFound {
-        return Err("Socket file not found. Are you sure swww-daemon is running?".to_string());
-    }
-
-    Err(format!("Failed to connect to socket: {error}"))
+pub fn connect_to_socket(_: &PathBuf, _: u8, _: u64) -> Result<OwnedFd, String> {
+    IpcSocket::connect()
+        .map(|socket| socket.fd)
+        .map_err(|err| err.to_string())
 }

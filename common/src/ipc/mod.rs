@@ -2,11 +2,13 @@ use std::path::PathBuf;
 
 use rustix::fd::OwnedFd;
 
+mod error;
 mod mmap;
 mod socket;
 mod types;
 
 use crate::cache;
+pub use error::*;
 pub use mmap::*;
 pub use socket::*;
 pub use types::*;
