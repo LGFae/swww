@@ -23,7 +23,7 @@ use std::{
     fs,
     io::{IsTerminal, Write},
     num::{NonZeroI32, NonZeroU32},
-    path::PathBuf,
+    path::Path,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -31,8 +31,8 @@ use std::{
 };
 
 use common::ipc::{
-    connect_to_socket, get_socket_path, read_socket, Answer, BgInfo, ImageReq, MmappedStr,
-    RequestRecv, RequestSend, Scale,
+    read_socket, Answer, BgInfo, ImageReq, IpcSocket, MmappedStr, RequestRecv, RequestSend, Scale,
+    Server,
 };
 
 use animations::Animator;
@@ -525,25 +525,26 @@ fn setup_signals() {
 struct SocketWrapper(OwnedFd);
 impl SocketWrapper {
     fn new() -> Result<Self, String> {
-        let socket_addr = get_socket_path();
+        let addr = IpcSocket::<Server>::path();
+        let addr = Path::new(addr);
 
-        if socket_addr.exists() {
-            if is_daemon_running(&socket_addr)? {
+        if addr.exists() {
+            if is_daemon_running()? {
                 return Err(
                     "There is an swww-daemon instance already running on this socket!".to_string(),
                 );
             } else {
                 warn!(
                     "socket file {} was not deleted when the previous daemon exited",
-                    socket_addr.to_string_lossy()
+                    addr.to_string_lossy()
                 );
-                if let Err(e) = std::fs::remove_file(&socket_addr) {
+                if let Err(e) = std::fs::remove_file(addr) {
                     return Err(format!("failed to delete previous socket: {e}"));
                 }
             }
         }
 
-        let runtime_dir = match socket_addr.parent() {
+        let runtime_dir = match addr.parent() {
             Some(path) => path,
             None => return Err("couldn't find a valid runtime directory".to_owned()),
         };
@@ -555,34 +556,20 @@ impl SocketWrapper {
             }
         }
 
-        let socket = rustix::net::socket_with(
-            rustix::net::AddressFamily::UNIX,
-            rustix::net::SocketType::STREAM,
-            rustix::net::SocketFlags::CLOEXEC.union(rustix::net::SocketFlags::NONBLOCK),
-            None,
-        )
-        .expect("failed to create socket file descriptor");
+        let socket = IpcSocket::server().map_err(|err| err.to_string())?;
 
-        rustix::net::bind_unix(
-            &socket,
-            &rustix::net::SocketAddrUnix::new(&socket_addr).unwrap(),
-        )
-        .unwrap();
-
-        rustix::net::listen(&socket, 0).unwrap();
-
-        debug!("Created socket in {:?}", socket_addr);
-        Ok(Self(socket))
+        debug!("Created socket in {:?}", addr);
+        Ok(Self(socket.to_fd()))
     }
 }
 
 impl Drop for SocketWrapper {
     fn drop(&mut self) {
-        let socket_addr = get_socket_path();
-        if let Err(e) = fs::remove_file(&socket_addr) {
-            error!("Failed to remove socket at {socket_addr:?}: {e}");
+        let addr = IpcSocket::<Server>::path();
+        if let Err(e) = fs::remove_file(Path::new(addr)) {
+            error!("Failed to remove socket at {addr}: {e}");
         }
-        info!("Removed socket at {:?}", socket_addr);
+        info!("Removed socket at {addr}");
     }
 }
 
@@ -648,16 +635,16 @@ fn make_logger(quiet: bool) {
     .unwrap();
 }
 
-pub fn is_daemon_running(addr: &PathBuf) -> Result<bool, String> {
-    let sock = match connect_to_socket(addr, 5, 100) {
+pub fn is_daemon_running() -> Result<bool, String> {
+    let sock = match IpcSocket::connect() {
         Ok(s) => s,
         // likely a connection refused; either way, this is a reliable signal there's no surviving
         // daemon.
         Err(_) => return Ok(false),
     };
 
-    RequestSend::Ping.send(&sock)?;
-    let answer = Answer::receive(read_socket(&sock)?);
+    RequestSend::Ping.send(sock.as_fd())?;
+    let answer = Answer::receive(read_socket(sock.as_fd())?);
     match answer {
         Answer::Ping(_) => Ok(true),
         _ => Err("Daemon did not return Answer::Ping, as expected".to_string()),

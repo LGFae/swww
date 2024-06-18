@@ -1,9 +1,9 @@
-use clap::Parser;
-use std::time::Duration;
+use std::{path::Path, time::Duration};
 
+use clap::Parser;
 use common::{
     cache,
-    ipc::{self, connect_to_socket, get_socket_path, read_socket, Answer, RequestSend},
+    ipc::{self, read_socket, Answer, Client, IpcSocket, RequestSend},
 };
 
 mod imgproc;
@@ -19,10 +19,10 @@ fn main() -> Result<(), String> {
         return cache::clean().map_err(|e| format!("failed to clean the cache: {e}"));
     }
 
+    let socket = IpcSocket::connect().map_err(|err| err.to_string())?;
     loop {
-        let socket = connect_to_socket(&get_socket_path(), 5, 100)?;
-        RequestSend::Ping.send(&socket)?;
-        let bytes = read_socket(&socket)?;
+        RequestSend::Ping.send(socket.as_fd())?;
+        let bytes = read_socket(socket.as_fd())?;
         let answer = Answer::receive(bytes);
         if let Answer::Ping(configured) = answer {
             if configured {
@@ -42,9 +42,9 @@ fn process_swww_args(args: &Swww) -> Result<(), String> {
         Some(request) => request,
         None => return Ok(()),
     };
-    let socket = connect_to_socket(&get_socket_path(), 5, 100)?;
-    request.send(&socket)?;
-    let bytes = read_socket(&socket)?;
+    let socket = IpcSocket::connect().map_err(|err| err.to_string())?;
+    request.send(socket.as_fd())?;
+    let bytes = read_socket(socket.as_fd())?;
     drop(socket);
     match Answer::receive(bytes) {
         Answer::Info(info) => info.iter().for_each(|i| println!("{}", i)),
@@ -54,16 +54,15 @@ fn process_swww_args(args: &Swww) -> Result<(), String> {
                 let tries = 20;
                 #[cfg(not(debug_assertions))]
                 let tries = 10;
-                let socket_path = get_socket_path();
+                let path = IpcSocket::<Client>::path();
+                let path = Path::new(path);
                 for _ in 0..tries {
-                    if !socket_path.exists() {
+                    if !path.exists() {
                         return Ok(());
                     }
                     std::thread::sleep(Duration::from_millis(100));
                 }
-                return Err(format!(
-                    "Could not confirm socket deletion at: {socket_path:?}"
-                ));
+                return Err(format!("Could not confirm socket deletion at: {path:?}"));
             }
         }
         Answer::Ping(_) => {
@@ -213,9 +212,9 @@ fn get_format_dims_and_outputs(
     let mut dims: Vec<(u32, u32)> = Vec::new();
     let mut imgs: Vec<ipc::BgImg> = Vec::new();
 
-    let socket = connect_to_socket(&get_socket_path(), 5, 100)?;
-    RequestSend::Query.send(&socket)?;
-    let bytes = read_socket(&socket)?;
+    let socket = IpcSocket::connect().map_err(|err| err.to_string())?;
+    RequestSend::Query.send(socket.as_fd())?;
+    let bytes = read_socket(socket.as_fd())?;
     drop(socket);
     let answer = Answer::receive(bytes);
     match answer {

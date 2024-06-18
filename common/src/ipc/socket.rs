@@ -1,6 +1,5 @@
 use std::env;
 use std::marker::PhantomData;
-use std::path::PathBuf;
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -39,6 +38,10 @@ impl<T> IpcSocket<T> {
             fd,
             phantom: PhantomData,
         }
+    }
+
+    pub fn to_fd(self) -> OwnedFd {
+        self.fd
     }
 
     fn socket_file() -> String {
@@ -192,19 +195,4 @@ pub(super) fn send_socket_msg(
     let iov = rustix::io::IoSlice::new(&socket_msg[..]);
     net::sendmsg(stream, &[iov], &mut ancillary, net::SendFlags::empty())
         .map(|written| written == socket_msg.len())
-}
-
-#[must_use]
-pub fn get_socket_path() -> PathBuf {
-    IpcSocket::<Client>::path().into()
-}
-
-/// We make sure the Stream is always set to blocking mode
-///
-/// * `tries` -  how many times to attempt the connection
-/// * `interval` - how long to wait between attempts, in milliseconds
-pub fn connect_to_socket(_: &PathBuf, _: u8, _: u64) -> Result<OwnedFd, String> {
-    IpcSocket::connect()
-        .map(|socket| socket.fd)
-        .map_err(|err| err.to_string())
 }
