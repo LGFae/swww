@@ -9,7 +9,7 @@ use std::{
     time::Duration,
 };
 
-use utils::{
+use common::{
     compression::{BitPack, Compressor},
     ipc::{self, Coord, PixelFormat, Position},
 };

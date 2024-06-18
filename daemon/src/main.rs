@@ -30,7 +30,7 @@ use std::{
     },
 };
 
-use utils::ipc::{
+use common::ipc::{
     connect_to_socket, get_socket_path, read_socket, Answer, BgInfo, ImageReq, MmappedStr,
     RequestRecv, RequestSend, Scale,
 };
@@ -125,7 +125,7 @@ impl Daemon {
     }
 
     fn recv_socket_msg(&mut self, stream: OwnedFd) {
-        let bytes = match utils::ipc::read_socket(&stream) {
+        let bytes = match common::ipc::read_socket(&stream) {
             Ok(bytes) => bytes,
             Err(e) => {
                 error!("FATAL: cannot read socket: {e}. Exiting...");
@@ -143,7 +143,7 @@ impl Daemon {
                     .spawn(move || {
                         crate::wallpaper::stop_animations(&wallpapers);
                         for wallpaper in &wallpapers {
-                            wallpaper.set_img_info(utils::ipc::BgImg::Color(clear.color));
+                            wallpaper.set_img_info(common::ipc::BgImg::Color(clear.color));
                             wallpaper.clear(clear.color);
                         }
                         crate::wallpaper::attach_buffers_and_damange_surfaces(&wallpapers);

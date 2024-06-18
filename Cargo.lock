@@ -242,6 +242,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b6a852b24ab71dffc585bcb46eaf7959d175cb865a7152e35b348d1b2960422"
 
 [[package]]
+name = "common"
+version = "0.9.5-masterV2"
+dependencies = [
+ "criterion",
+ "fastrand",
+ "pkg-config",
+ "rustix",
+]
+
+[[package]]
 name = "crc32fast"
 version = "1.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -831,22 +841,22 @@ dependencies = [
  "assert_cmd",
  "clap",
  "clap_complete",
+ "common",
  "fast_image_resize",
  "fastrand",
  "image",
- "utils",
 ]
 
 [[package]]
 name = "swww-daemon"
 version = "0.9.5-masterV2"
 dependencies = [
+ "common",
  "keyframe",
  "libc",
  "log",
  "rustix",
  "sd-notify",
- "utils",
 ]
 
 [[package]]
@@ -928,16 +938,6 @@ name = "utf8parse"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "711b9620af191e0cdc7468a8d14e709c3dcdb115b36f838e601583af800a370a"
-
-[[package]]
-name = "utils"
-version = "0.9.5-masterV2"
-dependencies = [
- "criterion",
- "fastrand",
- "pkg-config",
- "rustix",
-]
 
 [[package]]
 name = "wait-timeout"
