@@ -17,6 +17,7 @@ rustix = { version = "0.38", default-features = false, features = [
   "mm",
   "param",
 ] }
+anyhow = { workspace = true }
 
 [build-dependencies]
 pkg-config = "0.3"

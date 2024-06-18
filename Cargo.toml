@@ -12,6 +12,7 @@ rust-version = "1.75"
 
 [workspace.dependencies]
 utils = { path = "utils" }
+anyhow = "1"
 
 [workspace.lints.clippy]
 correctness = { level = "deny", priority = -1 }

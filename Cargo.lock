@@ -73,6 +73,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "anyhow"
+version = "1.0.86"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b3d1d046238990b9cf5bcde22a3fb3584ee5cf65fb2765f454ed428c7a0063da"
+
+[[package]]
 name = "assert_cmd"
 version = "2.0.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -828,6 +834,7 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 name = "swww"
 version = "0.9.5-masterV2"
 dependencies = [
+ "anyhow",
  "assert_cmd",
  "clap",
  "clap_complete",
@@ -841,6 +848,7 @@ dependencies = [
 name = "swww-daemon"
 version = "0.9.5-masterV2"
 dependencies = [
+ "anyhow",
  "keyframe",
  "libc",
  "log",
@@ -933,6 +941,7 @@ checksum = "711b9620af191e0cdc7468a8d14e709c3dcdb115b36f838e601583af800a370a"
 name = "utils"
 version = "0.9.5-masterV2"
 dependencies = [
+ "anyhow",
  "criterion",
  "fastrand",
  "pkg-config",

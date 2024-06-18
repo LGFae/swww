@@ -24,3 +24,4 @@ keyframe = "1.1"
 sd-notify = { version = "0.4.1" }
 
 utils = { workspace = true }
+anyhow = { workspace = true }

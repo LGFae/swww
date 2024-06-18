@@ -1,7 +1,13 @@
+use std::path::Path;
 /// Note: this file only has basic declarations and some definitions in order to be possible to
 /// import it in the build script, to automate shell completion
-use clap::{Parser, ValueEnum};
 use std::path::PathBuf;
+
+use anyhow::anyhow;
+use anyhow::bail;
+use anyhow::Result;
+use clap::Parser;
+use clap::ValueEnum;
 
 fn from_hex(hex: &str) -> Result<[u8; 3], String> {
     let chars = hex
@@ -38,9 +44,9 @@ fn from_hex(hex: &str) -> Result<[u8; 3], String> {
 
 #[derive(Clone, ValueEnum)]
 pub enum PixelFormat {
-    /// No swap, can copy directly onto WlBuffer
+    /// No swap, can copy directly onto `WlBuffer`
     Bgr,
-    /// Swap R and B channels at client, can copy directly onto WlBuffer
+    /// Swap R and B channels at client, can copy directly onto `WlBuffer`
     Rgb,
     /// No swap, must extend pixel with an extra byte when copying
     Xbgr,
@@ -376,129 +382,103 @@ pub struct Img {
     pub transition_wave: (f32, f32),
 }
 
-fn parse_wave(raw: &str) -> Result<(f32, f32), String> {
+fn parse_wave(raw: &str) -> Result<(f32, f32)> {
     let mut iter = raw.split(',');
     let mut parse = || {
         iter.next()
-            .ok_or_else(|| "Not enough values".to_string())
-            .and_then(|s| s.parse::<f32>().map_err(|e| e.to_string()))
+            .ok_or_else(|| anyhow!("Not enough values"))?
+            .parse::<f32>()
+            .map_err(anyhow::Error::from)
     };
-
     let parsed = (parse()?, parse()?);
     Ok(parsed)
 }
 
-fn parse_bezier(raw: &str) -> Result<(f32, f32, f32, f32), String> {
+fn parse_bezier(raw: &str) -> Result<(f32, f32, f32, f32)> {
     let mut iter = raw.split(',');
     let mut parse = || {
         iter.next()
-            .ok_or_else(|| "Not enough values".to_string())
-            .and_then(|s| s.parse::<f32>().map_err(|e| e.to_string()))
+            .ok_or_else(|| anyhow!("Not enough values"))?
+            .parse::<f32>()
+            .map_err(anyhow::Error::from)
     };
 
     let parsed = (parse()?, parse()?, parse()?, parse()?);
     if parsed == (0.0, 0.0, 0.0, 0.0) {
-        return Err("Invalid bezier curve: 0,0,0,0 (try using 0,0,1,1 instead)".to_string());
+        bail!("Invalid bezier curve: 0,0,0,0 (try using 0,0,1,1 instead)");
     }
     Ok(parsed)
 }
 
-pub fn parse_image(raw: &str) -> Result<CliImage, String> {
-    let path = PathBuf::from(raw);
+pub fn parse_image(raw: &str) -> Result<CliImage> {
+    let path = Path::new(raw);
     if path.exists() {
-        return Ok(CliImage::Path(path));
+        return Ok(CliImage::Path(path.into()));
     }
     if let Some(color) = raw.strip_prefix("0x") {
         if let Ok(color) = from_hex(color) {
             return Ok(CliImage::Color(color));
         }
     }
-    Err(format!("Path '{}' does not exist", raw))
+    bail!("Path '{raw}' does not exist")
 }
 
 // parses Percents and numbers in format of "<coord1>,<coord2>"
 fn parse_coords(raw: &str) -> Result<CliPosition, String> {
-    let coords = raw.split(',').map(|s| s.trim()).collect::<Vec<&str>>();
-    if coords.len() != 2 {
-        match coords[0] {
-            "center" => {
-                return Ok(CliPosition::new(
-                    CliCoord::Percent(0.5),
-                    CliCoord::Percent(0.5),
-                ));
-            }
-            "top" => {
-                return Ok(CliPosition::new(
-                    CliCoord::Percent(0.5),
-                    CliCoord::Percent(1.0),
-                ));
-            }
-            "bottom" => {
-                return Ok(CliPosition::new(
-                    CliCoord::Percent(0.5),
-                    CliCoord::Percent(0.0),
-                ));
-            }
-            "left" => {
-                return Ok(CliPosition::new(
-                    CliCoord::Percent(0.0),
-                    CliCoord::Percent(0.5),
-                ));
-            }
-            "right" => {
-                return Ok(CliPosition::new(
-                    CliCoord::Percent(1.0),
-                    CliCoord::Percent(0.5),
-                ));
-            }
-            "top-left" => {
-                return Ok(CliPosition::new(
-                    CliCoord::Percent(0.0),
-                    CliCoord::Percent(1.0),
-                ));
-            }
-            "top-right" => {
-                return Ok(CliPosition::new(
-                    CliCoord::Percent(1.0),
-                    CliCoord::Percent(1.0),
-                ));
-            }
-            "bottom-left" => {
-                return Ok(CliPosition::new(
-                    CliCoord::Percent(0.0),
-                    CliCoord::Percent(0.0),
-                ));
-            }
-            "bottom-right" => {
-                return Ok(CliPosition::new(
-                    CliCoord::Percent(1.0),
-                    CliCoord::Percent(0.0),
-                ));
-            }
-            _ => return Err(format!("Invalid position keyword: {raw}")),
+    let mut coords = raw.split(',').map(str::trim);
+    match (coords.next(), coords.next()) {
+        (Some(first), None) => match first {
+            "center" => Ok(CliPosition::new(
+                CliCoord::Percent(0.5),
+                CliCoord::Percent(0.5),
+            )),
+            "top" => Ok(CliPosition::new(
+                CliCoord::Percent(0.5),
+                CliCoord::Percent(1.0),
+            )),
+            "bottom" => Ok(CliPosition::new(
+                CliCoord::Percent(0.5),
+                CliCoord::Percent(0.0),
+            )),
+            "left" => Ok(CliPosition::new(
+                CliCoord::Percent(0.0),
+                CliCoord::Percent(0.5),
+            )),
+            "right" => Ok(CliPosition::new(
+                CliCoord::Percent(1.0),
+                CliCoord::Percent(0.5),
+            )),
+            "top-left" => Ok(CliPosition::new(
+                CliCoord::Percent(0.0),
+                CliCoord::Percent(1.0),
+            )),
+            "top-right" => Ok(CliPosition::new(
+                CliCoord::Percent(1.0),
+                CliCoord::Percent(1.0),
+            )),
+            "bottom-left" => Ok(CliPosition::new(
+                CliCoord::Percent(0.0),
+                CliCoord::Percent(0.0),
+            )),
+            "bottom-right" => Ok(CliPosition::new(
+                CliCoord::Percent(1.0),
+                CliCoord::Percent(0.0),
+            )),
+            _ => Err(format!("Invalid position keyword: {raw}")),
+        },
+        (Some(x), Some(y)) => {
+            let convert = |name: char, text: &str| {
+                text.parse::<u32>()
+                    .map(|num| num as f32)
+                    .or_else(|_| text.parse::<f32>())
+                    .map(CliCoord::Percent)
+                    .map_err(|_| format!("Invalid {name} coord: {text}"))
+            };
+
+            Ok(CliPosition::new(convert('x', x)?, convert('y', y)?))
         }
+        _ => unreachable!(),
     }
-
-    let x = coords[0];
-    let y = coords[1];
-
-    let parsed_x = match x.parse::<u32>() {
-        Ok(x) => CliCoord::Pixel(x as f32),
-        Err(_) => match x.parse::<f32>() {
-            Ok(x) => CliCoord::Percent(x),
-            Err(_) => return Err(format!("Invalid x coord: {x}")),
-        },
-    };
-
-    let parsed_y = match y.parse::<u32>() {
-        Ok(y) => CliCoord::Pixel(y as f32),
-        Err(_) => match y.parse::<f32>() {
-            Ok(y) => CliCoord::Percent(y),
-            Err(_) => return Err(format!("Invalid y coord: {y}")),
-        },
-    };
-
-    Ok(CliPosition::new(parsed_x, parsed_y))
 }
 
 #[cfg(test)]

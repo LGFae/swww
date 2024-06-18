@@ -1,18 +1,32 @@
-use fast_image_resize::{FilterType, PixelType, ResizeAlg, ResizeOptions, Resizer};
-use image::{
-    codecs::{gif::GifDecoder, png::PngDecoder, webp::WebPDecoder},
-    AnimationDecoder, DynamicImage, Frames, GenericImageView, ImageFormat,
-};
-use std::{
-    io::{stdin, Cursor, Read},
-    path::Path,
-    time::Duration,
-};
+use std::io::stdin;
+use std::io::Cursor;
+use std::io::Read;
+use std::path::Path;
+use std::time::Duration;
 
-use utils::{
-    compression::{BitPack, Compressor},
-    ipc::{self, Coord, PixelFormat, Position},
-};
+use anyhow::anyhow;
+use anyhow::bail;
+use anyhow::Context;
+use anyhow::Result;
+use fast_image_resize::FilterType;
+use fast_image_resize::PixelType;
+use fast_image_resize::ResizeAlg;
+use fast_image_resize::ResizeOptions;
+use fast_image_resize::Resizer;
+use image::codecs::gif::GifDecoder;
+use image::codecs::png::PngDecoder;
+use image::codecs::webp::WebPDecoder;
+use image::AnimationDecoder;
+use image::DynamicImage;
+use image::Frames;
+use image::GenericImageView;
+use image::ImageFormat;
+use utils::compression::BitPack;
+use utils::compression::Compressor;
+use utils::ipc;
+use utils::ipc::Coord;
+use utils::ipc::PixelFormat;
+use utils::ipc::Position;
 
 use crate::cli::ResizeStrategy;
 
@@ -25,38 +39,39 @@ pub struct ImgBuf {
 }
 
 impl ImgBuf {
-    /// Create a new ImgBuf from a given path. Use - for Stdin
-    pub fn new(path: &Path) -> Result<Self, String> {
+    /// Create a new `ImgBuf` from a given path. Use - for Stdin
+    pub fn new(path: &Path) -> Result<Self> {
         let bytes = if let Some("-") = path.to_str() {
             let mut bytes = Vec::new();
             stdin()
                 .read_to_end(&mut bytes)
-                .map_err(|e| format!("failed to read standard input: {e}"))?;
+                .context("failed to read standard input")?;
             bytes
         } else {
-            std::fs::read(path).map_err(|e| format!("failed to read file: {e}"))?
+            std::fs::read(path).context("failed to read file: ")?
         };
 
         let reader = image::io::Reader::new(Cursor::new(&bytes))
             .with_guessed_format()
-            .map_err(|e| format!("failed to detect the image's format: {e}"))?;
+            .context("failed to detect the image's format:")?;
 
-        let format = reader.format();
+        let format = reader
+            .format()
+            .ok_or_else(|| anyhow!("Unknown image format"))?;
         let is_animated = match format {
-            Some(ImageFormat::Gif) => true,
-            Some(ImageFormat::WebP) => WebPDecoder::new(Cursor::new(&bytes))
-                .map_err(|e| format!("failed to decode Webp Image: {e}"))?
+            ImageFormat::Gif => true,
+            ImageFormat::WebP => WebPDecoder::new(Cursor::new(&bytes))
+                .context("failed to decode Webp Image")?
                 .has_animation(),
-            Some(ImageFormat::Png) => PngDecoder::new(Cursor::new(&bytes))
-                .map_err(|e| format!("failed to decode Png Image: {e}"))?
+            ImageFormat::Png => PngDecoder::new(Cursor::new(&bytes))
+                .context("failed to decode Png Image")?
                 .is_apng()
-                .map_err(|e| format!("failed to detect if Png is animated: {e}"))?,
-            None => return Err("Unknown image format".to_string()),
+                .context("failed to detect if Png is animated")?,
             _ => false,
         };
 
         Ok(Self {
-            format: format.unwrap(), // this is ok because we return err earlier if it is None
+            format,
             bytes: bytes.into_boxed_slice(),
             is_animated,
         })
@@ -67,12 +82,10 @@ impl ImgBuf {
     }
 
     /// Decode the ImgBuf into am RgbImage
-    pub fn decode(&self, format: PixelFormat) -> Result<Image, String> {
+    pub fn decode(&self, format: PixelFormat) -> Result<Image> {
         let mut reader = image::io::Reader::new(Cursor::new(&self.bytes));
         reader.set_format(self.format);
-        let dynimage = reader
-            .decode()
-            .map_err(|e| format!("failed to decode image: {e}"))?;
+        let dynimage = reader.decode().context("failed to decode image")?;
 
         let width = dynimage.width();
         let height = dynimage.height();
@@ -100,25 +113,22 @@ impl ImgBuf {
         })
     }
 
-    /// Convert this ImgBuf into Frames
-    pub fn as_frames(&self) -> Result<Frames, String> {
-        match self.format {
-            ImageFormat::Gif => Ok(GifDecoder::new(Cursor::new(&self.bytes))
-                .map_err(|e| format!("failed to decode gif during animation: {e}"))?
-                .into_frames()),
-            ImageFormat::WebP => Ok(WebPDecoder::new(Cursor::new(&self.bytes))
-                .map_err(|e| format!("failed to decode webp during animation: {e}"))?
-                .into_frames()),
-            ImageFormat::Png => Ok(PngDecoder::new(Cursor::new(&self.bytes))
-                .map_err(|e| format!("failed to decode png during animation: {e}"))?
+    /// Convert this `ImgBuf` into Frames
+    pub fn as_frames(&self) -> Result<Frames> {
+        Ok(match self.format {
+            ImageFormat::Gif => GifDecoder::new(Cursor::new(&self.bytes))
+                .context("failed to decode gif during animation")?
+                .into_frames(),
+            ImageFormat::WebP => WebPDecoder::new(Cursor::new(&self.bytes))
+                .context("failed to decode webp during animation")?
+                .into_frames(),
+            ImageFormat::Png => PngDecoder::new(Cursor::new(&self.bytes))
+                .context("failed to decode png during animation")?
                 .apng()
-                .unwrap() // we detected this earlier
-                .into_frames()),
-            _ => Err(format!(
-                "requested format has no decoder: {:#?}",
-                self.format
-            )),
-        }
+                .context("failed to decode png during animation")?
+                .into_frames(),
+            _ => bail!("requested format has no decoder: {:#?}", self.format),
+        })
     }
 }
 
@@ -192,7 +202,7 @@ pub fn compress_frames(
     filter: FilterType,
     resize: ResizeStrategy,
     color: &[u8; 3],
-) -> Result<Vec<(BitPack, Duration)>, String> {
+) -> Result<Vec<(BitPack, Duration)>> {
     let mut compressor = Compressor::new();
     let mut compressed_frames = Vec::new();
 
@@ -260,7 +270,7 @@ pub fn make_filter(filter: &cli::Filter) -> fast_image_resize::FilterType {
     }
 }
 
-pub fn img_pad(img: &Image, dimensions: (u32, u32), color: &[u8; 3]) -> Result<Box<[u8]>, String> {
+pub fn img_pad(img: &Image, dimensions: (u32, u32), color: &[u8; 3]) -> Result<Box<[u8]>> {
     let channels = img.format.channels() as usize;
 
     let mut color3 = color.to_owned();
@@ -328,7 +338,7 @@ pub fn img_resize_fit(
     dimensions: (u32, u32),
     filter: FilterType,
     padding_color: &[u8; 3],
-) -> Result<Box<[u8]>, String> {
+) -> Result<Box<[u8]>> {
     let (width, height) = dimensions;
     if (img.width, img.height) != (width, height) {
         // if our image is already scaled to fit, skip resizing it and just pad it directly
@@ -352,23 +362,18 @@ pub fn img_resize_fit(
         } else {
             PixelType::U8x4
         };
-        let src = match fast_image_resize::images::ImageRef::new(
+        let src = fast_image_resize::images::ImageRef::new(
             img.width,
             img.height,
             img.bytes.as_ref(),
             pixel_type,
-        ) {
-            Ok(i) => i,
-            Err(e) => return Err(e.to_string()),
-        };
+        )?;
 
         let mut dst = fast_image_resize::images::Image::new(trg_w, trg_h, pixel_type);
         let mut resizer = Resizer::new();
         let options = ResizeOptions::new().resize_alg(ResizeAlg::Convolution(filter));
 
-        if let Err(e) = resizer.resize(&src, &mut dst, Some(&options)) {
-            return Err(e.to_string());
-        }
+        resizer.resize(&src, &mut dst, Some(&options))?;
 
         let img = Image {
             width: trg_w,
@@ -386,7 +391,7 @@ pub fn img_resize_crop(
     img: &Image,
     dimensions: (u32, u32),
     filter: FilterType,
-) -> Result<Box<[u8]>, String> {
+) -> Result<Box<[u8]>> {
     let (width, height) = dimensions;
     let resized_img = if (img.width, img.height) != (width, height) {
         let pixel_type = if img.format.channels() == 3 {
@@ -394,15 +399,12 @@ pub fn img_resize_crop(
         } else {
             PixelType::U8x4
         };
-        let src = match fast_image_resize::images::ImageRef::new(
+        let src = fast_image_resize::images::ImageRef::new(
             img.width,
             img.height,
             img.bytes.as_ref(),
             pixel_type,
-        ) {
-            Ok(i) => i,
-            Err(e) => return Err(e.to_string()),
-        };
+        )?;
 
         let mut dst = fast_image_resize::images::Image::new(width, height, pixel_type);
         let mut resizer = Resizer::new();
@@ -410,9 +412,7 @@ pub fn img_resize_crop(
             .resize_alg(ResizeAlg::Convolution(filter))
             .fit_into_destination(Some((0.5, 0.5)));
 
-        if let Err(e) = resizer.resize(&src, &mut dst, Some(&options)) {
-            return Err(e.to_string());
-        }
+        resizer.resize(&src, &mut dst, Some(&options))?;
 
         dst.into_vec().into_boxed_slice()
     } else {

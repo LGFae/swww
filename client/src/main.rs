@@ -1,23 +1,30 @@
-use clap::Parser;
 use std::path::Path;
 use std::time::Duration;
 
-use utils::{
-    cache,
-    ipc::{self, Answer, RequestSend, Socket},
-};
+use anyhow::anyhow;
+use anyhow::bail;
+use anyhow::Context;
+use anyhow::Error;
+use anyhow::Result;
+use clap::Parser;
+use utils::cache;
+use utils::ipc;
+use utils::ipc::Answer;
+use utils::ipc::RequestSend;
+use utils::ipc::Socket;
 
-mod imgproc;
 use imgproc::*;
 
-mod cli;
 use cli::{CliImage, ResizeStrategy, Swww};
 
-fn main() -> Result<(), String> {
+mod cli;
+mod imgproc;
+
+fn main() -> Result<()> {
     let swww = Swww::parse();
 
     if let Swww::ClearCache = &swww {
-        return cache::clean().map_err(|e| format!("failed to clean the cache: {e}"));
+        return cache::clean().context("failed to clean the cache");
     }
 
     let socket = Socket::connect()?;
@@ -31,7 +38,7 @@ fn main() -> Result<(), String> {
                 break;
             }
         } else {
-            return Err("Daemon did not return Answer::Ping, as expected".to_string());
+            bail!("Daemon did not return Answer::Ping, as expected");
         }
         std::thread::sleep(Duration::from_millis(1));
     }
@@ -40,7 +47,7 @@ fn main() -> Result<(), String> {
 }
 
 impl Swww {
-    fn process(&self, socket: Socket) -> Result<(), String> {
+    fn process(&self, socket: Socket) -> Result<()> {
         let request = match make_request(self)? {
             Some(request) => request,
             None => return Ok(()),
@@ -49,7 +56,7 @@ impl Swww {
         let bytes = socket.read()?;
         drop(socket);
         match Answer::receive(bytes) {
-            Answer::Err(msg) => return Err(msg.to_string()),
+            Answer::Err(msg) => return Err(Error::msg(msg)),
             Answer::Info(info) => info.iter().for_each(|i| println!("{}", i)),
             Answer::Ok => {
                 if let Swww::Kill = self {
@@ -64,20 +71,16 @@ impl Swww {
                         }
                         std::thread::sleep(Duration::from_millis(100));
                     }
-                    return Err(format!(
-                        "Could not confirm socket deletion at: {socket_path:?}"
-                    ));
+                    bail!("Could not confirm socket deletion at: {socket_path:?}");
                 }
             }
-            Answer::Ping(_) => {
-                return Ok(());
-            }
+            Answer::Ping(_) => {}
         }
         Ok(())
     }
 }
 
-fn make_request(args: &Swww) -> Result<Option<RequestSend>, String> {
+fn make_request(args: &Swww) -> Result<Option<RequestSend>> {
     match args {
         Swww::Clear(c) => {
             let (format, _, _) = get_format_dims_and_outputs(&[])?;
@@ -116,7 +119,7 @@ fn make_img_request(
     dims: &[(u32, u32)],
     pixel_format: ipc::PixelFormat,
     outputs: &[Vec<String>],
-) -> Result<ipc::Mmap, String> {
+) -> Result<ipc::Mmap> {
     let transition = make_transition(img);
     let mut img_req_builder = ipc::ImageRequestBuilder::new(transition);
 
@@ -148,7 +151,7 @@ fn make_img_request(
                         if let Some("-") = img_path.to_str() {
                             "STDIN".to_string()
                         } else {
-                            return Err(format!("failed no canonicalize image path: {e}"));
+                            bail!("failed no canonicalize image path: {e}");
                         }
                     }
                 };
@@ -212,7 +215,7 @@ fn make_img_request(
 #[allow(clippy::type_complexity)]
 fn get_format_dims_and_outputs(
     requested_outputs: &[&str],
-) -> Result<(ipc::PixelFormat, Vec<(u32, u32)>, Vec<Vec<String>>), String> {
+) -> Result<(ipc::PixelFormat, Vec<(u32, u32)>, Vec<Vec<String>>)> {
     let mut outputs: Vec<Vec<String>> = Vec::new();
     let mut dims: Vec<(u32, u32)> = Vec::new();
     let mut imgs: Vec<ipc::BgImg> = Vec::new();
@@ -247,12 +250,12 @@ fn get_format_dims_and_outputs(
                 }
             }
             if outputs.is_empty() {
-                Err("none of the requested outputs are valid".to_owned())
+                Err(anyhow!("none of the requested outputs are valid"))
             } else {
                 Ok((format, dims, outputs))
             }
         }
-        Answer::Err(e) => Err(format!("daemon error when sending query: {e}")),
+        Answer::Err(e) => Err(anyhow!("daemon error when sending query: {e}")),
         _ => unreachable!(),
     }
 }
@@ -261,12 +264,12 @@ fn split_cmdline_outputs(outputs: &str) -> Box<[&str]> {
     outputs.split(',').filter(|s| !s.is_empty()).collect()
 }
 
-fn restore_from_cache(requested_outputs: &[&str]) -> Result<(), String> {
+fn restore_from_cache(requested_outputs: &[&str]) -> Result<()> {
     let (_, _, outputs) = get_format_dims_and_outputs(requested_outputs)?;
 
     for output in outputs.iter().flatten() {
         let img_path = utils::cache::get_previous_image_path(output)
-            .map_err(|e| format!("failed to get previous image path: {e}"))?;
+            .context("failed to get previous image path")?;
         #[allow(deprecated)]
         if let Err(e) = Swww::Img(cli::Img {
             image: cli::parse_image(&img_path)?,

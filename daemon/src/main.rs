@@ -7,6 +7,7 @@ mod cli;
 mod wallpaper;
 #[allow(dead_code)]
 mod wayland;
+use anyhow::{bail, Context, Result};
 use log::{debug, error, info, warn, LevelFilter};
 use rustix::{
     event::{poll, PollFd, PollFlags},
@@ -385,7 +386,7 @@ impl wayland::interfaces::wp_fractional_scale_v1::EvHandler for Daemon {
     }
 }
 
-fn main() -> Result<(), String> {
+fn main() -> Result<()> {
     // first, get the command line arguments and make the logger
     let cli = cli::Cli::new();
     make_logger(cli.quiet);
@@ -425,7 +426,7 @@ fn main() -> Result<(), String> {
         if let Err(e) = poll(&mut fds, -1) {
             match e {
                 rustix::io::Errno::INTR => continue,
-                _ => return Err(format!("failed to poll file descriptors: {e:?}")),
+                _ => Err(e).context("failed to poll file descriptors")?,
             }
         }
 
@@ -433,7 +434,7 @@ fn main() -> Result<(), String> {
             let (msg, payload) = match wire::WireMsg::recv() {
                 Ok((msg, payload)) => (msg, payload),
                 Err(rustix::io::Errno::INTR) => continue,
-                Err(e) => return Err(format!("failed to receive wire message: {e:?}")),
+                Err(e) => Err(e).context("failed to receive wire message")?,
             };
 
             match msg.sender_id() {
@@ -469,7 +470,7 @@ fn main() -> Result<(), String> {
             match rustix::net::accept(listener.socket.as_fd()) {
                 Ok(stream) => daemon.recv_socket_msg(&stream.into()),
                 Err(rustix::io::Errno::INTR | rustix::io::Errno::WOULDBLOCK) => continue,
-                Err(e) => return Err(format!("failed to accept incoming connection: {e}")),
+                Err(e) => Err(e).context("failed to accept incoming connection: {e}")?,
             }
         }
     }
@@ -525,33 +526,25 @@ struct ServerSocket {
 }
 
 impl ServerSocket {
-    fn new() -> Result<Self, String> {
+    fn new() -> Result<Self> {
         let path = Socket::path();
         let fspath = Path::new(&path);
 
         if fspath.exists() {
             if is_daemon_running()? {
-                return Err(
-                    "There is an swww-daemon instance already running on this socket!".to_string(),
-                );
-            } else {
-                warn!("socket file {path} was not deleted when the previous daemon exited",);
-                if let Err(e) = std::fs::remove_file(&fspath) {
-                    return Err(format!("failed to delete previous socket: {e}"));
-                }
+                bail!("There is an swww-daemon instance already running on this socket!");
             }
+            warn!("socket file {path} was not deleted when the previous daemon exited",);
+            fs::remove_file(fspath).context("failed to delete previous socket")?;
         }
 
         let runtime_dir = match fspath.parent() {
             Some(path) => path,
-            None => return Err("couldn't find a valid runtime directory".to_owned()),
+            None => bail!("couldn't find a valid runtime directory"),
         };
 
         if !runtime_dir.exists() {
-            match fs::create_dir(runtime_dir) {
-                Ok(()) => (),
-                Err(e) => return Err(format!("failed to create runtime dir: {e}")),
-            }
+            fs::create_dir(runtime_dir).context("failed to create runtime dir")?;
         }
 
         let socket = net::socket_with(
@@ -645,7 +638,7 @@ fn make_logger(quiet: bool) {
     .unwrap();
 }
 
-pub fn is_daemon_running() -> Result<bool, String> {
+pub fn is_daemon_running() -> Result<bool> {
     let sock = match Socket::connect() {
         Ok(s) => s,
         // likely a connection refused; either way, this is a reliable signal there's no surviving
@@ -657,7 +650,7 @@ pub fn is_daemon_running() -> Result<bool, String> {
     let answer = Answer::receive(sock.read()?);
     match answer {
         Answer::Ping(_) => Ok(true),
-        _ => Err("Daemon did not return Answer::Ping, as expected".to_string()),
+        _ => bail!("Daemon did not return Answer::Ping, as expected"),
     }
 }
 

@@ -2,6 +2,10 @@ use std::env;
 use std::sync::OnceLock;
 use std::time::Duration;
 
+use anyhow::anyhow;
+use anyhow::bail;
+use anyhow::Context;
+use anyhow::Result;
 use rustix::fd::OwnedFd;
 use rustix::net;
 use rustix::net::RecvFlags;
@@ -40,7 +44,7 @@ impl Socket {
         &self.fd
     }
 
-    pub fn connect() -> Result<Self, String> {
+    pub fn connect() -> Result<Self> {
         Self::connect_configured(5, 100)
     }
 
@@ -48,15 +52,17 @@ impl Socket {
     ///
     /// * `tries` -  how many times to attempt the connection
     /// * `interval` - how long to wait between attempts, in milliseconds
-    pub fn connect_configured(tries: u8, interval: u64) -> Result<Self, String> {
+    pub fn connect_configured(tries: u8, interval: u64) -> Result<Self> {
         let socket = net::socket_with(
             net::AddressFamily::UNIX,
             net::SocketType::STREAM,
             net::SocketFlags::CLOEXEC,
             None,
         )
-        .expect("failed to create socket file descriptor");
-        let addr = net::SocketAddrUnix::new(Self::path()).unwrap();
+        .context("failed to create socket file descriptor")?;
+
+        let addr = net::SocketAddrUnix::new(Self::path()).expect("addr is correct");
+
         //Make sure we try at least once
         let tries = if tries == 0 { 1 } else { tries };
         let mut error = None;
@@ -67,29 +73,29 @@ impl Socket {
                     let timeout = Duration::from_secs(30); //Some operations take a while to respond in debug mode
                     #[cfg(not(debug_assertions))]
                     let timeout = Duration::from_secs(5);
-                    if let Err(e) = net::sockopt::set_socket_timeout(
+                    return match net::sockopt::set_socket_timeout(
                         &socket,
                         net::sockopt::Timeout::Recv,
                         Some(timeout),
                     ) {
-                        return Err(format!("failed to set read timeout for socket: {e}"));
-                    }
-
-                    return Ok(Self { fd: socket });
+                        Ok(()) => Ok(Self { fd: socket }),
+                        Err(e) => bail!("failed to set read timeout for socket: {e}"),
+                    };
                 }
                 Err(e) => error = Some(e),
             }
             std::thread::sleep(Duration::from_millis(interval));
         }
-        let error = error.unwrap();
+
+        let error = error.expect("error must have ocurred");
         if error.kind() == std::io::ErrorKind::NotFound {
-            return Err("Socket file not found. Are you sure swww-daemon is running?".to_string());
+            bail!("Socket file not found. Are you sure swww-daemon is running?");
         }
 
-        Err(format!("Failed to connect to socket: {error}"))
+        Err(anyhow!("Failed to connect to socket")).context(error)
     }
 
-    pub fn read(&self) -> Result<SocketMsg, String> {
+    pub fn read(&self) -> Result<SocketMsg> {
         let mut buf = [0u8; 16];
         let mut ancillary_buf = [0u8; rustix::cmsg_space!(ScmRights(1))];
 
@@ -104,7 +110,7 @@ impl Socket {
                     if e.kind() == std::io::ErrorKind::WouldBlock && tries < 5 {
                         std::thread::sleep(Duration::from_millis(1));
                     } else {
-                        return Err(format!("failed to read serialized length: {e}"));
+                        bail!("failed to read serialized length: {e}");
                     }
                 }
             }

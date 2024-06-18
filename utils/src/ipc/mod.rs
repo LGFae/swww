@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use anyhow::{anyhow, Context, Result};
 use rustix::fd::OwnedFd;
 
 mod mmap;
@@ -134,7 +135,7 @@ pub enum RequestRecv {
 }
 
 impl RequestSend {
-    pub fn send(&self, stream: &OwnedFd) -> Result<(), String> {
+    pub fn send(&self, stream: &OwnedFd) -> Result<()> {
         let mut socket_msg = [0u8; 16];
         socket_msg[0..8].copy_from_slice(&match self {
             Self::Ping => 0u64.to_ne_bytes(),
@@ -151,12 +152,10 @@ impl RequestSend {
         };
 
         match send_socket_msg(stream, &mut socket_msg, mmap) {
-            Ok(true) => (),
-            Ok(false) => return Err("failed to send full length of message in socket!".to_string()),
-            Err(e) => return Err(format!("failed to write serialized request: {e}")),
+            Ok(true) => Ok(()),
+            Ok(false) => Err(anyhow!("failed to send full length of message in socket!")),
+            Err(e) => Err(e).context("failed to write serialized request"),
         }
-
-        Ok(())
     }
 }
 
