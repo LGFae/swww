@@ -1,0 +1,41 @@
+[package]
+name = "swww"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license-file.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+image = { version = "0.25", default-features = false, features = [
+  # all formats, except avif, since avif compiles just rav1d, which is just an
+  # encoder, which we do not care about
+  "bmp",
+  "dds",
+  "exr",
+  "ff",
+  "gif",
+  "hdr",
+  "ico",
+  "jpeg",
+  "png",
+  "pnm",
+  "qoi",
+  "tga",
+  "tiff",
+  "webp",
+] }
+fast_image_resize = "4.0"
+clap = { version = "4.5", features = ["derive", "wrap_help", "env"] }
+fastrand = { version = "2.1", default-features = false, features = ["std"] }
+utils = { workspace = true }
+
+[dev-dependencies]
+assert_cmd = "2.0"
+
+[build-dependencies]
+clap = { version = "4.5", features = ["derive", "env"] }
+clap_complete = "4.5"

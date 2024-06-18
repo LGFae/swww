@@ -1,19 +1,26 @@
 [package]
 name = "swww-daemon"
-version = "0.9.5-masterV2"
-authors = ["Leonardo Gibrowski Faé <leonardo.fae44@gmail.com>"]
-edition = "2021"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license-file.workspace = true
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lints]
+workspace = true
 
 [dependencies]
-log = { version = "0.4", default_features = false, features = [ "max_level_debug", "release_max_level_info", "std" ] }
+log = { version = "0.4", default-features = false, features = [
+  "max_level_debug",
+  "release_max_level_info",
+  "std",
+] }
 
-rustix = { version = "0.38", default-features = false, features = [ "event" ] }
+rustix = { version = "0.38", default-features = false, features = ["event"] }
 libc = "0.2"
 
 keyframe = "1.1"
 
 sd-notify = { version = "0.4.1" }
 
-utils = { version = "0.9.5-masterV2", path = "../utils" }
+utils = { workspace = true }
