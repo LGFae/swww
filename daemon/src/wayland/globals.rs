@@ -17,8 +17,8 @@ use rustix::{
     net::SocketAddrAny,
 };
 
-use log::{debug, error, info};
 use common::ipc::PixelFormat;
+use log::{debug, error, info};
 
 use super::{ObjectId, ObjectManager, WlDynObj};
 use std::{

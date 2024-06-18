@@ -1,5 +1,5 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use common::compression::{Compressor, Decompressor};
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 fn generate_data() -> (Box<[u8]>, Box<[u8]>) {
     let v1 = vec![120; 1920 * 1080 * 3];
@@ -61,7 +61,11 @@ pub fn compression_and_decompression(c: &mut Criterion) {
     let mut decompressor = Decompressor::new();
     decomp.bench_function("Full", |b| {
         b.iter(|| {
-            black_box(decompressor.decompress(&bitpack, &mut canvas, common::ipc::PixelFormat::Xrgb))
+            black_box(decompressor.decompress(
+                &bitpack,
+                &mut canvas,
+                common::ipc::PixelFormat::Xrgb,
+            ))
         })
     });
 

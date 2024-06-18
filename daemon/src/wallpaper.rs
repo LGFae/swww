@@ -1,5 +1,5 @@
-use log::{debug, error, warn};
 use common::ipc::{BgImg, BgInfo, Scale};
+use log::{debug, error, warn};
 
 use std::{
     num::NonZeroI32,
@@ -487,7 +487,7 @@ pub(crate) fn commit_wallpapers(wallpapers: &[Arc<Wallpaper>]) {
 impl Drop for Wallpaper {
     fn drop(&mut self) {
         // note we shouldn't panic in a drop implementation
-       
+
         if let Err(e) = wp_viewport::req::destroy(self.wp_viewport) {
             error!("error destroying wp_viewport: {e:?}");
         }

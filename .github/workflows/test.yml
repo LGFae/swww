@@ -38,7 +38,7 @@ jobs:
         id: msrv
         with:
           file: 'Cargo.toml'
-          field: 'package.rust-version'
+          field: 'workspace.package.rust-version'
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ steps.msrv.outputs.value }}

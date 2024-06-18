@@ -3,8 +3,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use log::debug;
 use common::ipc::{Position, TransitionType};
+use log::debug;
 
 use crate::{
     wallpaper::{AnimationToken, Wallpaper},
