@@ -18,7 +18,7 @@ use rustix::{
 };
 
 use log::{debug, error, info};
-use utils::ipc::PixelFormat;
+use common::ipc::PixelFormat;
 
 use super::{ObjectId, ObjectManager, WlDynObj};
 use std::{

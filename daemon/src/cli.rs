@@ -1,4 +1,4 @@
-use utils::ipc::PixelFormat;
+use common::ipc::PixelFormat;
 
 pub struct Cli {
     pub format: Option<PixelFormat>,

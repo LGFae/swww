@@ -16,7 +16,7 @@ fn spell_check_code_and_man_pages() {
             "doc/generated",   // skip the generated documentation
             "src",             // client
             "daemon/src",      // daemon
-            "utils/src",       // common code
+            "common/src",       // common code
             "doc",             // man pages
             "example_scripts", // scripts
             "CHANGELOG.md",

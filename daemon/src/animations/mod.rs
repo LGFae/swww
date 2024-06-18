@@ -5,7 +5,7 @@ use std::{
     thread::{self, Scope},
 };
 
-use utils::{
+use common::{
     compression::Decompressor,
     ipc::{self, Animation, Answer, BgImg, ImgReq},
 };

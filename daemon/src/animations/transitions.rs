@@ -4,7 +4,7 @@ use std::{
 };
 
 use log::debug;
-use utils::ipc::{Position, TransitionType};
+use common::ipc::{Position, TransitionType};
 
 use crate::{
     wallpaper::{AnimationToken, Wallpaper},
@@ -35,7 +35,7 @@ impl<'a> Transition<'a> {
     pub(super) fn new(
         wallpapers: &'a mut Vec<Arc<Wallpaper>>,
         dimensions: (u32, u32),
-        transition: &utils::ipc::Transition,
+        transition: &common::ipc::Transition,
     ) -> Self {
         Transition {
             animation_tokens: wallpapers

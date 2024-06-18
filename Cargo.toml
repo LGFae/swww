@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["client", "daemon", "utils"]
+members = ["client", "daemon", "common"]
 default-members = ["client", "daemon"]
 
 [workspace.package]
@@ -11,7 +11,7 @@ license-file = "LICENSE"
 rust-version = "1.75"
 
 [workspace.dependencies]
-utils = { path = "utils" }
+common = { path = "common" }
 
 [workspace.lints.clippy]
 correctness = { level = "deny", priority = -1 }

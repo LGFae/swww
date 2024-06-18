@@ -1,5 +1,5 @@
 use log::{debug, error, warn};
-use utils::ipc::{BgImg, BgInfo, Scale};
+use common::ipc::{BgImg, BgInfo, Scale};
 
 use std::{
     num::NonZeroI32,
@@ -238,7 +238,7 @@ impl Wallpaper {
                 .name("cache loader".to_string())
                 .stack_size(1 << 14)
                 .spawn(move || {
-                    if let Err(e) = utils::cache::load(&name) {
+                    if let Err(e) = common::cache::load(&name) {
                         warn!("failed to load cache: {e}");
                     }
                 })

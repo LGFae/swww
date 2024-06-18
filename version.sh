@@ -21,16 +21,16 @@ cargo test --workspace -- --include-ignored
 # Cargo.toml:
 sed \
 	-e "s/^version = .*/version = \"$1\"/" \
-	-e "s/^utils.*/utils = { version = \"$1\", path = \"utils\" }/" \
+	-e "s/^common.*/common = { version = \"$1\", path = \"common\" }/" \
 	Cargo.toml > TMP
 mv -v TMP Cargo.toml
 
-sed "s/^version = .*/version = \"$1\"/" utils/Cargo.toml > TMP
-mv -v TMP utils/Cargo.toml
+sed "s/^version = .*/version = \"$1\"/" common/Cargo.toml > TMP
+mv -v TMP common/Cargo.toml
 
 sed \
 	-e "s/^version = .*/version = \"$1\"/" \
-	-e "s/^utils.*/utils = { version = \"$1\", path = \"..\/utils\" }/" \
+	-e "s/^common.*/common = { version = \"$1\", path = \"..\/common\" }/" \
 	daemon/Cargo.toml > TMP
 mv -v TMP daemon/Cargo.toml
 
