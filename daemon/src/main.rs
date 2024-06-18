@@ -10,7 +10,7 @@ mod wayland;
 use log::{debug, error, info, warn, LevelFilter};
 use rustix::{
     event::{poll, PollFd, PollFlags},
-    fd::OwnedFd,
+    net,
 };
 
 use wallpaper::Wallpaper;
@@ -23,17 +23,14 @@ use std::{
     fs,
     io::{IsTerminal, Write},
     num::{NonZeroI32, NonZeroU32},
-    path::PathBuf,
+    path::Path,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
 };
 
-use utils::ipc::{
-    connect_to_socket, get_socket_path, read_socket, Answer, BgInfo, ImageReq, MmappedStr,
-    RequestRecv, RequestSend, Scale,
-};
+use utils::ipc::{Answer, BgInfo, ImageReq, MmappedStr, RequestRecv, RequestSend, Scale, Socket};
 
 use animations::Animator;
 
@@ -124,8 +121,8 @@ impl Daemon {
         )));
     }
 
-    fn recv_socket_msg(&mut self, stream: OwnedFd) {
-        let bytes = match utils::ipc::read_socket(&stream) {
+    fn recv_socket_msg(&mut self, stream: &Socket) {
+        let bytes = match stream.read() {
             Ok(bytes) => bytes,
             Err(e) => {
                 error!("FATAL: cannot read socket: {e}. Exiting...");
@@ -178,7 +175,7 @@ impl Daemon {
                     .transition(transition, imgs, animations, used_wallpapers)
             }
         };
-        if let Err(e) = answer.send(&stream) {
+        if let Err(e) = answer.send(stream.as_fd()) {
             error!("error sending answer to client: {e}");
         }
     }
@@ -399,7 +396,7 @@ fn main() -> Result<(), String> {
     // create the socket listener and setup the signal handlers
     // this will also return an error if there is an `swww-daemon` instance already
     // running
-    let listener = SocketWrapper::new()?;
+    let listener = ServerSocket::new()?;
     setup_signals();
 
     // use the initializer to create the Daemon, then drop it to free up the memory
@@ -418,7 +415,7 @@ fn main() -> Result<(), String> {
     let wayland_fd = wayland::globals::wayland_fd();
     let mut fds = [
         PollFd::new(&wayland_fd, PollFlags::IN),
-        PollFd::new(&listener.0, PollFlags::IN),
+        PollFd::new(listener.socket.as_fd(), PollFlags::IN),
     ];
 
     // main loop
@@ -469,8 +466,8 @@ fn main() -> Result<(), String> {
         }
 
         if !fds[1].revents().is_empty() {
-            match rustix::net::accept(&listener.0) {
-                Ok(stream) => daemon.recv_socket_msg(stream),
+            match rustix::net::accept(listener.socket.as_fd()) {
+                Ok(stream) => daemon.recv_socket_msg(&stream.into()),
                 Err(rustix::io::Errno::INTR | rustix::io::Errno::WOULDBLOCK) => continue,
                 Err(e) => return Err(format!("failed to accept incoming connection: {e}")),
             }
@@ -522,28 +519,30 @@ fn setup_signals() {
 }
 
 /// This is a wrapper that makes sure to delete the socket when it is dropped
-struct SocketWrapper(OwnedFd);
-impl SocketWrapper {
-    fn new() -> Result<Self, String> {
-        let socket_addr = get_socket_path();
+struct ServerSocket {
+    socket: Socket,
+    path: &'static str,
+}
 
-        if socket_addr.exists() {
-            if is_daemon_running(&socket_addr)? {
+impl ServerSocket {
+    fn new() -> Result<Self, String> {
+        let path = Socket::path();
+        let fspath = Path::new(&path);
+
+        if fspath.exists() {
+            if is_daemon_running()? {
                 return Err(
                     "There is an swww-daemon instance already running on this socket!".to_string(),
                 );
             } else {
-                warn!(
-                    "socket file {} was not deleted when the previous daemon exited",
-                    socket_addr.to_string_lossy()
-                );
-                if let Err(e) = std::fs::remove_file(&socket_addr) {
+                warn!("socket file {path} was not deleted when the previous daemon exited",);
+                if let Err(e) = std::fs::remove_file(&fspath) {
                     return Err(format!("failed to delete previous socket: {e}"));
                 }
             }
         }
 
-        let runtime_dir = match socket_addr.parent() {
+        let runtime_dir = match fspath.parent() {
             Some(path) => path,
             None => return Err("couldn't find a valid runtime directory".to_owned()),
         };
@@ -555,34 +554,32 @@ impl SocketWrapper {
             }
         }
 
-        let socket = rustix::net::socket_with(
-            rustix::net::AddressFamily::UNIX,
-            rustix::net::SocketType::STREAM,
-            rustix::net::SocketFlags::CLOEXEC.union(rustix::net::SocketFlags::NONBLOCK),
+        let socket = net::socket_with(
+            net::AddressFamily::UNIX,
+            net::SocketType::STREAM,
+            net::SocketFlags::CLOEXEC.union(rustix::net::SocketFlags::NONBLOCK),
             None,
         )
         .expect("failed to create socket file descriptor");
+        net::bind_unix(&socket, &net::SocketAddrUnix::new(fspath).unwrap()).unwrap();
+        net::listen(&socket, 0).unwrap();
 
-        rustix::net::bind_unix(
-            &socket,
-            &rustix::net::SocketAddrUnix::new(&socket_addr).unwrap(),
-        )
-        .unwrap();
+        debug!("Created socket in {:?}", path);
 
-        rustix::net::listen(&socket, 0).unwrap();
-
-        debug!("Created socket in {:?}", socket_addr);
-        Ok(Self(socket))
+        Ok(Self {
+            socket: socket.into(),
+            path,
+        })
     }
 }
 
-impl Drop for SocketWrapper {
+impl Drop for ServerSocket {
     fn drop(&mut self) {
-        let socket_addr = get_socket_path();
-        if let Err(e) = fs::remove_file(&socket_addr) {
-            error!("Failed to remove socket at {socket_addr:?}: {e}");
+        let path = &self.path;
+        if let Err(e) = fs::remove_file(path) {
+            error!("Failed to remove socket at {path:?}: {e}");
         }
-        info!("Removed socket at {:?}", socket_addr);
+        info!("Removed socket at {:?}", path);
     }
 }
 
@@ -648,16 +645,16 @@ fn make_logger(quiet: bool) {
     .unwrap();
 }
 
-pub fn is_daemon_running(addr: &PathBuf) -> Result<bool, String> {
-    let sock = match connect_to_socket(addr, 5, 100) {
+pub fn is_daemon_running() -> Result<bool, String> {
+    let sock = match Socket::connect() {
         Ok(s) => s,
         // likely a connection refused; either way, this is a reliable signal there's no surviving
         // daemon.
         Err(_) => return Ok(false),
     };
 
-    RequestSend::Ping.send(&sock)?;
-    let answer = Answer::receive(read_socket(&sock)?);
+    RequestSend::Ping.send(sock.as_fd())?;
+    let answer = Answer::receive(sock.read()?);
     match answer {
         Answer::Ping(_) => Ok(true),
         _ => Err("Daemon did not return Answer::Ping, as expected".to_string()),

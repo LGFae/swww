@@ -1,9 +1,10 @@
 use clap::Parser;
+use std::path::Path;
 use std::time::Duration;
 
 use utils::{
     cache,
-    ipc::{self, connect_to_socket, get_socket_path, read_socket, Answer, RequestSend},
+    ipc::{self, Answer, RequestSend, Socket},
 };
 
 mod imgproc;
@@ -19,10 +20,11 @@ fn main() -> Result<(), String> {
         return cache::clean().map_err(|e| format!("failed to clean the cache: {e}"));
     }
 
+    let socket = Socket::connect()?;
+
     loop {
-        let socket = connect_to_socket(&get_socket_path(), 5, 100)?;
-        RequestSend::Ping.send(&socket)?;
-        let bytes = read_socket(&socket)?;
+        RequestSend::Ping.send(socket.as_fd())?;
+        let bytes = socket.read()?;
         let answer = Answer::receive(bytes);
         if let Answer::Ping(configured) = answer {
             if configured {
@@ -34,44 +36,45 @@ fn main() -> Result<(), String> {
         std::thread::sleep(Duration::from_millis(1));
     }
 
-    process_swww_args(&swww)
+    swww.process(socket)
 }
 
-fn process_swww_args(args: &Swww) -> Result<(), String> {
-    let request = match make_request(args)? {
-        Some(request) => request,
-        None => return Ok(()),
-    };
-    let socket = connect_to_socket(&get_socket_path(), 5, 100)?;
-    request.send(&socket)?;
-    let bytes = read_socket(&socket)?;
-    drop(socket);
-    match Answer::receive(bytes) {
-        Answer::Err(msg) => return Err(msg.to_string()),
-        Answer::Info(info) => info.iter().for_each(|i| println!("{}", i)),
-        Answer::Ok => {
-            if let Swww::Kill = args {
-                #[cfg(debug_assertions)]
-                let tries = 20;
-                #[cfg(not(debug_assertions))]
-                let tries = 10;
-                let socket_path = get_socket_path();
-                for _ in 0..tries {
-                    if !socket_path.exists() {
-                        return Ok(());
+impl Swww {
+    fn process(&self, socket: Socket) -> Result<(), String> {
+        let request = match make_request(self)? {
+            Some(request) => request,
+            None => return Ok(()),
+        };
+        request.send(socket.as_fd())?;
+        let bytes = socket.read()?;
+        drop(socket);
+        match Answer::receive(bytes) {
+            Answer::Err(msg) => return Err(msg.to_string()),
+            Answer::Info(info) => info.iter().for_each(|i| println!("{}", i)),
+            Answer::Ok => {
+                if let Swww::Kill = self {
+                    #[cfg(debug_assertions)]
+                    let tries = 20;
+                    #[cfg(not(debug_assertions))]
+                    let tries = 10;
+                    let socket_path = Path::new(Socket::path());
+                    for _ in 0..tries {
+                        if !socket_path.exists() {
+                            return Ok(());
+                        }
+                        std::thread::sleep(Duration::from_millis(100));
                     }
-                    std::thread::sleep(Duration::from_millis(100));
+                    return Err(format!(
+                        "Could not confirm socket deletion at: {socket_path:?}"
+                    ));
                 }
-                return Err(format!(
-                    "Could not confirm socket deletion at: {socket_path:?}"
-                ));
+            }
+            Answer::Ping(_) => {
+                return Ok(());
             }
         }
-        Answer::Ping(_) => {
-            return Ok(());
-        }
+        Ok(())
     }
-    Ok(())
 }
 
 fn make_request(args: &Swww) -> Result<Option<RequestSend>, String> {
@@ -214,9 +217,9 @@ fn get_format_dims_and_outputs(
     let mut dims: Vec<(u32, u32)> = Vec::new();
     let mut imgs: Vec<ipc::BgImg> = Vec::new();
 
-    let socket = connect_to_socket(&get_socket_path(), 5, 100)?;
-    RequestSend::Query.send(&socket)?;
-    let bytes = read_socket(&socket)?;
+    let socket = Socket::connect()?;
+    RequestSend::Query.send(socket.as_fd())?;
+    let bytes = socket.read()?;
     drop(socket);
     let answer = Answer::receive(bytes);
     match answer {
@@ -265,7 +268,7 @@ fn restore_from_cache(requested_outputs: &[&str]) -> Result<(), String> {
         let img_path = utils::cache::get_previous_image_path(output)
             .map_err(|e| format!("failed to get previous image path: {e}"))?;
         #[allow(deprecated)]
-        if let Err(e) = process_swww_args(&Swww::Img(cli::Img {
+        if let Err(e) = Swww::Img(cli::Img {
             image: cli::parse_image(&img_path)?,
             outputs: output.to_string(),
             no_resize: false,
@@ -284,7 +287,9 @@ fn restore_from_cache(requested_outputs: &[&str]) -> Result<(), String> {
             invert_y: false,
             transition_bezier: (0.0, 0.0, 0.0, 0.0),
             transition_wave: (0.0, 0.0),
-        })) {
+        })
+        .process(Socket::connect()?)
+        {
             eprintln!("WARNING: failed to load cache for output {output}: {e}");
         }
     }
