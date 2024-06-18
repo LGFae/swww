@@ -1,5 +1,4 @@
 [workspace]
-resolver = "2"
 members = ["client", "daemon", "common"]
 default-members = ["client", "daemon"]
 
