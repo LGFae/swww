@@ -239,7 +239,6 @@ pub enum Answer {
     Ok,
     Ping(bool),
     Info(Box<[BgInfo]>),
-    Err(String),
 }
 
 impl Answer {
@@ -250,7 +249,6 @@ impl Answer {
             Self::Ping(true) => 1u64.to_ne_bytes(),
             Self::Ping(false) => 2u64.to_ne_bytes(),
             Self::Info(_) => 3u64.to_ne_bytes(),
-            Self::Err(_) => 4u64.to_ne_bytes(),
         });
 
         let mmap = match self {
@@ -266,14 +264,6 @@ impl Answer {
                     i += info.serialize(&mut bytes[i..]);
                 }
 
-                Some(mmap)
-            }
-            Self::Err(s) => {
-                let len = 4 + s.len();
-                let mut mmap = Mmap::create(len);
-                let bytes = mmap.slice_mut();
-                bytes[0..4].copy_from_slice(&(s.as_bytes().len() as u32).to_ne_bytes());
-                bytes[4..len].copy_from_slice(s.as_bytes());
                 Some(mmap)
             }
             _ => None,
@@ -307,15 +297,6 @@ impl Answer {
                 }
 
                 Self::Info(bg_infos.into())
-            }
-            4 => {
-                let mmap = socket_msg.shm.unwrap();
-                let bytes = mmap.slice();
-                let size = u32::from_ne_bytes(bytes[0..4].try_into().unwrap()) as usize;
-                let s = std::str::from_utf8(&bytes[4..4 + size])
-                    .expect("received a non utf8 string from socket")
-                    .to_string();
-                Self::Err(s)
             }
             _ => panic!("Received malformed answer from daemon"),
         }

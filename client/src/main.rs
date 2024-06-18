@@ -47,7 +47,6 @@ fn process_swww_args(args: &Swww) -> Result<(), String> {
     let bytes = read_socket(&socket)?;
     drop(socket);
     match Answer::receive(bytes) {
-        Answer::Err(msg) => return Err(msg.to_string()),
         Answer::Info(info) => info.iter().for_each(|i| println!("{}", i)),
         Answer::Ok => {
             if let Swww::Kill = args {
@@ -249,7 +248,6 @@ fn get_format_dims_and_outputs(
                 Ok((format, dims, outputs))
             }
         }
-        Answer::Err(e) => Err(format!("daemon error when sending query: {e}")),
         _ => unreachable!(),
     }
 }
