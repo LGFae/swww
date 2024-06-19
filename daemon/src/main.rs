@@ -31,8 +31,7 @@ use std::{
 };
 
 use common::ipc::{
-    read_socket, Answer, BgInfo, ImageReq, IpcSocket, MmappedStr, RequestRecv, RequestSend, Scale,
-    Server,
+    Answer, BgInfo, ImageReq, IpcSocket, MmappedStr, RequestRecv, RequestSend, Scale, Server,
 };
 
 use animations::Animator;
@@ -124,8 +123,8 @@ impl Daemon {
         )));
     }
 
-    fn recv_socket_msg(&mut self, stream: OwnedFd) {
-        let bytes = match common::ipc::read_socket(&stream) {
+    fn recv_socket_msg(&mut self, stream: IpcSocket<Server>) {
+        let bytes = match stream.recv() {
             Ok(bytes) => bytes,
             Err(e) => {
                 error!("FATAL: cannot read socket: {e}. Exiting...");
@@ -470,7 +469,8 @@ fn main() -> Result<(), String> {
 
         if !fds[1].revents().is_empty() {
             match rustix::net::accept(&listener.0) {
-                Ok(stream) => daemon.recv_socket_msg(stream),
+                // TODO: abstract away explicit socket creation
+                Ok(stream) => daemon.recv_socket_msg(IpcSocket::new(stream)),
                 Err(rustix::io::Errno::INTR | rustix::io::Errno::WOULDBLOCK) => continue,
                 Err(e) => return Err(format!("failed to accept incoming connection: {e}")),
             }
@@ -643,8 +643,8 @@ pub fn is_daemon_running() -> Result<bool, String> {
         Err(_) => return Ok(false),
     };
 
-    RequestSend::Ping.send(sock.as_fd())?;
-    let answer = Answer::receive(read_socket(sock.as_fd())?);
+    RequestSend::Ping.send(&sock)?;
+    let answer = Answer::receive(sock.recv().map_err(|err| err.to_string())?);
     match answer {
         Answer::Ping(_) => Ok(true),
         _ => Err("Daemon did not return Answer::Ping, as expected".to_string()),

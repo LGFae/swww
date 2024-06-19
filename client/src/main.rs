@@ -3,7 +3,7 @@ use std::{path::Path, time::Duration};
 use clap::Parser;
 use common::{
     cache,
-    ipc::{self, read_socket, Answer, Client, IpcSocket, RequestSend},
+    ipc::{self, Answer, Client, IpcSocket, RequestSend},
 };
 
 mod imgproc;
@@ -21,8 +21,8 @@ fn main() -> Result<(), String> {
 
     let socket = IpcSocket::connect().map_err(|err| err.to_string())?;
     loop {
-        RequestSend::Ping.send(socket.as_fd())?;
-        let bytes = read_socket(socket.as_fd())?;
+        RequestSend::Ping.send(&socket)?;
+        let bytes = socket.recv().map_err(|err| err.to_string())?;
         let answer = Answer::receive(bytes);
         if let Answer::Ping(configured) = answer {
             if configured {
@@ -43,8 +43,8 @@ fn process_swww_args(args: &Swww) -> Result<(), String> {
         None => return Ok(()),
     };
     let socket = IpcSocket::connect().map_err(|err| err.to_string())?;
-    request.send(socket.as_fd())?;
-    let bytes = read_socket(socket.as_fd())?;
+    request.send(&socket)?;
+    let bytes = socket.recv().map_err(|err| err.to_string())?;
     drop(socket);
     match Answer::receive(bytes) {
         Answer::Info(info) => info.iter().for_each(|i| println!("{}", i)),
@@ -213,8 +213,8 @@ fn get_format_dims_and_outputs(
     let mut imgs: Vec<ipc::BgImg> = Vec::new();
 
     let socket = IpcSocket::connect().map_err(|err| err.to_string())?;
-    RequestSend::Query.send(socket.as_fd())?;
-    let bytes = read_socket(socket.as_fd())?;
+    RequestSend::Query.send(&socket)?;
+    let bytes = socket.recv().map_err(|err| err.to_string())?;
     drop(socket);
     let answer = Answer::receive(bytes);
     match answer {

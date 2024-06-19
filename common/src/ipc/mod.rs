@@ -1,10 +1,11 @@
 use std::path::PathBuf;
 
-use rustix::fd::OwnedFd;
+use transmit::RawMsg;
 
 mod error;
 mod mmap;
 mod socket;
+mod transmit;
 mod types;
 
 use crate::cache;
@@ -136,104 +137,20 @@ pub enum RequestRecv {
 }
 
 impl RequestSend {
-    pub fn send(&self, stream: &OwnedFd) -> Result<(), String> {
-        let mut socket_msg = [0u8; 16];
-        socket_msg[0..8].copy_from_slice(&match self {
-            Self::Ping => 0u64.to_ne_bytes(),
-            Self::Query => 1u64.to_ne_bytes(),
-            Self::Clear(_) => 2u64.to_ne_bytes(),
-            Self::Img(_) => 3u64.to_ne_bytes(),
-            Self::Kill => 4u64.to_ne_bytes(),
-        });
-
-        let mmap = match self {
-            Self::Clear(clear) => Some(clear),
-            Self::Img(img) => Some(img),
-            _ => None,
-        };
-
-        match send_socket_msg(stream, &mut socket_msg, mmap) {
-            Ok(true) => (),
-            Ok(false) => return Err("failed to send full length of message in socket!".to_string()),
-            Err(e) => return Err(format!("failed to write serialized request: {e}")),
+    pub fn send(self, stream: &IpcSocket<Client>) -> Result<(), String> {
+        match stream.send(self.into()) {
+            Ok(true) => Ok(()),
+            Ok(false) => Err("failed to send full length of message in socket!".to_string()),
+            Err(e) => Err(format!("failed to write serialized request: {e}")),
         }
-
-        Ok(())
     }
 }
 
 impl RequestRecv {
     #[must_use]
     #[inline]
-    pub fn receive(socket_msg: SocketMsg) -> Self {
-        let ret = match socket_msg.code {
-            0 => Self::Ping,
-            1 => Self::Query,
-            2 => {
-                let mmap = socket_msg.shm.unwrap();
-                let bytes = mmap.slice();
-                let len = bytes[0] as usize;
-                let mut outputs = Vec::with_capacity(len);
-                let mut i = 1;
-                for _ in 0..len {
-                    let output = MmappedStr::new(&mmap, &bytes[i..]);
-                    i += 4 + output.str().len();
-                    outputs.push(output);
-                }
-                let color = [bytes[i], bytes[i + 1], bytes[i + 2]];
-                Self::Clear(ClearReq {
-                    color,
-                    outputs: outputs.into(),
-                })
-            }
-            3 => {
-                let mmap = socket_msg.shm.unwrap();
-                let bytes = mmap.slice();
-                let transition = Transition::deserialize(&bytes[0..]);
-                let len = bytes[51] as usize;
-
-                let mut imgs = Vec::with_capacity(len);
-                let mut outputs = Vec::with_capacity(len);
-                let mut animations = Vec::with_capacity(len);
-
-                let mut i = 52;
-                for _ in 0..len {
-                    let (img, offset) = ImgReq::deserialize(&mmap, &bytes[i..]);
-                    i += offset;
-                    imgs.push(img);
-
-                    let n_outputs = bytes[i] as usize;
-                    i += 1;
-                    let mut out = Vec::with_capacity(n_outputs);
-                    for _ in 0..n_outputs {
-                        let output = MmappedStr::new(&mmap, &bytes[i..]);
-                        i += 4 + output.str().len();
-                        out.push(output);
-                    }
-                    outputs.push(out.into());
-
-                    if bytes[i] == 1 {
-                        let (animation, offset) = Animation::deserialize(&mmap, &bytes[i + 1..]);
-                        i += offset;
-                        animations.push(animation);
-                    }
-                    i += 1;
-                }
-
-                Self::Img(ImageReq {
-                    transition,
-                    imgs: imgs.into(),
-                    outputs: outputs.into(),
-                    animations: if animations.is_empty() {
-                        None
-                    } else {
-                        Some(animations.into())
-                    },
-                })
-            }
-            _ => Self::Kill,
-        };
-        ret
+    pub fn receive(msg: RawMsg) -> Self {
+        msg.into()
     }
 }
 
@@ -244,34 +161,8 @@ pub enum Answer {
 }
 
 impl Answer {
-    pub fn send(&self, stream: &OwnedFd) -> Result<(), String> {
-        let mut socket_msg = [0u8; 16];
-        socket_msg[0..8].copy_from_slice(&match self {
-            Self::Ok => 0u64.to_ne_bytes(),
-            Self::Ping(true) => 1u64.to_ne_bytes(),
-            Self::Ping(false) => 2u64.to_ne_bytes(),
-            Self::Info(_) => 3u64.to_ne_bytes(),
-        });
-
-        let mmap = match self {
-            Self::Info(infos) => {
-                let len = 1 + infos.iter().map(|i| i.serialized_size()).sum::<usize>();
-                let mut mmap = Mmap::create(len);
-                let bytes = mmap.slice_mut();
-
-                bytes[0] = infos.len() as u8;
-                let mut i = 1;
-
-                for info in infos.iter() {
-                    i += info.serialize(&mut bytes[i..]);
-                }
-
-                Some(mmap)
-            }
-            _ => None,
-        };
-
-        match send_socket_msg(stream, &mut socket_msg, mmap.as_ref()) {
+    pub fn send(self, stream: &IpcSocket<Server>) -> Result<(), String> {
+        match stream.send(self.into()) {
             Ok(true) => Ok(()),
             Ok(false) => Err("failed to send full length of message in socket!".to_string()),
             Err(e) => Err(format!("failed to write serialized request: {e}")),
@@ -280,27 +171,7 @@ impl Answer {
 
     #[must_use]
     #[inline]
-    pub fn receive(socket_msg: SocketMsg) -> Self {
-        match socket_msg.code {
-            0 => Self::Ok,
-            1 => Self::Ping(true),
-            2 => Self::Ping(false),
-            3 => {
-                let mmap = socket_msg.shm.unwrap();
-                let bytes = mmap.slice();
-                let len = bytes[0] as usize;
-                let mut bg_infos = Vec::with_capacity(len);
-
-                let mut i = 1;
-                for _ in 0..len {
-                    let (info, offset) = BgInfo::deserialize(&bytes[i..]);
-                    i += offset;
-                    bg_infos.push(info);
-                }
-
-                Self::Info(bg_infos.into())
-            }
-            _ => panic!("Received malformed answer from daemon"),
-        }
+    pub fn receive(msg: RawMsg) -> Self {
+        msg.into()
     }
 }

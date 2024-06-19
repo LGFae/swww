@@ -30,6 +30,12 @@ pub enum IpcErrorKind {
     NoSocketFile,
     /// Socket timeout couldn't be set
     SetTimeout,
+    /// IPC contained invalid identification code
+    BadCode,
+    /// IPC payload was broken
+    MalformedMsg,
+    /// Reading socket failed
+    Read,
 }
 
 impl IpcErrorKind {
@@ -41,6 +47,9 @@ impl IpcErrorKind {
             Self::Listen => "failed to listen on socket",
             Self::NoSocketFile => "Socket file not found. Are you sure swww-daemon is running?",
             Self::SetTimeout => "failed to set read timeout for socket",
+            Self::BadCode => "invalid message code",
+            Self::MalformedMsg => "malformed ancillary message",
+            Self::Read => "failed to receive message",
         }
     }
 }
