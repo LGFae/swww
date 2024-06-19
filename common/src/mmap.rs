@@ -251,40 +251,23 @@ fn create_memfd() -> rustix::io::Result<OwnedFd> {
     }
 }
 
-pub struct MmappedBytes {
+pub struct Mmapped<const UTF8: bool> {
     base_ptr: NonNull<std::ffi::c_void>,
     ptr: NonNull<std::ffi::c_void>,
     len: usize,
 }
 
-impl MmappedBytes {
+pub type MmappedBytes = Mmapped<false>;
+pub type MmappedStr = Mmapped<true>;
+
+impl<const UTF8: bool> Mmapped<UTF8> {
     const PROT: ProtFlags = ProtFlags::READ;
     const FLAGS: MapFlags = MapFlags::SHARED;
 
     pub(crate) fn new(map: &Mmap, bytes: &[u8]) -> Self {
         let len = u32::from_ne_bytes(bytes[0..4].try_into().unwrap()) as usize;
-        let offset = 4 + bytes.as_ptr() as usize - map.ptr.as_ptr() as usize;
-        let page_size = rustix::param::page_size();
-        let page_offset = offset - offset % page_size;
-
-        let base_ptr = unsafe {
-            let ptr = mmap(
-                std::ptr::null_mut(),
-                len + (offset - page_offset),
-                Self::PROT,
-                Self::FLAGS,
-                &map.fd,
-                page_offset as u64,
-            )
-            .unwrap();
-            // SAFETY: the function above will never return a null pointer if it succeeds
-            // POSIX says that the implementation will never select an address at 0
-            NonNull::new_unchecked(ptr)
-        };
-        let ptr =
-            unsafe { NonNull::new_unchecked(base_ptr.as_ptr().byte_add(offset - page_offset)) };
-
-        Self { base_ptr, ptr, len }
+        let bytes = &bytes[4..];
+        Self::new_with_len(map, bytes, len)
     }
 
     pub(crate) fn new_with_len(map: &Mmap, bytes: &[u8], len: usize) -> Self {
@@ -309,6 +292,12 @@ impl MmappedBytes {
         let ptr =
             unsafe { NonNull::new_unchecked(base_ptr.as_ptr().byte_add(offset - page_offset)) };
 
+        if UTF8 {
+            // try to parse, panicking if we fail
+            let s = unsafe { std::slice::from_raw_parts(ptr.as_ptr().cast(), len) };
+            let _s = std::str::from_utf8(s).expect("received a non utf8 string from socket");
+        }
+
         Self { base_ptr, ptr, len }
     }
 
@@ -319,59 +308,7 @@ impl MmappedBytes {
     }
 }
 
-impl Drop for MmappedBytes {
-    #[inline]
-    fn drop(&mut self) {
-        let len = self.len + self.ptr.as_ptr() as usize - self.base_ptr.as_ptr() as usize;
-        if let Err(e) = unsafe { munmap(self.base_ptr.as_ptr(), len) } {
-            eprintln!("ERROR WHEN UNMAPPING MEMORY: {e}");
-        }
-    }
-}
-
-unsafe impl Send for MmappedBytes {}
-unsafe impl Sync for MmappedBytes {}
-
-pub struct MmappedStr {
-    base_ptr: NonNull<std::ffi::c_void>,
-    ptr: NonNull<std::ffi::c_void>,
-    len: usize,
-}
-
 impl MmappedStr {
-    const PROT: ProtFlags = ProtFlags::READ;
-    const FLAGS: MapFlags = MapFlags::SHARED;
-
-    pub(crate) fn new(map: &Mmap, bytes: &[u8]) -> Self {
-        let len = u32::from_ne_bytes(bytes[0..4].try_into().unwrap()) as usize;
-        let offset = 4 + bytes.as_ptr() as usize - map.ptr.as_ptr() as usize;
-        let page_size = rustix::param::page_size();
-        let page_offset = offset - offset % page_size;
-
-        let base_ptr = unsafe {
-            let ptr = mmap(
-                std::ptr::null_mut(),
-                len + (offset - page_offset),
-                Self::PROT,
-                Self::FLAGS,
-                &map.fd,
-                page_offset as u64,
-            )
-            .unwrap();
-            // SAFETY: the function above will never return a null pointer if it succeeds
-            // POSIX says that the implementation will never select an address at 0
-            NonNull::new_unchecked(ptr)
-        };
-        let ptr =
-            unsafe { NonNull::new_unchecked(base_ptr.as_ptr().byte_add(offset - page_offset)) };
-
-        // try to parse, panicking if we fail
-        let s = unsafe { std::slice::from_raw_parts(ptr.as_ptr().cast(), len) };
-        let _s = std::str::from_utf8(s).expect("received a non utf8 string from socket");
-
-        Self { base_ptr, ptr, len }
-    }
-
     #[inline]
     #[must_use]
     pub fn str(&self) -> &str {
@@ -380,10 +317,7 @@ impl MmappedStr {
     }
 }
 
-unsafe impl Send for MmappedStr {}
-unsafe impl Sync for MmappedStr {}
-
-impl Drop for MmappedStr {
+impl<const UTF8: bool> Drop for Mmapped<UTF8> {
     #[inline]
     fn drop(&mut self) {
         let len = self.len + self.ptr.as_ptr() as usize - self.base_ptr.as_ptr() as usize;
@@ -392,3 +326,6 @@ impl Drop for MmappedStr {
         }
     }
 }
+
+unsafe impl<const UTF8: bool> Send for Mmapped<UTF8> {}
+unsafe impl<const UTF8: bool> Sync for Mmapped<UTF8> {}
