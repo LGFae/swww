@@ -51,8 +51,8 @@ impl From<Answer> for RawMsg {
     fn from(value: Answer) -> Self {
         let code = match value {
             Answer::Ok => Code::ResOk,
-            Answer::Ping(true) => Code::ResPingTrue,
-            Answer::Ping(false) => Code::ResPingFalse,
+            Answer::Ping(true) => Code::ResConfigured,
+            Answer::Ping(false) => Code::ResAwait,
             Answer::Info(_) => Code::ResInfo,
         };
 
@@ -158,8 +158,8 @@ impl From<RawMsg> for Answer {
     fn from(value: RawMsg) -> Self {
         match value.code {
             Code::ResOk => Self::Ok,
-            Code::ResPingTrue => Self::Ping(true),
-            Code::ResPingFalse => Self::Ping(false),
+            Code::ResConfigured => Self::Ping(true),
+            Code::ResAwait => Self::Ping(false),
             Code::ResInfo => {
                 let mmap = value.shm.unwrap();
                 let bytes = mmap.slice();
@@ -211,9 +211,10 @@ code! {
     ReqClear      2,
     ReqImg        3,
     ReqKill       4,
+
     ResOk         5,
-    ResPingTrue   6,
-    ResPingFalse  7,
+    ResConfigured 6,
+    ResAwait      7,
     ResInfo       8,
 }
 
