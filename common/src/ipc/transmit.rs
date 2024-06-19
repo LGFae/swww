@@ -16,11 +16,11 @@ use super::ImgReq;
 use super::IpcError;
 use super::IpcErrorKind;
 use super::IpcSocket;
-use super::Mmap;
-use super::MmappedStr;
 use super::RequestRecv;
 use super::RequestSend;
 use super::Transition;
+use crate::mmap::Mmap;
+use crate::mmap::MmappedStr;
 
 // could be enum
 pub struct RawMsg {

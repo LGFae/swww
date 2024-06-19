@@ -10,7 +10,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::ipc::{Animation, Mmap, PixelFormat};
+use crate::ipc::Animation;
+use crate::ipc::PixelFormat;
+use crate::mmap::Mmap;
 
 pub(crate) fn store(output_name: &str, img_path: &str) -> io::Result<()> {
     let mut filepath = cache_dir()?;

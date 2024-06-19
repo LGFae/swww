@@ -3,14 +3,13 @@ use std::path::PathBuf;
 use transmit::RawMsg;
 
 mod error;
-mod mmap;
 mod socket;
 mod transmit;
 mod types;
 
 use crate::cache;
+use crate::mmap::Mmap;
 pub use error::*;
-pub use mmap::*;
 pub use socket::*;
 pub use types::*;
 

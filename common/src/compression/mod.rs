@@ -6,7 +6,11 @@ use comp::pack_bytes;
 use decomp::{unpack_bytes_3channels, unpack_bytes_4channels};
 use std::ffi::{c_char, c_int};
 
-use crate::ipc::{ImageRequestBuilder, Mmap, MmappedBytes, PixelFormat};
+use crate::ipc::ImageRequestBuilder;
+use crate::ipc::PixelFormat;
+use crate::mmap::Mmap;
+use crate::mmap::MmappedBytes;
+
 mod comp;
 mod cpu;
 mod decomp;

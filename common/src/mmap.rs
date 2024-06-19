@@ -1,11 +1,15 @@
 use std::ptr::NonNull;
 
-use rustix::{
-    fd::{AsFd, BorrowedFd, OwnedFd},
-    io::Errno,
-    mm::{mmap, munmap, MapFlags, ProtFlags},
-    shm::{Mode, ShmOFlags},
-};
+use rustix::fd::AsFd;
+use rustix::fd::BorrowedFd;
+use rustix::fd::OwnedFd;
+use rustix::io::Errno;
+use rustix::mm::mmap;
+use rustix::mm::munmap;
+use rustix::mm::MapFlags;
+use rustix::mm::ProtFlags;
+use rustix::shm::Mode;
+use rustix::shm::ShmOFlags;
 
 #[derive(Debug)]
 pub struct Mmap {

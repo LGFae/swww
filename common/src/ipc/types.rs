@@ -5,8 +5,11 @@ use std::{
 };
 
 use crate::compression::BitPack;
+use crate::mmap::Mmap;
+use crate::mmap::MmappedBytes;
+use crate::mmap::MmappedStr;
 
-use super::{ImageRequestBuilder, Mmap, MmappedBytes, MmappedStr};
+use super::ImageRequestBuilder;
 
 #[derive(Clone, PartialEq)]
 pub enum Coord {

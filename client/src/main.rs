@@ -1,10 +1,9 @@
 use std::{path::Path, time::Duration};
 
 use clap::Parser;
-use common::{
-    cache,
-    ipc::{self, Answer, Client, IpcSocket, RequestSend},
-};
+use common::cache;
+use common::ipc::{self, Answer, Client, IpcSocket, RequestSend};
+use common::mmap::Mmap;
 
 mod imgproc;
 use imgproc::*;
@@ -111,7 +110,7 @@ fn make_img_request(
     dims: &[(u32, u32)],
     pixel_format: ipc::PixelFormat,
     outputs: &[Vec<String>],
-) -> Result<ipc::Mmap, String> {
+) -> Result<Mmap, String> {
     let transition = make_transition(img);
     let mut img_req_builder = ipc::ImageRequestBuilder::new(transition);
 

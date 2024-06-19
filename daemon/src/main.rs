@@ -30,9 +30,8 @@ use std::{
     },
 };
 
-use common::ipc::{
-    Answer, BgInfo, ImageReq, IpcSocket, MmappedStr, RequestRecv, RequestSend, Scale, Server,
-};
+use common::ipc::{Answer, BgInfo, ImageReq, IpcSocket, RequestRecv, RequestSend, Scale, Server};
+use common::mmap::MmappedStr;
 
 use animations::Animator;
 
