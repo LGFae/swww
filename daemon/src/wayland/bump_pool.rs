@@ -1,6 +1,6 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use common::ipc::Mmap;
+use common::mmap::Mmap;
 
 use super::{globals, ObjectId};
 
