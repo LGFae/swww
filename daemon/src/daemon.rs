@@ -1,3 +1,5 @@
+use std::error::Error;
+use std::fs;
 use std::mem;
 use std::num::NonZeroU32;
 use std::path::Path;
@@ -19,13 +21,13 @@ use common::mmap::MmappedStr;
 use log::debug;
 use log::error;
 use log::info;
+use log::warn;
 
-use rustix::event;
+use rustix::event::poll;
 use rustix::event::PollFd;
 use rustix::event::PollFlags;
-use rustix::io;
 use rustix::io::Errno;
-use rustix::net;
+use rustix::net::accept;
 
 use crate::animations::Animator;
 use crate::wallpaper;
@@ -48,8 +50,10 @@ pub struct Daemon {
 }
 
 impl Daemon {
-    pub fn new(initializer: Initializer, cache: bool) -> Self {
-        log::info!("Selected wl_shm format: {:?}", globals::pixel_format());
+    pub fn new(initializer: Initializer, cache: bool) -> Result<Self, Box<dyn Error>> {
+        Self::init_rt_files()?;
+
+        info!("Selected wl_shm format: {:?}", globals::pixel_format());
         let fractional_scale_manager = initializer.fractional_scale().copied();
 
         let mut daemon = Self {
@@ -63,7 +67,33 @@ impl Daemon {
             daemon.new_output(name);
         }
 
-        daemon
+        Ok(daemon)
+    }
+
+    fn init_rt_files() -> Result<(), Box<dyn Error>> {
+        let addr = IpcSocket::<Server>::path();
+        let path = Path::new(addr);
+        if path.exists() {
+            if Daemon::socket_occupied() {
+                Err("There is an swww-daemon instance already running on this socket!")?;
+            } else {
+                warn!("socket file '{addr}' was not deleted when the previous daemon exited",);
+                if let Err(err) = fs::remove_file(addr) {
+                    Err(format!("failed to delete previous socket: {err}"))?;
+                }
+            }
+        } else {
+            let Some(parent) = path.parent() else {
+                Err("couldn't find a valid runtime directory")?
+            };
+            if !parent.exists() {
+                if let Err(err) = fs::create_dir(parent) {
+                    Err(format!("failed to create runtime dir: {err}"))?
+                };
+            }
+        }
+        debug!("Created socket in {addr}");
+        Ok(())
     }
 
     fn wallpapers_info(&self) -> Box<[BgInfo]> {
@@ -94,9 +124,9 @@ impl Daemon {
 
         // main loop
         while !EXIT.load(Ordering::Acquire) {
-            if let Err(e) = event::poll(&mut fds, -1) {
+            if let Err(e) = poll(&mut fds, -1) {
                 match e {
-                    rustix::io::Errno::INTR => continue,
+                    Errno::INTR => continue,
                     _ => return Err(e),
                 }
             }
@@ -104,13 +134,13 @@ impl Daemon {
             if !fds[0].revents().is_empty() {
                 match wire::WireMsg::recv() {
                     Ok((msg, payload)) => self.wayland_handler(msg, payload),
-                    Err(io::Errno::INTR) => continue,
+                    Err(Errno::INTR) => continue,
                     Err(err) => return Err(err),
                 };
             }
 
             if !fds[1].revents().is_empty() {
-                match net::accept(socket.as_fd()) {
+                match accept(socket.as_fd()) {
                     // TODO: abstract away explicit socket creation
                     Ok(stream) => self.request_handler(IpcSocket::new(stream)),
                     Err(Errno::INTR | Errno::WOULDBLOCK) => continue,
@@ -181,7 +211,7 @@ impl Daemon {
         }
     }
 
-    pub fn socket_occupied() -> bool {
+    fn socket_occupied() -> bool {
         let Ok(socket) = IpcSocket::connect() else {
             return false;
         };
