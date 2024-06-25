@@ -92,7 +92,6 @@ impl Daemon {
                 };
             }
         }
-        debug!("Created socket in {addr}");
         Ok(())
     }
 

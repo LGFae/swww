@@ -12,7 +12,9 @@ use std::time::Instant;
 
 use cli::Cli;
 use common::ipc::IpcSocket;
+use common::ipc::Server;
 use daemon::Daemon;
+use log::debug;
 use log::error;
 use log::info;
 use log::Level;
@@ -35,10 +37,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     // initialize the wayland connection, getting all the necessary globals
     let initializer = wayland::globals::init(cli.format);
 
-    let listener = IpcSocket::server()?;
-
     // use the initializer to create the Daemon, then drop it to free up the memory
     let mut daemon = Daemon::new(initializer, !cli.no_cache)?;
+
+    // TODO: make socket part of daemon (beware of partial moves)
+    let listener = IpcSocket::server()?;
+    debug!("Created socket in {}", IpcSocket::<Server>::path());
 
     if let Ok(true) = sd_notify::booted() {
         if let Err(e) = sd_notify::notify(true, &[sd_notify::NotifyState::Ready]) {
