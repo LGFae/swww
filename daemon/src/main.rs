@@ -3,26 +3,20 @@
 //! of `expects`, **on purpose**, because we **want** to unwind and exit when they happen
 
 use std::error::Error;
-use std::fs;
 use std::io;
 use std::io::IsTerminal;
 use std::io::Write;
-use std::path::Path;
 use std::thread;
+use std::time::Duration;
 use std::time::Instant;
 
 use cli::Cli;
+use common::ipc::IpcSocket;
 use daemon::Daemon;
-
-use log::debug;
 use log::error;
 use log::info;
-use log::warn;
 use log::Level;
 use log::LevelFilter;
-
-use common::ipc::IpcSocket;
-use common::ipc::Server;
 use log::SetLoggerError;
 
 mod animations;
@@ -129,14 +123,14 @@ impl log::Log for Logger {
 ///
 /// This will sleep for an amount of time we can roughly expected the OS to still be precise enough
 /// for frame timing (125 us, currently).
-fn spin_sleep(duration: std::time::Duration) {
-    const ACCURACY: std::time::Duration = std::time::Duration::new(0, 125_000);
-    let start = std::time::Instant::now();
+fn spin_sleep(duration: Duration) {
+    const ACCURACY: Duration = Duration::from_micros(125);
+    let start = Instant::now();
     if duration > ACCURACY {
-        std::thread::sleep(duration - ACCURACY);
+        thread::sleep(duration - ACCURACY);
     }
 
     while start.elapsed() < duration {
-        std::thread::yield_now();
+        thread::yield_now();
     }
 }
