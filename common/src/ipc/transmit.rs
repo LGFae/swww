@@ -6,10 +6,18 @@ use rustix::io::Errno;
 use rustix::net;
 use rustix::net::RecvFlags;
 
+use super::serde::Cursor;
+use super::serde::Deserialize;
+use super::serde::Serialize;
+use super::types2::ClearRequest;
+use super::types2::Info;
+use super::types2::Request;
+use super::types2::Response;
 use super::Animation;
 use super::Answer;
 use super::BgInfo;
 use super::ClearReq;
+use super::Client;
 use super::ErrnoExt;
 use super::ImageReq;
 use super::ImgReq;
@@ -18,17 +26,19 @@ use super::IpcErrorKind;
 use super::IpcSocket;
 use super::RequestRecv;
 use super::RequestSend;
+use super::Server;
 use super::Transition;
+use crate::ipc::types2::ImageRequest;
 use crate::mmap::Mmap;
 use crate::mmap::MmappedStr;
 
 // could be enum
-pub struct RawMsg {
+pub struct IpcMessage {
     code: Code,
     shm: Option<Mmap>,
 }
 
-impl From<RequestSend> for RawMsg {
+impl From<RequestSend> for IpcMessage {
     fn from(value: RequestSend) -> Self {
         let code = match value {
             RequestSend::Ping => Code::ReqPing,
@@ -47,7 +57,7 @@ impl From<RequestSend> for RawMsg {
     }
 }
 
-impl From<Answer> for RawMsg {
+impl From<Answer> for IpcMessage {
     fn from(value: Answer) -> Self {
         let code = match value {
             Answer::Ok => Code::ResOk,
@@ -81,8 +91,8 @@ impl From<Answer> for RawMsg {
 }
 
 // TODO: remove this ugly mess
-impl From<RawMsg> for RequestRecv {
-    fn from(value: RawMsg) -> Self {
+impl From<IpcMessage> for RequestRecv {
+    fn from(value: IpcMessage) -> Self {
         match value.code {
             Code::ReqPing => Self::Ping,
             Code::ReqQuery => Self::Query,
@@ -154,8 +164,8 @@ impl From<RawMsg> for RequestRecv {
     }
 }
 
-impl From<RawMsg> for Answer {
-    fn from(value: RawMsg) -> Self {
+impl From<IpcMessage> for Answer {
+    fn from(value: IpcMessage) -> Self {
         match value.code {
             Code::ResOk => Self::Ok,
             Code::ResConfigured => Self::Ping(true),
@@ -181,9 +191,10 @@ impl From<RawMsg> for Answer {
 }
 // TODO: end remove ugly mess block
 
-macro_rules! code {
+macro_rules! msg {
     ($($name:ident $num:literal),* $(,)?) => {
-        pub enum Code {
+        #[derive(Copy, Clone, PartialEq, Eq)]
+        enum Code {
             $($name,)*
         }
 
@@ -201,11 +212,10 @@ macro_rules! code {
                  }
             }
         }
-
     };
 }
 
-code! {
+msg! {
     ReqPing       0,
     ReqQuery      1,
     ReqClear      2,
@@ -227,22 +237,28 @@ impl TryFrom<u64> for Code {
 
 // TODO: this along with `RawMsg` should be implementation detail
 impl<T> IpcSocket<T> {
-    pub fn send(&self, msg: RawMsg) -> io::Result<bool> {
+    pub fn send(&self, msg: IpcMessage) -> io::Result<bool> {
         let mut payload = [0u8; 16];
-        payload[0..8].copy_from_slice(&msg.code.into().to_ne_bytes());
+        let mut buf = Cursor::new(payload.as_mut_slice());
+        msg.code.into().serialize(&mut buf);
 
-        let mut ancillary_buf = [0u8; rustix::cmsg_space!(ScmRights(1))];
-        let mut ancillary = net::SendAncillaryBuffer::new(&mut ancillary_buf);
+        let mut ancillary = [0u8; rustix::cmsg_space!(ScmRights(1))];
+        let mut ancillary = net::SendAncillaryBuffer::new(&mut ancillary);
 
         let fd;
         if let Some(ref mmap) = msg.shm {
-            payload[8..].copy_from_slice(&(mmap.len() as u64).to_ne_bytes());
+            debug_assert!(
+                matches!(msg.code, Code::ReqClear | Code::ReqImg | Code::ResInfo),
+                "`Mmap` received but not requested"
+            );
+            (mmap.len() as u64).serialize(&mut buf);
             fd = [mmap.fd()];
             let msg = net::SendAncillaryMessage::ScmRights(&fd);
             ancillary.push(msg);
         }
 
-        let iov = io::IoSlice::new(&payload[..]);
+        let payload = buf.finish();
+        let iov = io::IoSlice::new(payload);
         net::sendmsg(
             self.as_fd(),
             &[iov],
@@ -252,11 +268,11 @@ impl<T> IpcSocket<T> {
         .map(|written| written == payload.len())
     }
 
-    pub fn recv(&self) -> Result<RawMsg, IpcError> {
+    pub fn recv(&self) -> Result<IpcMessage, IpcError> {
         let mut buf = [0u8; 16];
-        let mut ancillary_buf = [0u8; rustix::cmsg_space!(ScmRights(1))];
+        let mut ancillary = [0u8; rustix::cmsg_space!(ScmRights(1))];
 
-        let mut control = net::RecvAncillaryBuffer::new(&mut ancillary_buf);
+        let mut control = net::RecvAncillaryBuffer::new(&mut ancillary);
 
         for _ in 0..5 {
             let iov = io::IoSliceMut::new(&mut buf);
@@ -267,8 +283,9 @@ impl<T> IpcSocket<T> {
             }
         }
 
-        let code = u64::from_ne_bytes(buf[0..8].try_into().unwrap()).try_into()?;
-        let len = u64::from_ne_bytes(buf[8..16].try_into().unwrap()) as usize;
+        let mut buf = Cursor::new(buf.as_slice());
+        let code = u64::deserialize(&mut buf).try_into()?;
+        let len = u64::deserialize(&mut buf) as usize;
 
         let shm = if len == 0 {
             debug_assert!(matches!(
@@ -288,6 +305,131 @@ impl<T> IpcSocket<T> {
                 .context(IpcErrorKind::MalformedMsg)?;
             Some(Mmap::from_fd(file, len))
         };
-        Ok(RawMsg { code, shm })
+        Ok(IpcMessage { code, shm })
+    }
+}
+
+impl From<Request<'_>> for IpcMessage {
+    fn from(value: Request) -> Self {
+        match value {
+            Request::Ping => Self {
+                code: Code::ReqPing,
+                shm: None,
+            },
+            Request::Query => Self {
+                code: Code::ReqQuery,
+                shm: None,
+            },
+            Request::Kill => Self {
+                code: Code::ReqKill,
+                shm: None,
+            },
+            Request::Clear(clear) => {
+                let mut mmap = Mmap::create(clear.size());
+                clear.serialize(&mut Cursor::new(mmap.slice_mut()));
+                Self {
+                    code: Code::ReqClear,
+                    shm: Some(mmap),
+                }
+            }
+            Request::Img(image) => {
+                let mut mmap = Mmap::create(image.size());
+                image.serialize(&mut Cursor::new(mmap.slice_mut()));
+                Self {
+                    code: Code::ReqImg,
+                    shm: Some(mmap),
+                }
+            }
+        }
+    }
+}
+
+impl<'a> From<&'a IpcMessage> for Request<'a> {
+    fn from(value: &'a IpcMessage) -> Self {
+        match value.code {
+            Code::ReqPing => Self::Ping,
+            Code::ReqQuery => Self::Query,
+            Code::ReqKill => Self::Kill,
+            Code::ReqClear => {
+                let mmap = value.shm.as_ref().expect("clear request must contain data");
+                let clear = ClearRequest::deserialize(&mut Cursor::new(mmap.slice()));
+                Self::Clear(clear)
+            }
+            Code::ReqImg => {
+                let mmap = value.shm.as_ref().expect("image request must contain data");
+                let image = ImageRequest::deserialize(&mut Cursor::new(mmap.slice()));
+                Self::Img(image)
+            }
+            _ => unreachable!("`Request` builder reached invalid state"),
+        }
+    }
+}
+
+impl From<Response> for IpcMessage {
+    fn from(value: Response) -> Self {
+        match value {
+            Response::Ok => Self {
+                code: Code::ResOk,
+                shm: None,
+            },
+            Response::Ping(false) => Self {
+                code: Code::ResAwait,
+                shm: None,
+            },
+            Response::Ping(true) => Self {
+                code: Code::ResConfigured,
+                shm: None,
+            },
+            Response::Info(info) => {
+                let mut mmap = Mmap::create(info.size());
+                info.serialize(&mut Cursor::new(mmap.slice_mut()));
+                Self {
+                    code: Code::ReqImg,
+                    shm: Some(mmap),
+                }
+            }
+        }
+    }
+}
+
+impl From<IpcMessage> for Response {
+    fn from(value: IpcMessage) -> Self {
+        match value.code {
+            Code::ResOk => Self::Ok,
+            Code::ResAwait => Self::Ping(false),
+            Code::ResConfigured => Self::Ping(true),
+            Code::ResInfo => {
+                let mmap = value.shm.as_ref().expect("info request must contain data");
+                let info = Box::<[Info]>::deserialize(&mut Cursor::new(mmap.slice()));
+                Self::Info(info)
+            }
+            _ => unreachable!("`Response` builder reached invalid state"),
+        }
+    }
+}
+
+impl IpcSocket<Client> {
+    /// Send blocking request to `Daemon`, awaiting response
+    pub fn request(&self, request: Request) -> Result<Response, IpcError> {
+        self.send(IpcMessage::from(request))
+            .context(IpcErrorKind::MalformedMsg)?;
+        self.recv().map(Response::from)
+    }
+}
+
+impl IpcSocket<Server> {
+    /// Handle incoming request with `handler`
+    pub fn handle(&self, handler: impl FnOnce(Request) -> Response) -> Result<(), IpcError> {
+        let socket = match net::accept(self.as_fd()) {
+            Ok(stream) => Self::new(stream),
+            Err(Errno::INTR | Errno::WOULDBLOCK) => return Ok(()),
+            Err(err) => return Err(err).context(IpcErrorKind::Read),
+        };
+        let request = socket.recv()?;
+        let response = handler(Request::from(&request));
+        socket
+            .send(IpcMessage::from(response))
+            .map(|_| ())
+            .context(IpcErrorKind::Bind)
     }
 }
