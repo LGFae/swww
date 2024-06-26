@@ -360,7 +360,7 @@ pub struct Img {
     #[arg(long, env = "SWWW_TRANSITION_POS", default_value = "center", value_parser=parse_coords)]
     pub transition_pos: CliPosition,
 
-    /// inverts the y position sent in 'transiiton_pos' flag
+    /// inverts the y position sent in 'transition_pos' flag
     #[arg(long, env = "INVERT_Y", default_value = "false")]
     pub invert_y: bool,
 
