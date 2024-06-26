@@ -1,4 +1,5 @@
 use std::iter::repeat_with;
+use std::ptr;
 use std::ptr::NonNull;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
@@ -20,8 +21,7 @@ use rustix::shm::ShmOFlags;
 #[derive(Debug)]
 pub struct Mmap {
     fd: OwnedFd,
-    ptr: NonNull<std::ffi::c_void>,
-    len: usize,
+    buffer: NonNull<[u8]>,
     mmaped: bool,
 }
 
@@ -33,18 +33,17 @@ impl Mmap {
     #[must_use]
     pub fn create(len: usize) -> Self {
         let fd = Self::mmap_fd().unwrap();
-        rustix::io::retry_on_intr(|| rustix::fs::ftruncate(&fd, len as u64)).unwrap();
+        io::retry_on_intr(|| fs::ftruncate(&fd, len as u64)).unwrap();
 
-        let ptr = unsafe {
-            let ptr = mmap(std::ptr::null_mut(), len, Self::PROT, Self::FLAGS, &fd, 0).unwrap();
-            // SAFETY: the function above will never return a null pointer if it succeeds
-            // POSIX says that the implementation will never select an address at 0
-            NonNull::new_unchecked(ptr)
+        // SAFETY: the function above will never return a null pointer if it succeeds
+        // POSIX says that the implementation will never select an address at 0
+        let buffer = unsafe {
+            let ptr = mmap(ptr::null_mut(), len, Self::PROT, Self::FLAGS, &fd, 0).unwrap();
+            NonNull::slice_from_raw_parts(NonNull::new_unchecked(ptr.cast()), len)
         };
         Self {
             fd,
-            ptr,
-            len,
+            buffer,
             mmaped: true,
         }
     }
@@ -109,7 +108,7 @@ impl Mmap {
     ///
     /// This is only ever used in the daemon, when animations finish, in order to free up memory
     pub fn unmap(&mut self) {
-        if let Err(e) = unsafe { munmap(self.ptr.as_ptr(), self.len) } {
+        if let Err(e) = unsafe { munmap(self.buffer.as_ptr().cast(), self.len()) } {
             eprintln!("ERROR WHEN UNMAPPING MEMORY: {e}");
         } else {
             self.mmaped = false;
@@ -123,19 +122,20 @@ impl Mmap {
     pub fn ensure_mapped(&mut self) {
         if !self.mmaped {
             self.mmaped = true;
-            self.ptr = unsafe {
+
+            // SAFETY: the function above will never return a null pointer if it succeeds
+            // POSIX says that the implementation will never select an address at 0
+            self.buffer = unsafe {
                 let ptr = mmap(
-                    std::ptr::null_mut(),
-                    self.len,
+                    ptr::null_mut(),
+                    self.len(),
                     Self::PROT,
                     Self::FLAGS,
                     &self.fd,
                     0,
                 )
                 .unwrap();
-                // SAFETY: the function above will never return a null pointer if it succeeds
-                // POSIX says that the implementation will never select an address at 0
-                NonNull::new_unchecked(ptr)
+                NonNull::slice_from_raw_parts(NonNull::new_unchecked(ptr.cast()), self.len())
             };
         }
     }
@@ -148,57 +148,45 @@ impl Mmap {
         {
             use rustix::mm;
 
-            let result =
-                unsafe { mm::mremap(self.ptr.as_ptr(), self.len, new, mm::MremapFlags::MAYMOVE) };
+            let result = unsafe {
+                mm::mremap(
+                    self.buffer.as_ptr().cast(),
+                    self.len(),
+                    new,
+                    mm::MremapFlags::MAYMOVE,
+                )
+            };
 
             if let Ok(ptr) = result {
                 // SAFETY: the mremap above will never return a null pointer if it succeeds
-                let ptr = unsafe { NonNull::new_unchecked(ptr) };
-                self.ptr = ptr;
-                self.len = new;
+                self.buffer = unsafe {
+                    NonNull::slice_from_raw_parts(NonNull::new_unchecked(ptr.cast()), new)
+                };
                 return;
             }
         }
 
         self.unmap();
 
-        self.len = new;
-        self.ptr = unsafe {
-            let ptr = mmap(
-                std::ptr::null_mut(),
-                self.len,
-                Self::PROT,
-                Self::FLAGS,
-                &self.fd,
-                0,
-            )
-            .unwrap();
-            // SAFETY: the function above will never return a null pointer if it succeeds
-            // POSIX says that the implementation will never select an address at 0
-            NonNull::new_unchecked(ptr)
+        // SAFETY: the function above will never return a null pointer if it succeeds
+        // POSIX says that the implementation will never select an address at 0
+        self.buffer = unsafe {
+            let ptr = mmap(ptr::null_mut(), new, Self::PROT, Self::FLAGS, &self.fd, 0).unwrap();
+            NonNull::slice_from_raw_parts(NonNull::new_unchecked(ptr.cast()), new)
         };
     }
 
     #[must_use]
     pub(crate) fn from_fd(fd: OwnedFd, len: usize) -> Self {
-        let ptr = unsafe {
-            let ptr = mmap(
-                std::ptr::null_mut(),
-                len,
-                ProtFlags::READ,
-                Self::FLAGS,
-                &fd,
-                0,
-            )
-            .unwrap();
-            // SAFETY: the function above will never return a null pointer if it succeeds
-            // POSIX says that the implementation will never select an address at 0
-            NonNull::new_unchecked(ptr)
+        // SAFETY: the function above will never return a null pointer if it succeeds
+        // POSIX says that the implementation will never select an address at 0
+        let buffer = unsafe {
+            let ptr = mmap(ptr::null_mut(), len, Self::PROT, Self::FLAGS, &fd, 0).unwrap();
+            NonNull::slice_from_raw_parts(NonNull::new_unchecked(ptr.cast()), len)
         };
         Self {
             fd,
-            ptr,
-            len,
+            buffer,
             mmaped: true,
         }
     }
@@ -206,20 +194,24 @@ impl Mmap {
     #[inline]
     #[must_use]
     pub fn slice_mut(&mut self) -> &mut [u8] {
-        unsafe { std::slice::from_raw_parts_mut(self.ptr.as_ptr().cast(), self.len) }
+        unsafe { self.buffer.as_mut() }
     }
 
     #[inline]
     #[must_use]
     pub fn slice(&self) -> &[u8] {
-        unsafe { std::slice::from_raw_parts(self.ptr.as_ptr().cast(), self.len) }
+        unsafe { self.buffer.as_ref() }
     }
 
     #[inline]
     #[must_use]
-    #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
-        self.len
+        self.buffer.len()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     #[inline]
@@ -258,7 +250,7 @@ impl<const UTF8: bool> Mmapped<UTF8> {
     }
 
     pub(crate) fn new_with_len(map: &Mmap, bytes: &[u8], len: usize) -> Self {
-        let offset = bytes.as_ptr() as usize - map.ptr.as_ptr() as usize;
+        let offset = bytes.as_ptr() as usize - map.buffer.as_ptr() as *mut u8 as usize;
         let page_size = rustix::param::page_size();
         let page_offset = offset - offset % page_size;
 
