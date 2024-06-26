@@ -1,11 +1,13 @@
 use std::path::PathBuf;
 
 use transmit::RawMsg;
+use transmit::IpcMessage;
 
 mod error;
 mod socket;
 mod transmit;
 mod types;
+pub mod types2;
 
 use crate::cache;
 use crate::mmap::Mmap;
