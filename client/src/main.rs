@@ -1,114 +1,151 @@
-use std::{path::Path, time::Duration};
+use std::error::Error;
+use std::path::Path;
+use std::thread;
+use std::time::Duration;
 
 use clap::Parser;
+use cli::Img;
 use common::cache;
-use common::ipc::{self, Answer, Client, IpcSocket, RequestSend};
+use common::ipc;
+use common::ipc::Answer;
+use common::ipc::BgImg;
+use common::ipc::Client;
+use common::ipc::IpcSocket;
+use common::ipc::PixelFormat;
+use common::ipc::RequestSend;
 use common::mmap::Mmap;
 
 mod imgproc;
 use imgproc::*;
 
 mod cli;
-use cli::{CliImage, ResizeStrategy, Swww};
+use cli::CliImage;
+use cli::ResizeStrategy;
+use cli::Swww;
 
-fn main() -> Result<(), String> {
+fn main() -> Result<(), Box<dyn Error>> {
     let swww = Swww::parse();
 
     if let Swww::ClearCache = &swww {
-        return cache::clean().map_err(|e| format!("failed to clean the cache: {e}"));
+        cache::clean().map_err(|e| format!("failed to clean the cache: {e}"))?;
     }
 
-    let socket = IpcSocket::connect().map_err(|err| err.to_string())?;
+    let socket = IpcSocket::connect()?;
     loop {
         RequestSend::Ping.send(&socket)?;
-        let bytes = socket.recv().map_err(|err| err.to_string())?;
+        let bytes = socket.recv()?;
         let answer = Answer::receive(bytes);
         if let Answer::Ping(configured) = answer {
             if configured {
                 break;
             }
         } else {
-            return Err("Daemon did not return Answer::Ping, as expected".to_string());
+            Err("Daemon did not return Answer::Ping, as expected")?;
         }
-        std::thread::sleep(Duration::from_millis(1));
+        thread::sleep(Duration::from_millis(1));
     }
 
-    process_swww_args(&swww)
-}
-
-fn process_swww_args(args: &Swww) -> Result<(), String> {
-    let request = match make_request(args)? {
-        Some(request) => request,
-        None => return Ok(()),
-    };
-    let socket = IpcSocket::connect().map_err(|err| err.to_string())?;
-    request.send(&socket)?;
-    let bytes = socket.recv().map_err(|err| err.to_string())?;
-    drop(socket);
-    match Answer::receive(bytes) {
-        Answer::Info(info) => info.iter().for_each(|i| println!("{}", i)),
-        Answer::Ok => {
-            if let Swww::Kill = args {
-                #[cfg(debug_assertions)]
-                let tries = 20;
-                #[cfg(not(debug_assertions))]
-                let tries = 10;
-                let path = IpcSocket::<Client>::path();
-                let path = Path::new(path);
-                for _ in 0..tries {
-                    if !path.exists() {
-                        return Ok(());
-                    }
-                    std::thread::sleep(Duration::from_millis(100));
-                }
-                return Err(format!("Could not confirm socket deletion at: {path:?}"));
-            }
-        }
-        Answer::Ping(_) => {
-            return Ok(());
-        }
-    }
-    Ok(())
-}
-
-fn make_request(args: &Swww) -> Result<Option<RequestSend>, String> {
-    match args {
-        Swww::Clear(c) => {
-            let (format, _, _) = get_format_dims_and_outputs(&[])?;
-            let mut color = c.color;
+    match swww {
+        Swww::Clear(clear) => {
+            let (format, _, _) = get_format_dims_and_outputs(&[], &socket)?;
+            let mut color = clear.color;
             if format.must_swap_r_and_b_channels() {
                 color.swap(0, 2);
             }
             let clear = ipc::ClearSend {
                 color,
-                outputs: split_cmdline_outputs(&c.outputs),
+                outputs: split_cmdline_outputs(&clear.outputs)
+                    .map(ToString::to_string)
+                    .collect(),
             };
-            Ok(Some(RequestSend::Clear(clear.create_request())))
+            RequestSend::Clear(clear.create_request()).send(&socket)?
         }
         Swww::Restore(restore) => {
-            let requested_outputs = split_cmdline_outputs(&restore.outputs);
-            restore_from_cache(&requested_outputs)?;
-            Ok(None)
-        }
-        Swww::ClearCache => unreachable!("there is no request for clear-cache"),
-        Swww::Img(img) => {
-            let requested_outputs = split_cmdline_outputs(&img.outputs);
-            let (format, dims, outputs) = get_format_dims_and_outputs(&requested_outputs)?;
-            // let imgbuf = ImgBuf::new(&img.path)?;
+            let requested_outputs: Box<_> = split_cmdline_outputs(&restore.outputs)
+                .map(ToString::to_string)
+                .collect();
 
-            let img_request = make_img_request(img, &dims, format, &outputs)?;
+            let (_, _, outputs) = get_format_dims_and_outputs(&requested_outputs, &socket)?;
 
-            Ok(Some(RequestSend::Img(img_request)))
+            for output in outputs.iter().flatten().map(String::as_str) {
+                let path = cache::get_previous_image_path(output)
+                    .map_err(|err| format!("failed to get previous image path: {err}"))?;
+                #[allow(deprecated)]
+                let img = Img {
+                    image: cli::parse_image(&path)?,
+                    outputs: output.to_string(),
+                    no_resize: false,
+                    resize: ResizeStrategy::Crop,
+                    fill_color: [0, 0, 0],
+                    filter: cli::Filter::Lanczos3,
+                    transition_type: cli::TransitionType::None,
+                    transition_step: std::num::NonZeroU8::MAX,
+                    transition_duration: 0.0,
+                    transition_fps: 30,
+                    transition_angle: 0.0,
+                    transition_pos: cli::CliPosition {
+                        x: cli::CliCoord::Pixel(0.0),
+                        y: cli::CliCoord::Pixel(0.0),
+                    },
+                    invert_y: false,
+                    transition_bezier: (0.0, 0.0, 0.0, 0.0),
+                    transition_wave: (0.0, 0.0),
+                };
+                img_request(img, &socket)?.send(&socket)?;
+            }
         }
-        Swww::Kill => Ok(Some(RequestSend::Kill)),
-        Swww::Query => Ok(Some(RequestSend::Query)),
-    }
+        Swww::Img(img) => img_request(img, &socket)?.send(&socket)?,
+        Swww::Kill => match RequestSend::Kill
+            .send(&socket)
+            .map(|()| socket.recv())?
+            .map(Answer::receive)?
+        {
+            Answer::Ok => {
+                #[cfg(debug_assertions)]
+                let tries = 20;
+                #[cfg(not(debug_assertions))]
+                let tries = 10;
+                let addr = IpcSocket::<Client>::path();
+                let path = Path::new(addr);
+                for _ in 0..tries {
+                    if !path.exists() {
+                        return Ok(());
+                    }
+                    thread::sleep(Duration::from_millis(100));
+                }
+                Err(format!("Could not confirm socket deletion at: {addr}"))?;
+            }
+            _ => unreachable!("invalid IPC response"),
+        },
+        Swww::Query => match RequestSend::Query
+            .send(&socket)
+            .map(|()| socket.recv())?
+            .map(Answer::receive)?
+        {
+            Answer::Info(info) => info.iter().for_each(|info| println!("{info}")),
+            _ => unreachable!("invalid IPC response"),
+        },
+        Swww::ClearCache => unreachable!("handled at the start of `main`"),
+    };
+
+    Ok(())
+}
+
+fn img_request(img: Img, socket: &IpcSocket<Client>) -> Result<RequestSend, Box<dyn Error>> {
+    let requested_outputs: Box<_> = split_cmdline_outputs(&img.outputs)
+        .map(ToString::to_string)
+        .collect();
+    let (format, dims, outputs) = get_format_dims_and_outputs(&requested_outputs, socket)?;
+    // let imgbuf = ImgBuf::new(&img.path)?;
+
+    let img_request = make_img_request(&img, &dims, format, &outputs)?;
+    Ok(RequestSend::Img(img_request))
 }
 
 fn make_img_request(
     img: &cli::Img,
     dims: &[(u32, u32)],
-    pixel_format: ipc::PixelFormat,
+    pixel_format: PixelFormat,
     outputs: &[Vec<String>],
 ) -> Result<Mmap, String> {
     let transition = make_transition(img);
@@ -206,88 +243,47 @@ fn make_img_request(
 #[allow(clippy::type_complexity)]
 fn get_format_dims_and_outputs(
     requested_outputs: &[String],
-) -> Result<(ipc::PixelFormat, Vec<(u32, u32)>, Vec<Vec<String>>), String> {
+    socket: &IpcSocket<Client>,
+) -> Result<(PixelFormat, Vec<(u32, u32)>, Vec<Vec<String>>), String> {
     let mut outputs: Vec<Vec<String>> = Vec::new();
     let mut dims: Vec<(u32, u32)> = Vec::new();
-    let mut imgs: Vec<ipc::BgImg> = Vec::new();
+    let mut imgs: Vec<BgImg> = Vec::new();
 
-    let socket = IpcSocket::connect().map_err(|err| err.to_string())?;
-    RequestSend::Query.send(&socket)?;
+    RequestSend::Query.send(socket)?;
     let bytes = socket.recv().map_err(|err| err.to_string())?;
-    drop(socket);
     let answer = Answer::receive(bytes);
-    match answer {
-        Answer::Info(infos) => {
-            let mut format = ipc::PixelFormat::Xrgb;
-            for info in infos.iter() {
-                format = info.pixel_format;
-                let info_img = &info.img;
-                let name = info.name.to_string();
-                if !requested_outputs.is_empty() && !requested_outputs.contains(&name) {
-                    continue;
-                }
-                let real_dim = info.real_dim();
-                if let Some((_, output)) = dims
-                    .iter_mut()
-                    .zip(&imgs)
-                    .zip(&mut outputs)
-                    .find(|((dim, img), _)| real_dim == **dim && info_img == *img)
-                {
-                    output.push(name);
-                } else {
-                    outputs.push(vec![name]);
-                    dims.push(real_dim);
-                    imgs.push(info_img.clone());
-                }
-            }
-            if outputs.is_empty() {
-                Err("none of the requested outputs are valid".to_owned())
-            } else {
-                Ok((format, dims, outputs))
-            }
+    let Answer::Info(infos) = answer else {
+        unreachable!()
+    };
+    let mut format = PixelFormat::Xrgb;
+    for info in infos.iter() {
+        format = info.pixel_format;
+        let info_img = &info.img;
+        let name = info.name.to_string();
+        if !requested_outputs.is_empty() && !requested_outputs.contains(&name) {
+            continue;
         }
-        _ => unreachable!(),
+        let real_dim = info.real_dim();
+        if let Some((_, output)) = dims
+            .iter_mut()
+            .zip(&imgs)
+            .zip(&mut outputs)
+            .find(|((dim, img), _)| real_dim == **dim && info_img == *img)
+        {
+            output.push(name);
+        } else {
+            outputs.push(vec![name]);
+            dims.push(real_dim);
+            imgs.push(info_img.clone());
+        }
+    }
+    if outputs.is_empty() {
+        Err("none of the requested outputs are valid".to_owned())
+    } else {
+        Ok((format, dims, outputs))
     }
 }
 
-fn split_cmdline_outputs(outputs: &str) -> Box<[String]> {
-    outputs
-        .split(',')
-        .map(|s| s.to_owned())
-        .filter(|s| !s.is_empty())
-        .collect()
-}
-
-fn restore_from_cache(requested_outputs: &[String]) -> Result<(), String> {
-    let (_, _, outputs) = get_format_dims_and_outputs(requested_outputs)?;
-
-    for output in outputs.iter().flatten() {
-        let img_path = common::cache::get_previous_image_path(output)
-            .map_err(|e| format!("failed to get previous image path: {e}"))?;
-        #[allow(deprecated)]
-        if let Err(e) = process_swww_args(&Swww::Img(cli::Img {
-            image: cli::parse_image(&img_path)?,
-            outputs: output.to_string(),
-            no_resize: false,
-            resize: ResizeStrategy::Crop,
-            fill_color: [0, 0, 0],
-            filter: cli::Filter::Lanczos3,
-            transition_type: cli::TransitionType::None,
-            transition_step: std::num::NonZeroU8::MAX,
-            transition_duration: 0.0,
-            transition_fps: 30,
-            transition_angle: 0.0,
-            transition_pos: cli::CliPosition {
-                x: cli::CliCoord::Pixel(0.0),
-                y: cli::CliCoord::Pixel(0.0),
-            },
-            invert_y: false,
-            transition_bezier: (0.0, 0.0, 0.0, 0.0),
-            transition_wave: (0.0, 0.0),
-        })) {
-            eprintln!("WARNING: failed to load cache for output {output}: {e}");
-        }
-    }
-
-    Ok(())
+fn split_cmdline_outputs(outputs: &str) -> impl Iterator<Item = &str> {
+    outputs.split(',').filter(|s| !s.is_empty())
 }
