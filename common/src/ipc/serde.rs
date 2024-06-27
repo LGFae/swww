@@ -62,17 +62,17 @@ impl<'a> Cursor<&'a [u8]> {
     }
 }
 
-trait Tagged<'a> {
+trait Tagged {
     fn tag(&self) -> u32;
 }
 
-impl<T> Tagged<'_> for [T] {
+impl<T> Tagged for [T] {
     fn tag(&self) -> u32 {
         self.len() as u32
     }
 }
 
-impl Tagged<'_> for str {
+impl Tagged for str {
     fn tag(&self) -> u32 {
         self.as_bytes().tag()
     }
@@ -175,6 +175,14 @@ impl<T: Serialize> Serialize for Vec2<T> {
     }
 }
 
+impl<'a, T: Deserialize<'a>> Deserialize<'a> for Vec2<T> {
+    fn deserialize(buffer: &mut Cursor<&'a [u8]>) -> Self {
+        let x = T::deserialize(buffer);
+        let y = T::deserialize(buffer);
+        Self { x, y }
+    }
+}
+
 impl<T: Serialize> Serialize for Box<[T]> {
     fn serialize(&self, buffer: &mut Cursor<&mut [u8]>) {
         self.tag().serialize(buffer);
@@ -193,14 +201,6 @@ impl<'a, T: Deserialize<'a>> Deserialize<'a> for Box<[T]> {
         (0..u32::deserialize(buffer))
             .map(|_| T::deserialize(buffer))
             .collect()
-    }
-}
-
-impl<'a, T: Deserialize<'a>> Deserialize<'a> for Vec2<T> {
-    fn deserialize(buffer: &mut Cursor<&'a [u8]>) -> Self {
-        let x = T::deserialize(buffer);
-        let y = T::deserialize(buffer);
-        Self { x, y }
     }
 }
 
