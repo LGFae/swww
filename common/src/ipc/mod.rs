@@ -1,11 +1,13 @@
 use std::path::PathBuf;
 
-use transmit::RawMsg;
+use transmit::IpcMessage;
 
 mod error;
+pub mod serde;
 mod socket;
 mod transmit;
 mod types;
+pub mod types2;
 
 use crate::cache;
 use crate::mmap::Mmap;
@@ -148,7 +150,7 @@ impl RequestSend {
 impl RequestRecv {
     #[must_use]
     #[inline]
-    pub fn receive(msg: RawMsg) -> Self {
+    pub fn receive(msg: IpcMessage) -> Self {
         msg.into()
     }
 }
@@ -170,7 +172,7 @@ impl Answer {
 
     #[must_use]
     #[inline]
-    pub fn receive(msg: RawMsg) -> Self {
+    pub fn receive(msg: IpcMessage) -> Self {
         msg.into()
     }
 }
