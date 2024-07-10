@@ -58,9 +58,11 @@ while true; do
             for disp in $DISPLAY_LIST; do
                 # if there is no image try to get one
                 if [ "X" = "X${img}" ]; then
-                    read -r img
-                else # if there are no more images, refresh the list
-                    break 2
+                    if read -r img; then
+                        true
+                    else # if there are no more images, refresh the list
+                        break 2
+                    fi
                 fi
                 swww img --resize=$RESIZE_TYPE --outputs $disp $img
                 # make sure each image is only used once
