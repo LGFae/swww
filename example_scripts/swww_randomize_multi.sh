@@ -13,16 +13,19 @@ if [[ $# -lt 1 ]] || [[ ! -d $1 ]]; then
     exit 1
 fi
 
+# Make sure only 1 instance of swww_randomize
 PIDFILE=~/.local/state/swww-randomize-pidfile.txt
 if [ -e "${PIDFILE}" ]; then
-    OLD_PID="$(cat ${PIDFILE})"
+    OLD_PID="$(<${PIDFILE})"
     if [ "X" != "X${OLD_PID}" -a -e "/proc/${OLD_PID}" ]; then
-        if [ "$(cat /proc/${OLD_PID}/comm)" = "swww_randomize.sh" ]; then
+        OLD_NAME="$(</proc/${OLD_PID}/comm)"
+        THIS_NAME="$(</proc/${BASHPID}/comm)"
+        if [ "${OLD_NAME}" = "${THIS_NAME}" ]; then
             echo "old randomize process ${OLD_PID} is still running"
             exit 1
         else
-            echo "process with same ID as old randomize is running: ${OLD_PID}"
-            cat /proc/${OLD_PID}/comm
+            echo "process with same ID as old randomize is running: \"${OLD_NAME}\"@${OLD_PID}"
+            echo "Replacing old process ID"
         fi
     fi
 fi
