@@ -52,13 +52,13 @@ impl<T> IpcSocket<T> {
                     break;
                 }
             }
-            format!("{}.sock", &wayland_socket[i..])
+            (wayland_socket[i..]).to_string()
         } else {
             eprintln!("WARNING: WAYLAND_DISPLAY variable not set. Defaulting to wayland-0");
             "wayland-0.sock".to_string()
         };
 
-        format!("{runtime}/swww-{display}.socket")
+        format!("{runtime}/swww-{display}.sock")
     }
 
     /// Retreives path to socket file
