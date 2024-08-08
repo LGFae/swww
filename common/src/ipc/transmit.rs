@@ -183,6 +183,7 @@ impl From<RawMsg> for Answer {
 
 macro_rules! code {
     ($($name:ident $num:literal),* $(,)?) => {
+        #[derive(Debug)]
         pub enum Code {
             $($name,)*
         }
@@ -271,10 +272,14 @@ impl<T> IpcSocket<T> {
         let len = u64::from_ne_bytes(buf[8..16].try_into().unwrap()) as usize;
 
         let shm = if len == 0 {
-            debug_assert!(matches!(
-                code,
-                Code::ReqClear | Code::ReqImg | Code::ResInfo
-            ));
+            debug_assert!(
+                matches!(
+                    code,
+                    Code::ReqClear | Code::ReqImg | Code::ResInfo | Code::ReqPing | Code::ReqQuery
+                ),
+                "Received: Code {:?}, which should have sent a shm fd",
+                code
+            );
             None
         } else {
             let file = control
