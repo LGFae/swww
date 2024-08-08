@@ -1629,6 +1629,7 @@ pub mod wp_viewporter {
 /// 1. buffer_transform (wl_surface.set_buffer_transform)
 /// 2. buffer_scale (wl_surface.set_buffer_scale)
 /// 3. crop and scale (wp_viewport.set*)
+///
 ///This means, that the source rectangle coordinates of crop and scale
 ///are given in the coordinates after the buffer transform and scale,
 ///i.e. in the coordinates that would be the surface-local coordinates

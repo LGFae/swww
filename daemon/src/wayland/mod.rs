@@ -7,15 +7,15 @@
 //!
 //! Our own implementation can make several improvements:
 //!   * we make all the globals that always in our program exist `const`s, so that they can be
-//!   accessed anywhere within the code
+//!     accessed anywhere within the code
 //!   * we make the wayland file descriptor a global variable, so it can be accessed anywhere
-//!   within the code
+//!     within the code
 //!   * we don't buffer the wayland socket connection, instead just sending the message all at once
-//!   every time. This, combined with the two points above, mean we can make request from multiple
-//!   threads without having to keep passing weak references to a Backend struct (like how it
-//!   happens with `wayland-client.rs`).
+//!     every time. This, combined with the two points above, mean we can make request from multiple
+//!     threads without having to keep passing weak references to a Backend struct (like how it
+//!     happens with `wayland-client.rs`).
 //!   * we have a much simpler (from what I can tell), object id manager implementation. That we've
-//!   also made global, so it can be called anywhere.
+//!     also made global, so it can be called anywhere.
 //!
 //! Furthermore, this also prevents any changes to `wayland-client.rs` from affecting us. We are
 //! now completely independent from them.

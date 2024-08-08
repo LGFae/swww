@@ -125,7 +125,7 @@ impl Compressor {
     /// # Panics:
     ///   * `prev.len() != cur.len()`
     ///   * the len of the diff buffer is larger than 0x7E000000. In practice, this can only
-    ///   happen for 64k monitors and beyond
+    ///     happen for 64k monitors and beyond
     #[inline]
     pub fn compress(
         &mut self,
