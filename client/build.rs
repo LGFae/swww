@@ -1,6 +1,6 @@
 use std::io::Error;
 
-use clap::CommandFactory;
+use clap::{value_parser, CommandFactory};
 use clap_complete::{generate_to, Shell};
 
 include!("src/cli.rs");
@@ -11,6 +11,17 @@ const APP_NAME: &str = "swww";
 fn main() -> Result<(), Error> {
     let outdir = completion_dir()?;
     let mut app = Swww::command();
+
+    // we must change the value parser for the img subcommand argument to a PathBuf so that the
+    // generator creates the correct autocompletion that suggests filepaths to our users
+    for cmd in app.get_subcommands_mut() {
+        if cmd.get_name() == "img" {
+            *cmd = cmd
+                .clone()
+                .mut_arg("image", |arg| arg.value_parser(value_parser!(PathBuf)));
+            break;
+        }
+    }
 
     let shells = [Shell::Bash, Shell::Zsh, Shell::Fish, Shell::Elvish];
     for shell in shells {
