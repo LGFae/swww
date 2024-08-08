@@ -37,7 +37,7 @@ impl ImgBuf {
             std::fs::read(path).map_err(|e| format!("failed to read file: {e}"))?
         };
 
-        let reader = image::io::Reader::new(Cursor::new(&bytes))
+        let reader = image::ImageReader::new(Cursor::new(&bytes))
             .with_guessed_format()
             .map_err(|e| format!("failed to detect the image's format: {e}"))?;
 
@@ -68,7 +68,7 @@ impl ImgBuf {
 
     /// Decode the ImgBuf into am RgbImage
     pub fn decode(&self, format: PixelFormat) -> Result<Image, String> {
-        let mut reader = image::io::Reader::new(Cursor::new(&self.bytes));
+        let mut reader = image::ImageReader::new(Cursor::new(&self.bytes));
         reader.set_format(self.format);
         let dynimage = reader
             .decode()
