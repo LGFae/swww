@@ -273,10 +273,7 @@ impl<T> IpcSocket<T> {
 
         let shm = if len == 0 {
             debug_assert!(
-                matches!(
-                    code,
-                    Code::ReqClear | Code::ReqImg | Code::ResInfo | Code::ReqPing | Code::ReqQuery
-                ),
+                !matches!(code, Code::ReqImg | Code::ReqClear | Code::ResInfo),
                 "Received: Code {:?}, which should have sent a shm fd",
                 code
             );
