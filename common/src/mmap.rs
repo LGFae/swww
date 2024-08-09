@@ -251,12 +251,14 @@ impl<const UTF8: bool> Mmapped<UTF8> {
     const PROT: ProtFlags = ProtFlags::READ;
     const FLAGS: MapFlags = MapFlags::SHARED;
 
+    #[must_use]
     pub(crate) fn new(map: &Mmap, bytes: &[u8]) -> Self {
         let len = u32::from_ne_bytes(bytes[0..4].try_into().unwrap()) as usize;
         let bytes = &bytes[4..];
         Self::new_with_len(map, bytes, len)
     }
 
+    #[must_use]
     pub(crate) fn new_with_len(map: &Mmap, bytes: &[u8], len: usize) -> Self {
         let offset = bytes.as_ptr() as usize - map.ptr.as_ptr() as usize;
         let page_size = rustix::param::page_size();
@@ -293,19 +295,22 @@ impl<const UTF8: bool> Mmapped<UTF8> {
     pub fn bytes(&self) -> &[u8] {
         unsafe { std::slice::from_raw_parts(self.ptr.as_ptr().cast(), self.len) }
     }
-}
 
-impl MmappedStr {
     #[inline]
     #[must_use]
-    pub fn str(&self) -> &str {
-        let s = unsafe { std::slice::from_raw_parts(self.ptr.as_ptr().cast(), self.len) };
-        unsafe { std::str::from_utf8_unchecked(s) }
+    pub const fn str(&self) -> &str {
+        if UTF8 {
+            unsafe {
+                let slice = std::slice::from_raw_parts(self.ptr.as_ptr().cast(), self.len);
+                std::str::from_utf8_unchecked(slice)
+            }
+        } else {
+            panic!("trying to use a mmap that is not a utf8 as str")
+        }
     }
 }
 
 impl<const UTF8: bool> Drop for Mmapped<UTF8> {
-    #[inline]
     fn drop(&mut self) {
         let len = self.len + self.ptr.as_ptr() as usize - self.base_ptr.as_ptr() as usize;
         if let Err(e) = unsafe { munmap(self.base_ptr.as_ptr(), len) } {
@@ -313,6 +318,3 @@ impl<const UTF8: bool> Drop for Mmapped<UTF8> {
         }
     }
 }
-
-unsafe impl<const UTF8: bool> Send for Mmapped<UTF8> {}
-unsafe impl<const UTF8: bool> Sync for Mmapped<UTF8> {}
