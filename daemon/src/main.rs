@@ -15,7 +15,7 @@ use rustix::{
 
 use wallpaper::Wallpaper;
 use wayland::{
-    globals::{self, Initializer},
+    globals::{self, FractionalScaleManager, Initializer},
     ObjectId,
 };
 
@@ -30,20 +30,19 @@ use std::{
     time::Duration,
 };
 
+use animations::{ImageAnimator, TransitionAnimator};
 use common::ipc::{Answer, BgInfo, ImageReq, IpcSocket, RequestRecv, RequestSend, Scale, Server};
 use common::mmap::MmappedStr;
-
-use animations::{ImageAnimator, TransitionAnimator};
 
 // We need this because this might be set by signals, so we can't keep it in the daemon
 static EXIT: AtomicBool = AtomicBool::new(false);
 
 fn exit_daemon() {
-    EXIT.store(true, Ordering::Release);
+    EXIT.store(true, Ordering::Relaxed);
 }
 
 fn should_daemon_exit() -> bool {
-    EXIT.load(Ordering::Acquire)
+    EXIT.load(Ordering::Relaxed)
 }
 
 extern "C" fn signal_handler(_s: libc::c_int) {
@@ -55,8 +54,8 @@ struct Daemon {
     transition_animators: Vec<TransitionAnimator>,
     image_animators: Vec<ImageAnimator>,
     use_cache: bool,
-    fractional_scale_manager: Option<(ObjectId, NonZeroU32)>,
-    poll_time: i32,
+    fractional_scale_manager: Option<FractionalScaleManager>,
+    poll_time: PollTime,
 }
 
 impl Daemon {
@@ -75,7 +74,7 @@ impl Daemon {
             image_animators: Vec::new(),
             use_cache: !no_cache,
             fractional_scale_manager,
-            poll_time: -1,
+            poll_time: PollTime::Never,
         }
     }
 
@@ -106,10 +105,14 @@ impl Daemon {
         let viewport = globals::object_create(wayland::WlDynObj::Viewport);
         wp_viewporter::req::get_viewport(viewport, surface).unwrap();
 
-        let wp_fractional = if let Some((id, _)) = self.fractional_scale_manager.as_ref() {
+        let wp_fractional = if let Some(fract_man) = self.fractional_scale_manager.as_ref() {
             let fractional = globals::object_create(wayland::WlDynObj::FractionalScale);
-            wp_fractional_scale_manager_v1::req::get_fractional_scale(*id, fractional, surface)
-                .unwrap();
+            wp_fractional_scale_manager_v1::req::get_fractional_scale(
+                fract_man.id(),
+                fractional,
+                surface,
+            )
+            .unwrap();
             Some(fractional)
         } else {
             None
@@ -181,8 +184,8 @@ impl Daemon {
                         transition.frame();
                         self.transition_animators.push(transition);
                     }
-                    self.poll_time = 0;
                 }
+                self.poll_time = PollTime::Instant;
                 Answer::Ok
             }
         };
@@ -211,7 +214,7 @@ impl Daemon {
     }
 
     fn draw(&mut self) {
-        self.poll_time = -1;
+        self.poll_time = PollTime::Never;
 
         let mut i = 0;
         while i < self.transition_animators.len() {
@@ -223,7 +226,7 @@ impl Daemon {
             {
                 let time = animator.time_to_draw();
                 if time > Duration::from_micros(1200) {
-                    self.poll_time = 1;
+                    self.poll_time = PollTime::Short;
                     i += 1;
                     continue;
                 }
@@ -255,7 +258,7 @@ impl Daemon {
             {
                 let time = animator.time_to_draw();
                 if time > Duration::from_micros(1200) {
-                    self.poll_time = 1;
+                    self.poll_time = PollTime::Short;
                     continue;
                 }
 
@@ -298,6 +301,7 @@ impl wayland::interfaces::wl_display::EvHandler for Daemon {
         }
     }
 }
+
 impl wayland::interfaces::wl_registry::EvHandler for Daemon {
     fn global(&mut self, name: u32, interface: &str, version: u32) {
         if interface == "wl_output" {
@@ -410,6 +414,7 @@ impl wayland::interfaces::wl_output::EvHandler for Daemon {
         }
     }
 }
+
 impl wayland::interfaces::wl_surface::EvHandler for Daemon {
     fn enter(&mut self, _sender_id: ObjectId, output: ObjectId) {
         debug!("Output {}: Surface Enter", output.get());
@@ -539,7 +544,7 @@ fn main() -> Result<(), String> {
     while !should_daemon_exit() {
         use wayland::{interfaces::*, wire, WlDynObj};
 
-        if let Err(e) = poll(&mut fds, daemon.poll_time) {
+        if let Err(e) = poll(&mut fds, daemon.poll_time.into()) {
             match e {
                 rustix::io::Errno::INTR => continue,
                 _ => return Err(format!("failed to poll file descriptors: {e:?}")),
@@ -584,14 +589,13 @@ fn main() -> Result<(), String> {
 
         if !fds[1].revents().is_empty() {
             match rustix::net::accept(&listener.0) {
-                // TODO: abstract away explicit socket creation
                 Ok(stream) => daemon.recv_socket_msg(IpcSocket::new(stream)),
                 Err(rustix::io::Errno::INTR | rustix::io::Errno::WOULDBLOCK) => continue,
                 Err(e) => return Err(format!("failed to accept incoming connection: {e}")),
             }
         }
 
-        if daemon.poll_time > -1 {
+        if !matches!(daemon.poll_time, PollTime::Never) {
             daemon.draw();
         }
     }
@@ -675,6 +679,26 @@ impl Drop for SocketWrapper {
             error!("Failed to remove socket at {addr}: {e}");
         }
         info!("Removed socket at {addr}");
+    }
+}
+
+#[repr(i32)]
+#[derive(Clone, Copy)]
+/// We use PollTime as a way of making sure we draw at the right time
+/// when we call `Daemon::draw` before the frame callback returned, we need to *not* draw and
+/// instead wait for the next callback, which we do with a short poll time.
+///
+/// The instant poll time is for when we receive an img request, after we set up the requested
+/// transitions
+enum PollTime {
+    Never = -1,
+    Instant = 0,
+    Short = 1,
+}
+
+impl From<PollTime> for i32 {
+    fn from(value: PollTime) -> Self {
+        value as i32
     }
 }
 

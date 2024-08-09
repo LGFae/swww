@@ -21,7 +21,7 @@ use common::ipc::PixelFormat;
 use log::{debug, error, info};
 
 use super::{ObjectId, ObjectManager, WlDynObj};
-use std::{cell::RefCell, num::NonZeroU32, path::PathBuf, sync::atomic::AtomicBool};
+use std::{num::NonZeroU32, path::PathBuf, sync::atomic::AtomicBool};
 
 // all of these objects must always exist for `swww-daemon` to work correctly, so we turn them into
 // global constants
@@ -48,7 +48,7 @@ const VERSIONS: [u32; 4] = [4, 1, 1, 3];
 static mut WAYLAND_FD: OwnedFd = unsafe { std::mem::zeroed() };
 static mut FRACTIONAL_SCALE_SUPPORT: bool = false;
 static mut PIXEL_FORMAT: PixelFormat = PixelFormat::Xrgb;
-static mut OBJECT_MANAGER: RefCell<ObjectManager> = RefCell::new(ObjectManager::new());
+static mut OBJECT_MANAGER: ObjectManager = ObjectManager::new();
 
 static INITIALIZED: AtomicBool = AtomicBool::new(false);
 
@@ -64,20 +64,23 @@ pub fn fractional_scale_support() -> bool {
 }
 
 #[must_use]
+/// Safe because this is a single threaded application, so no race conditions can occur
 pub fn object_type_get(object_id: ObjectId) -> Option<WlDynObj> {
     debug_assert!(INITIALIZED.load(std::sync::atomic::Ordering::Relaxed));
-    unsafe { OBJECT_MANAGER.borrow() }.get(object_id)
+    unsafe { OBJECT_MANAGER.get(object_id) }
 }
 
 #[must_use]
+/// Safe because this is a single threaded application, so no race conditions can occur
 pub fn object_create(object_type: WlDynObj) -> ObjectId {
     debug_assert!(INITIALIZED.load(std::sync::atomic::Ordering::Relaxed));
-    unsafe { OBJECT_MANAGER.borrow_mut() }.create(object_type)
+    unsafe { OBJECT_MANAGER.create(object_type) }
 }
 
+/// Safe because this is a single threaded application, so no race conditions can occur
 pub fn object_remove(object_id: ObjectId) {
     debug_assert!(INITIALIZED.load(std::sync::atomic::Ordering::Relaxed));
-    unsafe { OBJECT_MANAGER.borrow_mut() }.remove(object_id)
+    unsafe { OBJECT_MANAGER.remove(object_id) }
 }
 
 #[must_use]
@@ -99,11 +102,11 @@ pub fn wl_shm_format() -> u32 {
 
 /// Note that this function assumes the logger has already been set up
 pub fn init(pixel_format: Option<PixelFormat>) -> Initializer {
-    // if we have initialized already, return imediatelly with an empty Initializer
-    let mut initializer = Initializer::new(pixel_format);
-    if INITIALIZED.load(std::sync::atomic::Ordering::SeqCst) {
-        return initializer;
+    if INITIALIZED.load(std::sync::atomic::Ordering::Relaxed) {
+        panic!("trying to run initialization code twice");
     }
+
+    let mut initializer = Initializer::new(pixel_format);
 
     // initialize the two most important globals:
     //   * the wayland file descriptor; and
@@ -161,11 +164,11 @@ pub fn init(pixel_format: Option<PixelFormat>) -> Initializer {
     }
 
     // bind fractional scale, if it is supported
-    if let Some((id, name)) = initializer.fractional_scale.as_ref() {
+    if let Some(fractional_scale_manager) = initializer.fractional_scale.as_ref() {
         unsafe { FRACTIONAL_SCALE_SUPPORT = true };
         super::interfaces::wl_registry::req::bind(
-            name.get(),
-            *id,
+            fractional_scale_manager.name.get(),
+            fractional_scale_manager.id,
             "wp_fractional_scale_manager_v1",
             1,
         )
@@ -244,11 +247,23 @@ fn connect() -> OwnedFd {
     }
 }
 
+#[derive(Clone)]
+pub struct FractionalScaleManager {
+    id: ObjectId,
+    name: NonZeroU32,
+}
+
+impl FractionalScaleManager {
+    pub fn id(&self) -> ObjectId {
+        self.id
+    }
+}
+
 /// Helper struct to do all the initialization in this file
 pub struct Initializer {
     global_names: [u32; REQUIRED_GLOBALS.len()],
     output_names: Vec<u32>,
-    fractional_scale: Option<(ObjectId, NonZeroU32)>,
+    fractional_scale: Option<FractionalScaleManager>,
     forced_shm_format: bool,
     should_exit: bool,
 }
@@ -276,7 +291,7 @@ impl Initializer {
         &self.output_names
     }
 
-    pub fn fractional_scale(&self) -> Option<&(ObjectId, NonZeroU32)> {
+    pub fn fractional_scale(&self) -> Option<&FractionalScaleManager> {
         self.fractional_scale.as_ref()
     }
 }
@@ -311,10 +326,10 @@ impl super::interfaces::wl_registry::EvHandler for Initializer {
     fn global(&mut self, name: u32, interface: &str, version: u32) {
         match interface {
             "wp_fractional_scale_manager_v1" => {
-                self.fractional_scale = Some((
-                    ObjectId(unsafe { NonZeroU32::new_unchecked(7) }),
-                    name.try_into().unwrap(),
-                ));
+                self.fractional_scale = Some(FractionalScaleManager {
+                    id: ObjectId(unsafe { NonZeroU32::new_unchecked(7) }),
+                    name: name.try_into().unwrap(),
+                });
             }
             "wl_output" => {
                 if version < 4 {
