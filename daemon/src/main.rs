@@ -15,35 +15,34 @@ use rustix::{
 
 use wallpaper::Wallpaper;
 use wayland::{
-    globals::{self, Initializer},
+    globals::{self, FractionalScaleManager, Initializer},
     ObjectId,
 };
 
 use std::{
+    cell::RefCell,
     fs,
     io::{IsTerminal, Write},
     num::{NonZeroI32, NonZeroU32},
     path::Path,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
+    rc::Rc,
+    sync::atomic::{AtomicBool, Ordering},
+    time::Duration,
 };
 
+use animations::{ImageAnimator, TransitionAnimator};
 use common::ipc::{Answer, BgInfo, ImageReq, IpcSocket, RequestRecv, RequestSend, Scale, Server};
 use common::mmap::MmappedStr;
-
-use animations::Animator;
 
 // We need this because this might be set by signals, so we can't keep it in the daemon
 static EXIT: AtomicBool = AtomicBool::new(false);
 
 fn exit_daemon() {
-    EXIT.store(true, Ordering::Release);
+    EXIT.store(true, Ordering::Relaxed);
 }
 
 fn should_daemon_exit() -> bool {
-    EXIT.load(Ordering::Acquire)
+    EXIT.load(Ordering::Relaxed)
 }
 
 extern "C" fn signal_handler(_s: libc::c_int) {
@@ -51,10 +50,12 @@ extern "C" fn signal_handler(_s: libc::c_int) {
 }
 
 struct Daemon {
-    wallpapers: Vec<Arc<Wallpaper>>,
-    animator: Animator,
+    wallpapers: Vec<Rc<RefCell<Wallpaper>>>,
+    transition_animators: Vec<TransitionAnimator>,
+    image_animators: Vec<ImageAnimator>,
     use_cache: bool,
-    fractional_scale_manager: Option<(ObjectId, NonZeroU32)>,
+    fractional_scale_manager: Option<FractionalScaleManager>,
+    poll_time: PollTime,
 }
 
 impl Daemon {
@@ -69,9 +70,11 @@ impl Daemon {
 
         Self {
             wallpapers,
-            animator: Animator::new(),
+            transition_animators: Vec::new(),
+            image_animators: Vec::new(),
             use_cache: !no_cache,
             fractional_scale_manager,
+            poll_time: PollTime::Never,
         }
     }
 
@@ -102,24 +105,28 @@ impl Daemon {
         let viewport = globals::object_create(wayland::WlDynObj::Viewport);
         wp_viewporter::req::get_viewport(viewport, surface).unwrap();
 
-        let wp_fractional = if let Some((id, _)) = self.fractional_scale_manager.as_ref() {
+        let wp_fractional = if let Some(fract_man) = self.fractional_scale_manager.as_ref() {
             let fractional = globals::object_create(wayland::WlDynObj::FractionalScale);
-            wp_fractional_scale_manager_v1::req::get_fractional_scale(*id, fractional, surface)
-                .unwrap();
+            wp_fractional_scale_manager_v1::req::get_fractional_scale(
+                fract_man.id(),
+                fractional,
+                surface,
+            )
+            .unwrap();
             Some(fractional)
         } else {
             None
         };
 
         debug!("New output: {output_name}");
-        self.wallpapers.push(Arc::new(Wallpaper::new(
+        self.wallpapers.push(Rc::new(RefCell::new(Wallpaper::new(
             output,
             output_name,
             surface,
             viewport,
             wp_fractional,
             layer_surface,
-        )));
+        ))));
     }
 
     fn recv_socket_msg(&mut self, stream: IpcSocket<Server>) {
@@ -135,26 +142,21 @@ impl Daemon {
         let answer = match request {
             RequestRecv::Clear(clear) => {
                 let wallpapers = self.find_wallpapers_by_names(&clear.outputs);
-                std::thread::Builder::new()
-                    .stack_size(1 << 15)
-                    .name("clear".to_string())
-                    .spawn(move || {
-                        crate::wallpaper::stop_animations(&wallpapers);
-                        for wallpaper in &wallpapers {
-                            wallpaper.set_img_info(common::ipc::BgImg::Color(clear.color));
-                            wallpaper.clear(clear.color);
-                        }
-                        crate::wallpaper::attach_buffers_and_damange_surfaces(&wallpapers);
-                        crate::wallpaper::commit_wallpapers(&wallpapers);
-                    })
-                    .unwrap(); // builder only failed if the name contains null bytes
+                self.stop_animations(&wallpapers);
+                for wallpaper in &wallpapers {
+                    let mut wallpaper = wallpaper.borrow_mut();
+                    wallpaper.set_img_info(common::ipc::BgImg::Color(clear.color));
+                    wallpaper.clear(clear.color);
+                }
+                crate::wallpaper::attach_buffers_and_damage_surfaces(&wallpapers);
+                crate::wallpaper::commit_wallpapers(&wallpapers);
                 Answer::Ok
             }
-            RequestRecv::Ping => Answer::Ping(
-                self.wallpapers
-                    .iter()
-                    .all(|w| w.configured.load(std::sync::atomic::Ordering::Acquire)),
-            ),
+            RequestRecv::Ping => Answer::Ping(self.wallpapers.iter().all(|w| {
+                w.borrow()
+                    .configured
+                    .load(std::sync::atomic::Ordering::Acquire)
+            })),
             RequestRecv::Kill => {
                 exit_daemon();
                 Answer::Ok
@@ -162,18 +164,29 @@ impl Daemon {
             RequestRecv::Query => Answer::Info(self.wallpapers_info()),
             RequestRecv::Img(ImageReq {
                 transition,
-                imgs,
-                outputs,
-                animations,
+                mut imgs,
+                mut outputs,
+                mut animations,
             }) => {
-                let mut used_wallpapers = Vec::new();
-                for names in outputs.iter() {
-                    let wallpapers = self.find_wallpapers_by_names(names);
-                    crate::wallpaper::stop_animations(&wallpapers);
-                    used_wallpapers.push(wallpapers);
+                while !imgs.is_empty() && !outputs.is_empty() {
+                    let names = outputs.pop().unwrap();
+                    let img = imgs.pop().unwrap();
+                    let animation = if let Some(ref mut animations) = animations {
+                        animations.pop()
+                    } else {
+                        None
+                    };
+                    let wallpapers = self.find_wallpapers_by_names(&names);
+                    self.stop_animations(&wallpapers);
+                    if let Some(mut transition) =
+                        TransitionAnimator::new(wallpapers, &transition, img, animation)
+                    {
+                        transition.frame();
+                        self.transition_animators.push(transition);
+                    }
                 }
-                self.animator
-                    .transition(transition, imgs, animations, used_wallpapers)
+                self.poll_time = PollTime::Instant;
+                Answer::Ok
             }
         };
         if let Err(e) = answer.send(&stream) {
@@ -184,20 +197,100 @@ impl Daemon {
     fn wallpapers_info(&self) -> Box<[BgInfo]> {
         self.wallpapers
             .iter()
-            .map(|wallpaper| wallpaper.get_bg_info())
+            .map(|wallpaper| wallpaper.borrow().get_bg_info())
             .collect()
     }
 
-    fn find_wallpapers_by_names(&self, names: &[MmappedStr]) -> Vec<Arc<Wallpaper>> {
+    fn find_wallpapers_by_names(&self, names: &[MmappedStr]) -> Vec<Rc<RefCell<Wallpaper>>> {
         self.wallpapers
             .iter()
             .filter_map(|wallpaper| {
-                if names.is_empty() || names.iter().any(|n| wallpaper.has_name(n.str())) {
-                    return Some(Arc::clone(wallpaper));
+                if names.is_empty() || names.iter().any(|n| wallpaper.borrow().has_name(n.str())) {
+                    return Some(Rc::clone(wallpaper));
                 }
                 None
             })
             .collect()
+    }
+
+    fn draw(&mut self) {
+        self.poll_time = PollTime::Never;
+
+        let mut i = 0;
+        while i < self.transition_animators.len() {
+            let animator = &mut self.transition_animators[i];
+            if animator
+                .wallpapers
+                .iter()
+                .all(|w| w.borrow().is_draw_ready())
+            {
+                let time = animator.time_to_draw();
+                if time > Duration::from_micros(1200) {
+                    self.poll_time = PollTime::Short;
+                    i += 1;
+                    continue;
+                }
+
+                if !time.is_zero() {
+                    spin_sleep(time);
+                }
+
+                wallpaper::attach_buffers_and_damage_surfaces(&animator.wallpapers);
+                wallpaper::commit_wallpapers(&animator.wallpapers);
+                animator.updt_time();
+                if animator.frame() {
+                    let animator = self.transition_animators.swap_remove(i);
+                    if let Some(anim) = animator.into_image_animator() {
+                        self.image_animators.push(anim);
+                    }
+                    continue;
+                }
+            }
+            i += 1;
+        }
+
+        self.image_animators.retain(|a| !a.wallpapers.is_empty());
+        for animator in &mut self.image_animators {
+            if animator
+                .wallpapers
+                .iter()
+                .all(|w| w.borrow().is_draw_ready())
+            {
+                let time = animator.time_to_draw();
+                if time > Duration::from_micros(1200) {
+                    self.poll_time = PollTime::Short;
+                    continue;
+                }
+
+                if !time.is_zero() {
+                    spin_sleep(time);
+                }
+
+                wallpaper::attach_buffers_and_damage_surfaces(&animator.wallpapers);
+                wallpaper::commit_wallpapers(&animator.wallpapers);
+                animator.updt_time();
+                animator.frame();
+            }
+        }
+    }
+
+    fn stop_animations(&mut self, wallpapers: &[Rc<RefCell<Wallpaper>>]) {
+        for transition in self.transition_animators.iter_mut() {
+            transition
+                .wallpapers
+                .retain(|w1| !wallpapers.iter().any(|w2| w1.borrow().eq(&w2.borrow())));
+        }
+
+        for animator in self.image_animators.iter_mut() {
+            animator
+                .wallpapers
+                .retain(|w1| !wallpapers.iter().any(|w2| w1.borrow().eq(&w2.borrow())));
+        }
+
+        self.transition_animators
+            .retain(|t| !t.wallpapers.is_empty());
+
+        self.image_animators.retain(|a| !a.wallpapers.is_empty());
     }
 }
 
@@ -208,6 +301,7 @@ impl wayland::interfaces::wl_display::EvHandler for Daemon {
         }
     }
 }
+
 impl wayland::interfaces::wl_registry::EvHandler for Daemon {
     fn global(&mut self, name: u32, interface: &str, version: u32) {
         if interface == "wl_output" {
@@ -220,7 +314,14 @@ impl wayland::interfaces::wl_registry::EvHandler for Daemon {
     }
 
     fn global_remove(&mut self, name: u32) {
-        self.wallpapers.retain(|w| !w.has_output_name(name));
+        if let Some(i) = self
+            .wallpapers
+            .iter()
+            .position(|w| w.borrow().has_output_name(name))
+        {
+            let w = self.wallpapers.remove(i);
+            self.stop_animations(&[w]);
+        }
     }
 }
 
@@ -246,6 +347,7 @@ impl wayland::interfaces::wl_output::EvHandler for Daemon {
         transform: i32,
     ) {
         for wallpaper in self.wallpapers.iter() {
+            let mut wallpaper = wallpaper.borrow_mut();
             if wallpaper.has_output(sender_id) {
                 if transform as u32 > wayland::interfaces::wl_output::transform::FLIPPED_270 {
                     error!("received invalid transform value from compositor: {transform}")
@@ -259,6 +361,7 @@ impl wayland::interfaces::wl_output::EvHandler for Daemon {
 
     fn mode(&mut self, sender_id: ObjectId, _flags: u32, width: i32, height: i32, _refresh: i32) {
         for wallpaper in self.wallpapers.iter() {
+            let mut wallpaper = wallpaper.borrow_mut();
             if wallpaper.has_output(sender_id) {
                 wallpaper.set_dimensions(width, height);
                 break;
@@ -268,8 +371,11 @@ impl wayland::interfaces::wl_output::EvHandler for Daemon {
 
     fn done(&mut self, sender_id: ObjectId) {
         for wallpaper in self.wallpapers.iter() {
-            if wallpaper.has_output(sender_id) {
-                wallpaper.commit_surface_changes(self.use_cache);
+            if wallpaper.borrow().has_output(sender_id) {
+                wallpaper
+                    .borrow_mut()
+                    .commit_surface_changes(self.use_cache);
+                self.stop_animations(&[wallpaper.clone()]);
                 break;
             }
         }
@@ -277,6 +383,7 @@ impl wayland::interfaces::wl_output::EvHandler for Daemon {
 
     fn scale(&mut self, sender_id: ObjectId, factor: i32) {
         for wallpaper in self.wallpapers.iter() {
+            let mut wallpaper = wallpaper.borrow_mut();
             if wallpaper.has_output(sender_id) {
                 match NonZeroI32::new(factor) {
                     Some(factor) => wallpaper.set_scale(Scale::Whole(factor)),
@@ -289,6 +396,7 @@ impl wayland::interfaces::wl_output::EvHandler for Daemon {
 
     fn name(&mut self, sender_id: ObjectId, name: &str) {
         for wallpaper in self.wallpapers.iter() {
+            let mut wallpaper = wallpaper.borrow_mut();
             if wallpaper.has_output(sender_id) {
                 wallpaper.set_name(name.to_string());
                 break;
@@ -298,6 +406,7 @@ impl wayland::interfaces::wl_output::EvHandler for Daemon {
 
     fn description(&mut self, sender_id: ObjectId, description: &str) {
         for wallpaper in self.wallpapers.iter() {
+            let mut wallpaper = wallpaper.borrow_mut();
             if wallpaper.has_output(sender_id) {
                 wallpaper.set_desc(description.to_string());
                 break;
@@ -305,6 +414,7 @@ impl wayland::interfaces::wl_output::EvHandler for Daemon {
         }
     }
 }
+
 impl wayland::interfaces::wl_surface::EvHandler for Daemon {
     fn enter(&mut self, _sender_id: ObjectId, output: ObjectId) {
         debug!("Output {}: Surface Enter", output.get());
@@ -316,6 +426,7 @@ impl wayland::interfaces::wl_surface::EvHandler for Daemon {
 
     fn preferred_buffer_scale(&mut self, sender_id: ObjectId, factor: i32) {
         for wallpaper in self.wallpapers.iter() {
+            let mut wallpaper = wallpaper.borrow_mut();
             if wallpaper.has_surface(sender_id) {
                 match NonZeroI32::new(factor) {
                     Some(factor) => wallpaper.set_scale(Scale::Whole(factor)),
@@ -334,8 +445,11 @@ impl wayland::interfaces::wl_surface::EvHandler for Daemon {
 impl wayland::interfaces::wl_buffer::EvHandler for Daemon {
     fn release(&mut self, sender_id: ObjectId) {
         for wallpaper in self.wallpapers.iter() {
-            let strong_count = Arc::strong_count(wallpaper);
-            if wallpaper.try_set_buffer_release_flag(sender_id, strong_count) {
+            let strong_count = Rc::strong_count(wallpaper);
+            if wallpaper
+                .borrow_mut()
+                .try_set_buffer_release_flag(sender_id, strong_count)
+            {
                 break;
             }
         }
@@ -345,8 +459,9 @@ impl wayland::interfaces::wl_buffer::EvHandler for Daemon {
 impl wayland::interfaces::wl_callback::EvHandler for Daemon {
     fn done(&mut self, sender_id: ObjectId, _callback_data: u32) {
         for wallpaper in self.wallpapers.iter() {
-            if wallpaper.has_callback(sender_id) {
-                wallpaper.frame_callback_completed();
+            if wallpaper.borrow().has_callback(sender_id) {
+                wallpaper.borrow_mut().frame_callback_completed();
+                self.draw();
                 break;
             }
         }
@@ -356,7 +471,7 @@ impl wayland::interfaces::wl_callback::EvHandler for Daemon {
 impl wayland::interfaces::zwlr_layer_surface_v1::EvHandler for Daemon {
     fn configure(&mut self, sender_id: ObjectId, serial: u32, _width: u32, _height: u32) {
         for wallpaper in self.wallpapers.iter() {
-            if wallpaper.has_layer_surface(sender_id) {
+            if wallpaper.borrow().has_layer_surface(sender_id) {
                 wayland::interfaces::zwlr_layer_surface_v1::req::ack_configure(sender_id, serial)
                     .unwrap();
                 break;
@@ -365,18 +480,24 @@ impl wayland::interfaces::zwlr_layer_surface_v1::EvHandler for Daemon {
     }
 
     fn closed(&mut self, sender_id: ObjectId) {
-        self.wallpapers.retain(|w| !w.has_layer_surface(sender_id));
+        self.wallpapers
+            .retain(|w| !w.borrow().has_layer_surface(sender_id));
     }
 }
 
 impl wayland::interfaces::wp_fractional_scale_v1::EvHandler for Daemon {
     fn preferred_scale(&mut self, sender_id: ObjectId, scale: u32) {
         for wallpaper in self.wallpapers.iter() {
-            if wallpaper.has_fractional_scale(sender_id) {
+            if wallpaper.borrow().has_fractional_scale(sender_id) {
                 match NonZeroI32::new(scale as i32) {
                     Some(factor) => {
-                        wallpaper.set_scale(Scale::Fractional(factor));
-                        wallpaper.commit_surface_changes(self.use_cache);
+                        wallpaper.borrow_mut().set_scale(Scale::Fractional(factor));
+                        if wallpaper
+                            .borrow_mut()
+                            .commit_surface_changes(self.use_cache)
+                        {
+                            self.stop_animations(&[wallpaper.clone()]);
+                        }
                     }
                     None => error!("received scale factor of 0 from compositor"),
                 }
@@ -423,7 +544,7 @@ fn main() -> Result<(), String> {
     while !should_daemon_exit() {
         use wayland::{interfaces::*, wire, WlDynObj};
 
-        if let Err(e) = poll(&mut fds, -1) {
+        if let Err(e) = poll(&mut fds, daemon.poll_time.into()) {
             match e {
                 rustix::io::Errno::INTR => continue,
                 _ => return Err(format!("failed to poll file descriptors: {e:?}")),
@@ -468,26 +589,15 @@ fn main() -> Result<(), String> {
 
         if !fds[1].revents().is_empty() {
             match rustix::net::accept(&listener.0) {
-                // TODO: abstract away explicit socket creation
                 Ok(stream) => daemon.recv_socket_msg(IpcSocket::new(stream)),
                 Err(rustix::io::Errno::INTR | rustix::io::Errno::WOULDBLOCK) => continue,
                 Err(e) => return Err(format!("failed to accept incoming connection: {e}")),
             }
         }
-    }
-    crate::wallpaper::stop_animations(&daemon.wallpapers);
 
-    // wait for the animation threads to finish.
-    while !daemon.wallpapers.is_empty() {
-        // When all animations finish, Arc's strong count will be exactly 1
-        daemon.wallpapers.retain(|w| Arc::strong_count(w) > 1);
-        // set all frame callbacks as completed, otherwise the animation threads might deadlock on
-        // the conditional variable
-        for wallpaper in &daemon.wallpapers {
-            wallpaper.frame_callback_completed();
+        if !matches!(daemon.poll_time, PollTime::Never) {
+            daemon.draw();
         }
-        // yield to waste less cpu
-        std::thread::yield_now();
     }
 
     drop(daemon);
@@ -572,6 +682,26 @@ impl Drop for SocketWrapper {
     }
 }
 
+#[repr(i32)]
+#[derive(Clone, Copy)]
+/// We use PollTime as a way of making sure we draw at the right time
+/// when we call `Daemon::draw` before the frame callback returned, we need to *not* draw and
+/// instead wait for the next callback, which we do with a short poll time.
+///
+/// The instant poll time is for when we receive an img request, after we set up the requested
+/// transitions
+enum PollTime {
+    Never = -1,
+    Instant = 0,
+    Short = 1,
+}
+
+impl From<PollTime> for i32 {
+    fn from(value: PollTime) -> Self {
+        value as i32
+    }
+}
+
 struct Logger {
     level_filter: LevelFilter,
     start: std::time::Instant,
@@ -603,13 +733,8 @@ impl log::Log for Logger {
                 }
             };
 
-            let thread = std::thread::current();
-            let thread_name = thread.name().unwrap_or("???");
             let msg = record.args();
-
-            let _ = std::io::stderr()
-                .lock()
-                .write_fmt(format_args!("{time:>8}ms {level} ({thread_name}) {msg}\n"));
+            let _ = std::io::stderr().write_fmt(format_args!("{time:>10}ms {level} {msg}\n"));
         }
     }
 

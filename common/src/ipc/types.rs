@@ -591,9 +591,9 @@ impl Animation {
 
 pub struct ImageReq {
     pub transition: Transition,
-    pub imgs: Box<[ImgReq]>,
-    pub outputs: Box<[Box<[MmappedStr]>]>,
-    pub animations: Option<Box<[Animation]>>,
+    pub imgs: Vec<ImgReq>,
+    pub outputs: Vec<Box<[MmappedStr]>>,
+    pub animations: Option<Vec<Animation>>,
 }
 
 fn deserialize_string(bytes: &[u8]) -> String {
