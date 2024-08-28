@@ -211,8 +211,7 @@ fn connect() -> OwnedFd {
 
         let socket_addr =
             rustix::net::getsockname(&fd).expect("failed to get wayland socket address");
-        if let SocketAddrAny::Unix(addr) = socket_addr {
-            rustix::net::connect_unix(&fd, &addr).expect("failed to connect to unix socket");
+        if let SocketAddrAny::Unix(_) = socket_addr {
             fd
         } else {
             panic!("socket address {:?} is not a unix socket", socket_addr);
