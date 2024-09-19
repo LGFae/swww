@@ -405,7 +405,7 @@ fn parse_bezier(raw: &str) -> Result<(f32, f32, f32, f32), String> {
 
 pub fn parse_image(raw: &str) -> Result<CliImage, String> {
     let path = PathBuf::from(raw);
-    if path.exists() {
+    if raw == "-" || path.exists() {
         return Ok(CliImage::Path(path));
     }
     if let Some(color) = raw.strip_prefix("0x") {
