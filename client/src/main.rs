@@ -150,7 +150,7 @@ fn make_img_request(
                 let animation = if !imgbuf.is_animated() {
                     None
                 } else if img.resize == ResizeStrategy::Crop {
-                    match cache::load_animation_frames(img_path, dim, pixel_format) {
+                    match cache::load_animation_frames(path.as_ref(), dim, pixel_format) {
                         Ok(Some(animation)) => Some(animation),
                         otherwise => {
                             if let Err(e) = otherwise {
