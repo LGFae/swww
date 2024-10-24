@@ -1,6 +1,7 @@
 /// Note: this file only has basic declarations and some definitions in order to be possible to
 /// import it in the build script, to automate shell completion
 use clap::{Parser, ValueEnum};
+use std::fmt::Display;
 use std::path::PathBuf;
 
 fn from_hex(hex: &str) -> Result<[u8; 3], String> {
@@ -71,6 +72,20 @@ impl std::str::FromStr for Filter {
                      Nearest | Bilinear | CatmullRom | Mitchell | Lanczos3\
                      see swww img --help for more details"),
         }
+    }
+}
+
+impl Display for Filter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let str = match self {
+            Self::Nearest => "Nearest",
+            Self::Bilinear => "Bilinear",
+            Self::CatmullRom => "CatmullRom",
+            Self::Mitchell => "Mitchell",
+            Self::Lanczos3 => "Lanczos3",
+        }
+        .to_string();
+        write!(f, "{}", str)
     }
 }
 
