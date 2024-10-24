@@ -4,6 +4,7 @@ use clap::Parser;
 use common::cache;
 use common::ipc::{self, Answer, Client, IpcSocket, RequestSend};
 use common::mmap::Mmap;
+use image::Pixel;
 
 mod imgproc;
 use imgproc::*;
@@ -119,9 +120,13 @@ fn make_img_request(
             for (&dim, outputs) in dims.iter().zip(outputs) {
                 img_req_builder.push(
                     ipc::ImgSend {
-                        img: image::RgbImage::from_pixel(dim.0, dim.1, image::Rgb(*color))
-                            .to_vec()
-                            .into_boxed_slice(),
+                        img: image::RgbaImage::from_pixel(
+                            dim.0,
+                            dim.1,
+                            image::Rgb(*color).to_rgba(),
+                        )
+                        .to_vec()
+                        .into_boxed_slice(),
                         path: format!("0x{:02x}{:02x}{:02x}", color[0], color[1], color[2]),
                         dim,
                         format: pixel_format,
