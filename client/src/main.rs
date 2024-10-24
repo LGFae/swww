@@ -1,4 +1,4 @@
-use std::{path::Path, time::Duration};
+use std::{path::Path, str::FromStr, time::Duration};
 
 use clap::Parser;
 use common::cache;
@@ -9,7 +9,7 @@ mod imgproc;
 use imgproc::*;
 
 mod cli;
-use cli::{CliImage, ResizeStrategy, Swww};
+use cli::{CliImage, Filter, ResizeStrategy, Swww};
 
 fn main() -> Result<(), String> {
     let swww = Swww::parse();
@@ -126,6 +126,7 @@ fn make_img_request(
                         dim,
                         format: pixel_format,
                     },
+                    Filter::Lanczos3.to_string(),
                     outputs,
                     None,
                 );
@@ -176,6 +177,7 @@ fn make_img_request(
                     None
                 };
 
+                let filter = img.filter.to_string();
                 let img = match img.resize {
                     ResizeStrategy::No => img_pad(&img_raw, dim, &img.fill_color)?,
                     ResizeStrategy::Crop => {
@@ -193,6 +195,7 @@ fn make_img_request(
                         dim,
                         format: pixel_format,
                     },
+                    filter,
                     outputs,
                     animation,
                 );
@@ -262,7 +265,7 @@ fn restore_from_cache(requested_outputs: &[String]) -> Result<(), String> {
     let (_, _, outputs) = get_format_dims_and_outputs(requested_outputs)?;
 
     for output in outputs.iter().flatten() {
-        let img_path = common::cache::get_previous_image_path(output)
+        let (filter, img_path) = common::cache::get_previous_image_path(output)
             .map_err(|e| format!("failed to get previous image path: {e}"))?;
         #[allow(deprecated)]
         if let Err(e) = process_swww_args(&Swww::Img(cli::Img {
@@ -271,7 +274,7 @@ fn restore_from_cache(requested_outputs: &[String]) -> Result<(), String> {
             no_resize: false,
             resize: ResizeStrategy::Crop,
             fill_color: [0, 0, 0],
-            filter: cli::Filter::Lanczos3,
+            filter: Filter::from_str(&filter).unwrap_or(Filter::Lanczos3),
             transition_type: cli::TransitionType::None,
             transition_step: std::num::NonZeroU8::MAX,
             transition_duration: 0.0,
