@@ -82,10 +82,12 @@ pub fn get_previous_image_path(output_name: &str) -> io::Result<(String, String)
         )
     })?;
 
-    if let Some(buf) = buf.split_once("\n") {
-        Ok((buf.0.to_string(), buf.1.to_string()))
-    } else {
-        Ok(("Lanczos3".to_string(), buf))
+    match buf.split_once("\n") {
+        Some(buf) => Ok((buf.0.to_string(), buf.1.to_string())),
+        None => Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "failed to read image filter",
+        )),
     }
 }
 
