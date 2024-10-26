@@ -205,6 +205,7 @@ pub fn compress_frames(
         ResizeStrategy::No => img_pad(&first_img, dim, color)?,
         ResizeStrategy::Crop => img_resize_crop(&first_img, dim, filter)?,
         ResizeStrategy::Fit => img_resize_fit(&first_img, dim, filter, color)?,
+        ResizeStrategy::Stretch => img_resize_stretch(&first_img, dim, filter)?,
     };
 
     let mut canvas: Option<Box<[u8]>> = None;
@@ -217,6 +218,7 @@ pub fn compress_frames(
             ResizeStrategy::No => img_pad(&img, dim, color)?,
             ResizeStrategy::Crop => img_resize_crop(&img, dim, filter)?,
             ResizeStrategy::Fit => img_resize_fit(&img, dim, filter, color)?,
+            ResizeStrategy::Stretch => img_resize_crop(&img, dim, filter)?,
         };
 
         if let Some(canvas) = canvas.as_ref() {
@@ -380,6 +382,46 @@ pub fn img_resize_fit(
     } else {
         Ok(img.bytes.clone())
     }
+}
+
+pub fn img_resize_stretch(
+    img: &Image,
+    dimensions: (u32, u32),
+    filter: FilterType,
+) -> Result<Box<[u8]>, String> {
+    let (width, height) = dimensions;
+    let resized_img = if (img.width, img.height) != (width, height) {
+        let pixel_type = if img.format.channels() == 3 {
+            PixelType::U8x3
+        } else {
+            PixelType::U8x4
+        };
+
+        let src = match fast_image_resize::images::ImageRef::new(
+            img.width,
+            img.height,
+            img.bytes.as_ref(),
+            pixel_type,
+        ) {
+            Ok(i) => i,
+            Err(e) => return Err(e.to_string()),
+        };
+
+        let mut dst = fast_image_resize::images::Image::new(width, height, pixel_type);
+        let mut resizer = Resizer::new();
+        let options = ResizeOptions::new()
+            .resize_alg(ResizeAlg::Convolution(filter));
+
+        if let Err(e) = resizer.resize(&src, &mut dst, Some(&options)) {
+            return Err(e.to_string());
+        }
+
+        dst.into_vec().into_boxed_slice()
+    } else {
+        img.bytes.clone()
+    };
+
+    Ok(resized_img)
 }
 
 pub fn img_resize_crop(

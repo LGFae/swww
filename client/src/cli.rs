@@ -212,6 +212,8 @@ pub enum ResizeStrategy {
     Crop,
     /// Resize the image to fit inside the screen, preserving the original aspect ratio
     Fit,
+    /// Resize the image to stretch across the screen
+    Stretch,
 }
 
 #[derive(Parser)]

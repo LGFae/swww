@@ -184,6 +184,9 @@ fn make_img_request(
                     ResizeStrategy::Fit => {
                         img_resize_fit(&img_raw, dim, make_filter(&img.filter), &img.fill_color)?
                     }
+                    ResizeStrategy::Stretch => {
+                        img_resize_stretch(&img_raw, dim, make_filter(&img.filter))?
+                    }
                 };
 
                 img_req_builder.push(
