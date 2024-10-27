@@ -83,8 +83,7 @@ impl Display for Filter {
             Self::CatmullRom => "CatmullRom",
             Self::Mitchell => "Mitchell",
             Self::Lanczos3 => "Lanczos3",
-        }
-        .to_string();
+        };
         write!(f, "{}", str)
     }
 }

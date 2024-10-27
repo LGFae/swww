@@ -70,7 +70,7 @@ pub fn get_previous_image_path(output_name: &str) -> io::Result<(String, String)
 
     filepath.push(output_name);
     if !filepath.is_file() {
-        return Ok(("Lanczos3".to_string(), "".to_string()));
+        return Ok(("".to_string(), "".to_string()));
     }
 
     let mut buf = Vec::with_capacity(64);

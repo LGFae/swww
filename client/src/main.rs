@@ -270,32 +270,40 @@ fn restore_from_cache(requested_outputs: &[String]) -> Result<(), String> {
     let (_, _, outputs) = get_format_dims_and_outputs(requested_outputs)?;
 
     for output in outputs.iter().flatten() {
-        let (filter, img_path) = common::cache::get_previous_image_path(output)
-            .map_err(|e| format!("failed to get previous image path: {e}"))?;
-        #[allow(deprecated)]
-        if let Err(e) = process_swww_args(&Swww::Img(cli::Img {
-            image: cli::parse_image(&img_path)?,
-            outputs: output.to_string(),
-            no_resize: false,
-            resize: ResizeStrategy::Crop,
-            fill_color: [0, 0, 0],
-            filter: Filter::from_str(&filter).unwrap_or(Filter::Lanczos3),
-            transition_type: cli::TransitionType::None,
-            transition_step: std::num::NonZeroU8::MAX,
-            transition_duration: 0.0,
-            transition_fps: 30,
-            transition_angle: 0.0,
-            transition_pos: cli::CliPosition {
-                x: cli::CliCoord::Pixel(0.0),
-                y: cli::CliCoord::Pixel(0.0),
-            },
-            invert_y: false,
-            transition_bezier: (0.0, 0.0, 0.0, 0.0),
-            transition_wave: (0.0, 0.0),
-        })) {
+        if let Err(e) = restore_output(output) {
             eprintln!("WARNING: failed to load cache for output {output}: {e}");
         }
     }
 
     Ok(())
+}
+
+fn restore_output(output: &str) -> Result<(), String> {
+    let (filter, img_path) = common::cache::get_previous_image_path(output)
+        .map_err(|e| format!("failed to get previous image path: {e}"))?;
+    if img_path.is_empty() {
+        return Err("cache file does not exist".to_string());
+    }
+
+    #[allow(deprecated)]
+    process_swww_args(&Swww::Img(cli::Img {
+        image: cli::parse_image(&img_path)?,
+        outputs: output.to_string(),
+        no_resize: false,
+        resize: ResizeStrategy::Crop,
+        fill_color: [0, 0, 0],
+        filter: Filter::from_str(&filter).unwrap_or(Filter::Lanczos3),
+        transition_type: cli::TransitionType::None,
+        transition_step: std::num::NonZeroU8::MAX,
+        transition_duration: 0.0,
+        transition_fps: 30,
+        transition_angle: 0.0,
+        transition_pos: cli::CliPosition {
+            x: cli::CliCoord::Pixel(0.0),
+            y: cli::CliCoord::Pixel(0.0),
+        },
+        invert_y: false,
+        transition_bezier: (0.0, 0.0, 0.0, 0.0),
+        transition_wave: (0.0, 0.0),
+    }))
 }
