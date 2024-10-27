@@ -218,7 +218,7 @@ pub fn compress_frames(
             ResizeStrategy::No => img_pad(&img, dim, color)?,
             ResizeStrategy::Crop => img_resize_crop(&img, dim, filter)?,
             ResizeStrategy::Fit => img_resize_fit(&img, dim, filter, color)?,
-            ResizeStrategy::Stretch => img_resize_crop(&img, dim, filter)?,
+            ResizeStrategy::Stretch => img_resize_stretch(&img, dim, filter)?,
         };
 
         if let Some(canvas) = canvas.as_ref() {
@@ -409,8 +409,7 @@ pub fn img_resize_stretch(
 
         let mut dst = fast_image_resize::images::Image::new(width, height, pixel_type);
         let mut resizer = Resizer::new();
-        let options = ResizeOptions::new()
-            .resize_alg(ResizeAlg::Convolution(filter));
+        let options = ResizeOptions::new().resize_alg(ResizeAlg::Convolution(filter));
 
         if let Err(e) = resizer.resize(&src, &mut dst, Some(&options)) {
             return Err(e.to_string());
