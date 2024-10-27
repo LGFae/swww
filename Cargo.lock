@@ -244,7 +244,7 @@ checksum = "5b63caa9aa9397e2d9480a9b13673856c78d8ac123288526c37d7839f2a86990"
 
 [[package]]
 name = "common"
-version = "0.9.5-masterV2"
+version = "0.9.5-masterV3"
 dependencies = [
  "criterion",
  "fastrand",
@@ -853,7 +853,7 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 
 [[package]]
 name = "swww"
-version = "0.9.5-masterV2"
+version = "0.9.5-masterV3"
 dependencies = [
  "assert_cmd",
  "clap",
@@ -866,7 +866,7 @@ dependencies = [
 
 [[package]]
 name = "swww-daemon"
-version = "0.9.5-masterV2"
+version = "0.9.5-masterV3"
 dependencies = [
  "common",
  "keyframe",

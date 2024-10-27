@@ -14,10 +14,10 @@ use crate::ipc::Animation;
 use crate::ipc::PixelFormat;
 use crate::mmap::Mmap;
 
-pub(crate) fn store(output_name: &str, img_path: &str) -> io::Result<()> {
+pub(crate) fn store(output_name: &str, img_path: &str, filter: &str) -> io::Result<()> {
     let mut filepath = cache_dir()?;
     filepath.push(output_name);
-    File::create(filepath)?.write_all(img_path.as_bytes())
+    File::create(filepath)?.write_all(format!("{filter}\n{img_path}").as_bytes())
 }
 
 pub(crate) fn store_animation_frames(
@@ -64,28 +64,35 @@ pub fn load_animation_frames(
     Ok(None)
 }
 
-pub fn get_previous_image_path(output_name: &str) -> io::Result<String> {
+pub fn get_previous_image_path(output_name: &str) -> io::Result<(String, String)> {
     let mut filepath = cache_dir()?;
     clean_previous_verions(&filepath);
 
     filepath.push(output_name);
     if !filepath.is_file() {
-        return Ok("".to_string());
+        return Ok(("".to_string(), "".to_string()));
     }
 
     let mut buf = Vec::with_capacity(64);
     File::open(filepath)?.read_to_end(&mut buf)?;
-
-    String::from_utf8(buf).map_err(|e| {
+    let buf = String::from_utf8(buf).map_err(|e| {
         std::io::Error::new(
             std::io::ErrorKind::Other,
             format!("failed to decode bytes: {e}"),
         )
-    })
+    })?;
+
+    match buf.split_once("\n") {
+        Some(buf) => Ok((buf.0.to_string(), buf.1.to_string())),
+        None => Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "failed to read image filter",
+        )),
+    }
 }
 
 pub fn load(output_name: &str) -> io::Result<()> {
-    let img_path = get_previous_image_path(output_name)?;
+    let (filter, img_path) = get_previous_image_path(output_name)?;
     if img_path.is_empty() {
         return Ok(());
     }
@@ -105,6 +112,7 @@ pub fn load(output_name: &str) -> io::Result<()> {
         .arg("img")
         .args([
             &format!("--outputs={output_name}"),
+            &format!("--filter={filter}"),
             "--transition-type=none",
             &img_path,
         ])

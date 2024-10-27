@@ -5,7 +5,7 @@ members = ["client", "daemon", "common"]
 default-members = ["client", "daemon"]
 
 [workspace.package]
-version = "0.9.5-masterV2"
+version = "0.9.5-masterV3"
 authors = ["Leonardo Gibrowski Faé <leonardo.fae44@gmail.com>"]
 edition = "2021"
 license-file = "LICENSE"

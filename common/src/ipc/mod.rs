@@ -59,7 +59,13 @@ impl ImageRequestBuilder {
     }
 
     #[inline]
-    pub fn push(&mut self, img: ImgSend, outputs: &[String], animation: Option<Animation>) {
+    pub fn push(
+        &mut self,
+        img: ImgSend,
+        filter: String,
+        outputs: &[String],
+        animation: Option<Animation>,
+    ) {
         self.img_count += 1;
 
         let ImgSend {
@@ -89,7 +95,7 @@ impl ImageRequestBuilder {
 
         // cache the request
         for output in outputs.iter() {
-            if let Err(e) = super::cache::store(output, path) {
+            if let Err(e) = super::cache::store(output, path, &filter) {
                 eprintln!("ERROR: failed to store cache: {e}");
             }
         }

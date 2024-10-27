@@ -1,15 +1,16 @@
-use std::{path::Path, time::Duration};
+use std::{path::Path, str::FromStr, time::Duration};
 
 use clap::Parser;
 use common::cache;
 use common::ipc::{self, Answer, Client, IpcSocket, RequestSend};
 use common::mmap::Mmap;
+use image::Pixel;
 
 mod imgproc;
 use imgproc::*;
 
 mod cli;
-use cli::{CliImage, ResizeStrategy, Swww};
+use cli::{CliImage, Filter, ResizeStrategy, Swww};
 
 fn main() -> Result<(), String> {
     let swww = Swww::parse();
@@ -119,13 +120,18 @@ fn make_img_request(
             for (&dim, outputs) in dims.iter().zip(outputs) {
                 img_req_builder.push(
                     ipc::ImgSend {
-                        img: image::RgbImage::from_pixel(dim.0, dim.1, image::Rgb(*color))
-                            .to_vec()
-                            .into_boxed_slice(),
+                        img: image::RgbaImage::from_pixel(
+                            dim.0,
+                            dim.1,
+                            image::Rgb(*color).to_rgba(),
+                        )
+                        .to_vec()
+                        .into_boxed_slice(),
                         path: format!("0x{:02x}{:02x}{:02x}", color[0], color[1], color[2]),
                         dim,
                         format: pixel_format,
                     },
+                    Filter::Lanczos3.to_string(),
                     outputs,
                     None,
                 );
@@ -176,6 +182,7 @@ fn make_img_request(
                     None
                 };
 
+                let filter = img.filter.to_string();
                 let img = match img.resize {
                     ResizeStrategy::No => img_pad(&img_raw, dim, &img.fill_color)?,
                     ResizeStrategy::Crop => {
@@ -196,6 +203,7 @@ fn make_img_request(
                         dim,
                         format: pixel_format,
                     },
+                    filter,
                     outputs,
                     animation,
                 );
@@ -265,32 +273,40 @@ fn restore_from_cache(requested_outputs: &[String]) -> Result<(), String> {
     let (_, _, outputs) = get_format_dims_and_outputs(requested_outputs)?;
 
     for output in outputs.iter().flatten() {
-        let img_path = common::cache::get_previous_image_path(output)
-            .map_err(|e| format!("failed to get previous image path: {e}"))?;
-        #[allow(deprecated)]
-        if let Err(e) = process_swww_args(&Swww::Img(cli::Img {
-            image: cli::parse_image(&img_path)?,
-            outputs: output.to_string(),
-            no_resize: false,
-            resize: ResizeStrategy::Crop,
-            fill_color: [0, 0, 0],
-            filter: cli::Filter::Lanczos3,
-            transition_type: cli::TransitionType::None,
-            transition_step: std::num::NonZeroU8::MAX,
-            transition_duration: 0.0,
-            transition_fps: 30,
-            transition_angle: 0.0,
-            transition_pos: cli::CliPosition {
-                x: cli::CliCoord::Pixel(0.0),
-                y: cli::CliCoord::Pixel(0.0),
-            },
-            invert_y: false,
-            transition_bezier: (0.0, 0.0, 0.0, 0.0),
-            transition_wave: (0.0, 0.0),
-        })) {
+        if let Err(e) = restore_output(output) {
             eprintln!("WARNING: failed to load cache for output {output}: {e}");
         }
     }
 
     Ok(())
+}
+
+fn restore_output(output: &str) -> Result<(), String> {
+    let (filter, img_path) = common::cache::get_previous_image_path(output)
+        .map_err(|e| format!("failed to get previous image path: {e}"))?;
+    if img_path.is_empty() {
+        return Err("cache file does not exist".to_string());
+    }
+
+    #[allow(deprecated)]
+    process_swww_args(&Swww::Img(cli::Img {
+        image: cli::parse_image(&img_path)?,
+        outputs: output.to_string(),
+        no_resize: false,
+        resize: ResizeStrategy::Crop,
+        fill_color: [0, 0, 0],
+        filter: Filter::from_str(&filter).unwrap_or(Filter::Lanczos3),
+        transition_type: cli::TransitionType::None,
+        transition_step: std::num::NonZeroU8::MAX,
+        transition_duration: 0.0,
+        transition_fps: 30,
+        transition_angle: 0.0,
+        transition_pos: cli::CliPosition {
+            x: cli::CliCoord::Pixel(0.0),
+            y: cli::CliCoord::Pixel(0.0),
+        },
+        invert_y: false,
+        transition_bezier: (0.0, 0.0, 0.0, 0.0),
+        transition_wave: (0.0, 0.0),
+    }))
 }
