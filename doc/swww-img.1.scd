@@ -40,9 +40,10 @@ swww-img
 	Whether to resize the image and the method by which to resize it.
 
 	Possible values:
-		- _no_:   Do not resize the image
-		- _crop_: Resize the image to fill the whole screen, cropping out parts that don't fit
-		- _fit_:  Resize the image to fit inside the screen, preserving the original aspect ratio
+		- _no_:       Do not resize the image
+		- _crop_:     Resize the image to fill the whole screen, cropping out parts that don't fit
+		- _fit_:      Resize the image to fit inside the screen, preserving the original aspect ratio
+		- _stretch_:  Resize the image to fit inside the screen, without preserving the original aspect ratio
 
 	Default is _crop_.
 
