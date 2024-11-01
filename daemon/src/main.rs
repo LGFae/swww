@@ -372,9 +372,12 @@ impl wayland::interfaces::wl_output::EvHandler for Daemon {
     fn done(&mut self, sender_id: ObjectId) {
         for wallpaper in self.wallpapers.iter() {
             if wallpaper.borrow().has_output(sender_id) {
-                wallpaper
+                if wallpaper
                     .borrow_mut()
-                    .commit_surface_changes(self.use_cache);
+                    .commit_surface_changes(self.use_cache)
+                {
+                    self.stop_animations(&[wallpaper.clone()]);
+                }
                 break;
             }
         }
