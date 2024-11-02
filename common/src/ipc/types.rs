@@ -86,6 +86,10 @@ impl BgImg {
             Self::Img(s) => 4 + s.len()
         }
     }
+
+    pub fn is_set(&self) -> bool {
+        matches!(self, Self::Img(_))
+    }
 }
 
 impl fmt::Display for BgImg {
@@ -147,7 +151,7 @@ impl PixelFormat {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug)]
 pub enum Scale {
     Whole(NonZeroI32),
     Fractional(NonZeroI32),
@@ -180,6 +184,18 @@ impl Scale {
                 (width, height)
             }
         }
+    }
+}
+
+impl PartialEq for Scale {
+    fn eq(&self, other: &Self) -> bool {
+        (match self {
+            Self::Whole(i) => i.get() * 120,
+            Self::Fractional(f) => f.get(),
+        }) == (match other {
+            Self::Whole(i) => i.get() * 120,
+            Self::Fractional(f) => f.get(),
+        })
     }
 }
 
