@@ -1,15 +1,14 @@
-use common::ipc::{BgImg, BgInfo, Scale};
+use common::ipc::{BgImg, BgInfo, PixelFormat, Scale};
 use log::{debug, error, warn};
 
 use std::{cell::RefCell, num::NonZeroI32, rc::Rc, sync::atomic::AtomicBool};
 
 use crate::wayland::{
     bump_pool::BumpPool,
-    globals,
     interfaces::{
         wl_output, wl_surface, wp_fractional_scale_v1, wp_viewport, zwlr_layer_surface_v1,
     },
-    ObjectId, WlDynObj,
+    ObjectId, ObjectManager, WlDynObj,
 };
 
 struct FrameCallbackHandler {
@@ -18,8 +17,8 @@ struct FrameCallbackHandler {
 }
 
 impl FrameCallbackHandler {
-    fn new(surface: ObjectId) -> Self {
-        let callback = globals::object_create(WlDynObj::Callback);
+    fn new(objman: &mut ObjectManager, surface: ObjectId) -> Self {
+        let callback = objman.create(WlDynObj::Callback);
         wl_surface::req::frame(surface, callback).unwrap();
         FrameCallbackHandler {
             done: true, // we do not have to wait for the first frame
@@ -27,8 +26,8 @@ impl FrameCallbackHandler {
         }
     }
 
-    fn request_frame_callback(&mut self, surface: ObjectId) {
-        let callback = globals::object_create(WlDynObj::Callback);
+    fn request_frame_callback(&mut self, objman: &mut ObjectManager, surface: ObjectId) {
+        let callback = objman.create(WlDynObj::Callback);
         wl_surface::req::frame(surface, callback).unwrap();
         self.callback = callback;
     }
@@ -85,13 +84,48 @@ impl std::cmp::PartialEq for Wallpaper {
 
 impl Wallpaper {
     pub(crate) fn new(
-        output: ObjectId,
+        objman: &mut ObjectManager,
+        pixel_format: PixelFormat,
+        fractional_scale_manager: Option<ObjectId>,
         output_name: u32,
-        wl_surface: ObjectId,
-        wp_viewport: ObjectId,
-        wp_fractional: Option<ObjectId>,
-        layer_surface: ObjectId,
     ) -> Self {
+        use crate::wayland::{self, interfaces::*};
+        let output = objman.create(wayland::WlDynObj::Output);
+        wl_registry::req::bind(output_name, output, "wl_output", 4).unwrap();
+
+        let wl_surface = objman.create(wayland::WlDynObj::Surface);
+        wl_compositor::req::create_surface(wl_surface).unwrap();
+
+        let region = objman.create(wayland::WlDynObj::Region);
+        wl_compositor::req::create_region(region).unwrap();
+
+        wl_surface::req::set_input_region(wl_surface, Some(region)).unwrap();
+        wl_region::req::destroy(region).unwrap();
+
+        let layer_surface = objman.create(wayland::WlDynObj::LayerSurface);
+        zwlr_layer_shell_v1::req::get_layer_surface(
+            layer_surface,
+            wl_surface,
+            Some(output),
+            zwlr_layer_shell_v1::layer::BACKGROUND,
+            "swww-daemon",
+        )
+        .unwrap();
+
+        let wp_viewport = objman.create(wayland::WlDynObj::Viewport);
+        wp_viewporter::req::get_viewport(wp_viewport, wl_surface).unwrap();
+
+        let wp_fractional = if let Some(fract_man) = fractional_scale_manager {
+            let fractional = objman.create(wayland::WlDynObj::FractionalScale);
+            wp_fractional_scale_manager_v1::req::get_fractional_scale(
+                fract_man, fractional, wl_surface,
+            )
+            .unwrap();
+            Some(fractional)
+        } else {
+            None
+        };
+
         let inner = WallpaperInner::default();
         let inner_staging = WallpaperInner::default();
 
@@ -106,12 +140,13 @@ impl Wallpaper {
         .unwrap();
         wl_surface::req::set_buffer_scale(wl_surface, 1).unwrap();
 
-        let frame_callback_handler = FrameCallbackHandler::new(wl_surface);
+        let frame_callback_handler = FrameCallbackHandler::new(objman, wl_surface);
         // commit so that the compositor send the initial configuration
         wl_surface::req::commit(wl_surface).unwrap();
 
-        let pool = BumpPool::new(256, 256);
+        let pool = BumpPool::new(256, 256, objman, pixel_format);
 
+        debug!("New output: {output_name}");
         Self {
             output,
             output_name,
@@ -128,7 +163,7 @@ impl Wallpaper {
         }
     }
 
-    pub fn get_bg_info(&self) -> BgInfo {
+    pub fn get_bg_info(&self, pixel_format: PixelFormat) -> BgInfo {
         BgInfo {
             name: self.inner.name.clone().unwrap_or("?".to_string()),
             dim: (
@@ -137,7 +172,7 @@ impl Wallpaper {
             ),
             scale_factor: self.inner.scale_factor,
             img: self.img.clone(),
-            pixel_format: globals::pixel_format(),
+            pixel_format,
         }
     }
 
@@ -213,7 +248,7 @@ impl Wallpaper {
         }
     }
 
-    pub fn commit_surface_changes(&mut self, use_cache: bool) -> bool {
+    pub fn commit_surface_changes(&mut self, objman: &mut ObjectManager, use_cache: bool) -> bool {
         use wl_output::transform;
         let inner = &mut self.inner;
         let staging = &self.inner_staging;
@@ -283,7 +318,7 @@ impl Wallpaper {
         self.pool.resize(w, h);
 
         self.frame_callback_handler
-            .request_frame_callback(self.wl_surface);
+            .request_frame_callback(objman, self.wl_surface);
         wl_surface::req::commit(self.wl_surface).unwrap();
         self.configured
             .store(true, std::sync::atomic::Ordering::Release);
@@ -342,20 +377,30 @@ impl Wallpaper {
         (dim.0 as u32, dim.1 as u32)
     }
 
-    pub(super) fn canvas_change<F, T>(&mut self, f: F) -> T
+    pub(super) fn canvas_change<F, T>(
+        &mut self,
+        objman: &mut ObjectManager,
+        pixel_format: PixelFormat,
+        f: F,
+    ) -> T
     where
         F: FnOnce(&mut [u8]) -> T,
     {
-        f(self.pool.get_drawable())
+        f(self.pool.get_drawable(objman, pixel_format))
     }
 
     pub(super) fn frame_callback_completed(&mut self) {
         self.frame_callback_handler.done = true;
     }
 
-    pub(super) fn clear(&mut self, color: [u8; 3]) {
-        self.canvas_change(|canvas| {
-            for pixel in canvas.chunks_exact_mut(globals::pixel_format().channels().into()) {
+    pub(super) fn clear(
+        &mut self,
+        objman: &mut ObjectManager,
+        pixel_format: PixelFormat,
+        color: [u8; 3],
+    ) {
+        self.canvas_change(objman, pixel_format, |canvas| {
+            for pixel in canvas.chunks_exact_mut(pixel_format.channels().into()) {
                 pixel[0..3].copy_from_slice(&color);
             }
         })
@@ -368,7 +413,10 @@ impl Wallpaper {
 }
 
 /// attaches all pending buffers and damages all surfaces with one single request
-pub(crate) fn attach_buffers_and_damage_surfaces(wallpapers: &[Rc<RefCell<Wallpaper>>]) {
+pub(crate) fn attach_buffers_and_damage_surfaces(
+    objman: &mut ObjectManager,
+    wallpapers: &[Rc<RefCell<Wallpaper>>],
+) {
     #[rustfmt::skip]
     // Note this is little-endian specific
     const MSG: [u8; 56] = [
@@ -409,7 +457,7 @@ pub(crate) fn attach_buffers_and_damage_surfaces(wallpapers: &[Rc<RefCell<Wallpa
             msg[40..44].copy_from_slice(&height.to_ne_bytes());
 
             // frame callback
-            let callback = globals::object_create(WlDynObj::Callback);
+            let callback = objman.create(WlDynObj::Callback);
             wallpaper.frame_callback_handler.callback = callback;
             msg[44..48].copy_from_slice(&wallpaper.wl_surface.get().to_ne_bytes());
             msg[52..56].copy_from_slice(&callback.get().to_ne_bytes());

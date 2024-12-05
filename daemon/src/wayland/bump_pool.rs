@@ -1,6 +1,6 @@
-use common::mmap::Mmap;
+use common::{ipc::PixelFormat, mmap::Mmap};
 
-use super::{globals, ObjectId};
+use super::{ObjectId, ObjectManager};
 
 #[derive(Debug)]
 struct Buffer {
@@ -10,6 +10,7 @@ struct Buffer {
 
 impl Buffer {
     fn new(
+        objman: &mut ObjectManager,
         pool_id: ObjectId,
         offset: i32,
         width: i32,
@@ -18,7 +19,7 @@ impl Buffer {
         format: u32,
     ) -> Self {
         let released = true;
-        let object_id = globals::object_create(super::WlDynObj::Buffer);
+        let object_id = objman.create(super::WlDynObj::Buffer);
         super::interfaces::wl_shm_pool::req::create_buffer(
             pool_id, object_id, offset, width, height, stride, format,
         )
@@ -66,11 +67,15 @@ pub(crate) struct BumpPool {
 
 impl BumpPool {
     /// We assume `width` and `height` have already been multiplied by their scale factor
-    pub(crate) fn new(width: i32, height: i32) -> Self {
-        let len =
-            width as usize * height as usize * super::globals::pixel_format().channels() as usize;
+    pub(crate) fn new(
+        width: i32,
+        height: i32,
+        objman: &mut ObjectManager,
+        pixel_format: PixelFormat,
+    ) -> Self {
+        let len = width as usize * height as usize * pixel_format.channels() as usize;
         let mmap = Mmap::create(len);
-        let pool_id = globals::object_create(super::WlDynObj::ShmPool);
+        let pool_id = objman.create(super::WlDynObj::ShmPool);
         super::interfaces::wl_shm::req::create_pool(pool_id, &mmap.fd(), len as i32)
             .expect("failed to create WlShmPool object");
         let buffers = Vec::with_capacity(2);
@@ -108,24 +113,22 @@ impl BumpPool {
         }
     }
 
-    fn buffer_len(&self) -> usize {
-        self.width as usize
-            * self.height as usize
-            * super::globals::pixel_format().channels() as usize
+    const fn buffer_len(&self, pixel_format: PixelFormat) -> usize {
+        self.width as usize * self.height as usize * pixel_format.channels() as usize
     }
 
-    fn buffer_offset(&self, buffer_index: usize) -> usize {
-        self.buffer_len() * buffer_index
+    const fn buffer_offset(&self, buffer_index: usize, pixel_format: PixelFormat) -> usize {
+        self.buffer_len(pixel_format) * buffer_index
     }
 
-    fn occupied_bytes(&self) -> usize {
-        self.buffer_offset(self.buffers.len())
+    fn occupied_bytes(&self, pixel_format: PixelFormat) -> usize {
+        self.buffer_offset(self.buffers.len(), pixel_format)
     }
 
     /// resizes the pool and creates a new WlBuffer at the next free offset
-    fn grow(&mut self) {
-        let len = self.buffer_len();
-        let new_len = self.occupied_bytes() + len;
+    fn grow(&mut self, objman: &mut ObjectManager, pixel_format: PixelFormat) {
+        let len = self.buffer_len(pixel_format);
+        let new_len = self.occupied_bytes(pixel_format) + len;
 
         // we unmap the shared memory file descriptor when animations are done, so here we must
         // ensure the bytes are actually mmaped
@@ -141,12 +144,13 @@ impl BumpPool {
 
         let new_buffer_index = self.buffers.len();
         self.buffers.push(Buffer::new(
+            objman,
             self.pool_id,
-            self.buffer_offset(new_buffer_index) as i32,
+            self.buffer_offset(new_buffer_index, pixel_format) as i32,
             self.width,
             self.height,
-            self.width * super::globals::pixel_format().channels() as i32,
-            super::globals::wl_shm_format(),
+            self.width * pixel_format.channels() as i32,
+            super::globals::wl_shm_format(pixel_format),
         ));
 
         log::info!(
@@ -159,7 +163,11 @@ impl BumpPool {
     /// Returns a drawable surface. If we can't find a free buffer, we request more memory
     ///
     /// This function automatically handles copying the previous buffer over onto the new one
-    pub(crate) fn get_drawable(&mut self) -> &mut [u8] {
+    pub(crate) fn get_drawable(
+        &mut self,
+        objman: &mut ObjectManager,
+        pixel_format: PixelFormat,
+    ) -> &mut [u8] {
         let (i, buf) = match self
             .buffers
             .iter_mut()
@@ -168,17 +176,17 @@ impl BumpPool {
         {
             Some((i, buf)) => (i, buf),
             None => {
-                self.grow();
+                self.grow(objman, pixel_format);
                 (self.buffers.len() - 1, self.buffers.last_mut().unwrap())
             }
         };
         buf.unset_released();
 
-        let len = self.buffer_len();
-        let offset = self.buffer_offset(i);
+        let len = self.buffer_len(pixel_format);
+        let offset = self.buffer_offset(i, pixel_format);
 
         if self.last_used_buffer != i {
-            let last_offset = self.buffer_offset(self.last_used_buffer);
+            let last_offset = self.buffer_offset(self.last_used_buffer, pixel_format);
             self.mmap
                 .slice_mut()
                 .copy_within(last_offset..last_offset + len, offset);

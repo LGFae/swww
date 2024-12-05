@@ -8,11 +8,11 @@ use std::{
 
 use common::{
     compression::Decompressor,
-    ipc::{self, Animation, BgImg, ImgReq},
+    ipc::{self, Animation, BgImg, ImgReq, PixelFormat},
     mmap::MmappedBytes,
 };
 
-use crate::{wallpaper::Wallpaper, wayland::globals};
+use crate::{wallpaper::Wallpaper, wayland::ObjectManager};
 
 mod transitions;
 use transitions::Effect;
@@ -31,6 +31,7 @@ impl TransitionAnimator {
     pub fn new(
         mut wallpapers: Vec<Rc<RefCell<Wallpaper>>>,
         transition: &ipc::Transition,
+        pixel_format: PixelFormat,
         img_req: ImgReq,
         animation: Option<Animation>,
     ) -> Option<Self> {
@@ -49,7 +50,7 @@ impl TransitionAnimator {
             return None;
         }
         let fps = Duration::from_nanos(1_000_000_000 / transition.fps as u64);
-        let effect = Effect::new(transition, dim);
+        let effect = Effect::new(transition, pixel_format, dim);
         Some(Self {
             wallpapers,
             effect,
@@ -69,7 +70,7 @@ impl TransitionAnimator {
         self.now = Instant::now();
     }
 
-    pub fn frame(&mut self) -> bool {
+    pub fn frame(&mut self, objman: &mut ObjectManager, pixel_format: PixelFormat) -> bool {
         let Self {
             wallpapers,
             effect,
@@ -78,7 +79,7 @@ impl TransitionAnimator {
             ..
         } = self;
         if !*over {
-            *over = effect.execute(wallpapers, img.bytes());
+            *over = effect.execute(objman, pixel_format, wallpapers, img.bytes());
             false
         } else {
             true
@@ -121,7 +122,7 @@ impl ImageAnimator {
         self.now = Instant::now();
     }
 
-    pub fn frame(&mut self) {
+    pub fn frame(&mut self, objman: &mut ObjectManager, pixel_format: PixelFormat) {
         let Self {
             wallpapers,
             animation,
@@ -134,9 +135,11 @@ impl ImageAnimator {
 
         let mut j = 0;
         while j < wallpapers.len() {
-            let result = wallpapers[j].borrow_mut().canvas_change(|canvas| {
-                decompressor.decompress(frame, canvas, globals::pixel_format())
-            });
+            let result = wallpapers[j]
+                .borrow_mut()
+                .canvas_change(objman, pixel_format, |canvas| {
+                    decompressor.decompress(frame, canvas, pixel_format)
+                });
 
             if let Err(e) = result {
                 error!("failed to unpack frame: {e}");
