@@ -372,10 +372,12 @@ impl wayland::interfaces::wl_output::EvHandler for Daemon {
     fn done(&mut self, sender_id: ObjectId) {
         for wallpaper in self.wallpapers.iter() {
             if wallpaper.borrow().has_output(sender_id) {
-                wallpaper
+                if wallpaper
                     .borrow_mut()
-                    .commit_surface_changes(self.use_cache);
-                self.stop_animations(&[wallpaper.clone()]);
+                    .commit_surface_changes(self.use_cache)
+                {
+                    self.stop_animations(&[wallpaper.clone()]);
+                }
                 break;
             }
         }
@@ -480,8 +482,14 @@ impl wayland::interfaces::zwlr_layer_surface_v1::EvHandler for Daemon {
     }
 
     fn closed(&mut self, sender_id: ObjectId) {
-        self.wallpapers
-            .retain(|w| !w.borrow().has_layer_surface(sender_id));
+        if let Some(i) = self
+            .wallpapers
+            .iter()
+            .position(|w| w.borrow().has_layer_surface(sender_id))
+        {
+            let w = self.wallpapers.remove(i);
+            self.stop_animations(&[w]);
+        }
     }
 }
 
