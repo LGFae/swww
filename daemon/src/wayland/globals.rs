@@ -55,7 +55,8 @@ static INITIALIZED: AtomicBool = AtomicBool::new(false);
 #[must_use]
 pub fn wayland_fd() -> BorrowedFd<'static> {
     debug_assert!(INITIALIZED.load(std::sync::atomic::Ordering::Relaxed));
-    unsafe { WAYLAND_FD.as_fd() }
+    let ptr = &raw const WAYLAND_FD;
+    unsafe { &*ptr }.as_fd()
 }
 
 #[must_use]
@@ -67,20 +68,23 @@ pub fn fractional_scale_support() -> bool {
 /// Safe because this is a single threaded application, so no race conditions can occur
 pub fn object_type_get(object_id: ObjectId) -> Option<WlDynObj> {
     debug_assert!(INITIALIZED.load(std::sync::atomic::Ordering::Relaxed));
-    unsafe { OBJECT_MANAGER.get(object_id) }
+    let ptr = &raw const OBJECT_MANAGER;
+    unsafe { &*ptr }.get(object_id)
 }
 
 #[must_use]
 /// Safe because this is a single threaded application, so no race conditions can occur
 pub fn object_create(object_type: WlDynObj) -> ObjectId {
     debug_assert!(INITIALIZED.load(std::sync::atomic::Ordering::Relaxed));
-    unsafe { OBJECT_MANAGER.create(object_type) }
+    let ptr = &raw mut OBJECT_MANAGER;
+    unsafe { &mut *ptr }.create(object_type)
 }
 
 /// Safe because this is a single threaded application, so no race conditions can occur
 pub fn object_remove(object_id: ObjectId) {
     debug_assert!(INITIALIZED.load(std::sync::atomic::Ordering::Relaxed));
-    unsafe { OBJECT_MANAGER.remove(object_id) }
+    let ptr = &raw mut OBJECT_MANAGER;
+    unsafe { &mut *ptr }.remove(object_id)
 }
 
 #[must_use]

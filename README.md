@@ -21,7 +21,7 @@
 
 ### Dependencies:
 
-  - Up to date stable rustc compiler and cargo (specifically, MSRV is 1.75.0)
+  - Up to date stable rustc compiler and cargo (specifically, MSRV is 1.82.0)
 
 To build, clone this repository and run:
 ```
