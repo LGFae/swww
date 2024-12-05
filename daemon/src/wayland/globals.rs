@@ -18,9 +18,9 @@ use rustix::{
 };
 
 use common::ipc::PixelFormat;
-use log::{debug, error, info};
+use log::{debug, error};
 
-use super::{ObjectId, ObjectManager, WlDynObj};
+use super::{ObjectId, ObjectManager};
 use std::{num::NonZeroU32, path::PathBuf, sync::atomic::AtomicBool};
 
 // all of these objects must always exist for `swww-daemon` to work correctly, so we turn them into
@@ -42,13 +42,14 @@ const REQUIRED_GLOBALS: [&str; 4] = [
     "wp_viewporter",
     "zwlr_layer_shell_v1",
 ];
+
 /// Minimal version necessary for `REQUIRED_GLOBALS`
 const VERSIONS: [u32; 4] = [4, 1, 1, 3];
 
+/// This is an unsafe static mut that we only ever write to once, during the `init` function call.
+/// Any other function in this program can only access this variable through the `wayland_fd`
+/// function, which always creates an immutable reference, which should be safe.
 static mut WAYLAND_FD: OwnedFd = unsafe { std::mem::zeroed() };
-static mut FRACTIONAL_SCALE_SUPPORT: bool = false;
-static mut PIXEL_FORMAT: PixelFormat = PixelFormat::Xrgb;
-static mut OBJECT_MANAGER: ObjectManager = ObjectManager::new();
 
 static INITIALIZED: AtomicBool = AtomicBool::new(false);
 
@@ -60,43 +61,8 @@ pub fn wayland_fd() -> BorrowedFd<'static> {
 }
 
 #[must_use]
-pub fn fractional_scale_support() -> bool {
-    unsafe { FRACTIONAL_SCALE_SUPPORT }
-}
-
-#[must_use]
-/// Safe because this is a single threaded application, so no race conditions can occur
-pub fn object_type_get(object_id: ObjectId) -> Option<WlDynObj> {
-    debug_assert!(INITIALIZED.load(std::sync::atomic::Ordering::Relaxed));
-    let ptr = &raw const OBJECT_MANAGER;
-    unsafe { &*ptr }.get(object_id)
-}
-
-#[must_use]
-/// Safe because this is a single threaded application, so no race conditions can occur
-pub fn object_create(object_type: WlDynObj) -> ObjectId {
-    debug_assert!(INITIALIZED.load(std::sync::atomic::Ordering::Relaxed));
-    let ptr = &raw mut OBJECT_MANAGER;
-    unsafe { &mut *ptr }.create(object_type)
-}
-
-/// Safe because this is a single threaded application, so no race conditions can occur
-pub fn object_remove(object_id: ObjectId) {
-    debug_assert!(INITIALIZED.load(std::sync::atomic::Ordering::Relaxed));
-    let ptr = &raw mut OBJECT_MANAGER;
-    unsafe { &mut *ptr }.remove(object_id)
-}
-
-#[must_use]
-pub fn pixel_format() -> PixelFormat {
-    debug_assert!(INITIALIZED.load(std::sync::atomic::Ordering::Relaxed));
-    unsafe { PIXEL_FORMAT }
-}
-
-#[must_use]
-pub fn wl_shm_format() -> u32 {
-    debug_assert!(INITIALIZED.load(std::sync::atomic::Ordering::Relaxed));
-    match unsafe { PIXEL_FORMAT } {
+pub fn wl_shm_format(pixel_format: PixelFormat) -> u32 {
+    match pixel_format {
         PixelFormat::Xrgb => super::interfaces::wl_shm::format::XRGB8888,
         PixelFormat::Xbgr => super::interfaces::wl_shm::format::XBGR8888,
         PixelFormat::Rgb => super::interfaces::wl_shm::format::RGB888,
@@ -105,24 +71,16 @@ pub fn wl_shm_format() -> u32 {
 }
 
 /// Note that this function assumes the logger has already been set up
-pub fn init(pixel_format: Option<PixelFormat>) -> Initializer {
+pub fn init(pixel_format: Option<PixelFormat>) -> InitState {
     if INITIALIZED.load(std::sync::atomic::Ordering::Relaxed) {
         panic!("trying to run initialization code twice");
     }
 
-    let mut initializer = Initializer::new(pixel_format);
-
-    // initialize the two most important globals:
-    //   * the wayland file descriptor; and
-    //   * the object manager
-    // we optionally initialize the pixel_format, if necessary
     unsafe {
         WAYLAND_FD = connect();
-        if let Some(format) = pixel_format {
-            info!("Forced usage of wl_shm format: {:?}", format);
-            PIXEL_FORMAT = format;
-        }
     }
+    let mut initializer = Initializer::new(pixel_format);
+
     // the only globals that can break catastrophically are WAYLAND_FD and OBJECT_MANAGER, that we
     // have just initialized above. So this is safe
     INITIALIZED.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -169,7 +127,6 @@ pub fn init(pixel_format: Option<PixelFormat>) -> Initializer {
 
     // bind fractional scale, if it is supported
     if let Some(fractional_scale_manager) = initializer.fractional_scale.as_ref() {
-        unsafe { FRACTIONAL_SCALE_SUPPORT = true };
         super::interfaces::wl_registry::req::bind(
             fractional_scale_manager.name.get(),
             fractional_scale_manager.id,
@@ -201,7 +158,7 @@ pub fn init(pixel_format: Option<PixelFormat>) -> Initializer {
         }
     }
 
-    initializer
+    initializer.into_init_state()
 }
 
 /// mostly copy-pasted from `wayland-client.rs`
@@ -263,7 +220,9 @@ impl FractionalScaleManager {
 }
 
 /// Helper struct to do all the initialization in this file
-pub struct Initializer {
+struct Initializer {
+    objman: ObjectManager,
+    pixel_format: PixelFormat,
     global_names: [u32; REQUIRED_GLOBALS.len()],
     output_names: Vec<u32>,
     fractional_scale: Option<FractionalScaleManager>,
@@ -271,14 +230,24 @@ pub struct Initializer {
     should_exit: bool,
 }
 
+/// Helper struct to expose all of the initialized state
+pub struct InitState {
+    pub output_names: Vec<u32>,
+    pub fractional_scale: Option<FractionalScaleManager>,
+    pub objman: ObjectManager,
+    pub pixel_format: PixelFormat,
+}
+
 impl Initializer {
     fn new(cli_format: Option<PixelFormat>) -> Self {
         Self {
+            objman: ObjectManager::new(),
             global_names: [0; REQUIRED_GLOBALS.len()],
             output_names: Vec::new(),
             fractional_scale: None,
             forced_shm_format: cli_format.is_some(),
             should_exit: false,
+            pixel_format: cli_format.unwrap_or(PixelFormat::Xrgb),
         }
     }
 
@@ -290,12 +259,28 @@ impl Initializer {
         }
     }
 
+    fn into_init_state(self) -> InitState {
+        debug!("Initialization Over");
+        InitState {
+            output_names: self.output_names,
+            fractional_scale: self.fractional_scale,
+            objman: self.objman,
+            pixel_format: self.pixel_format,
+        }
+    }
+
     pub fn output_names(&self) -> &[u32] {
         &self.output_names
     }
 
     pub fn fractional_scale(&self) -> Option<&FractionalScaleManager> {
         self.fractional_scale.as_ref()
+    }
+}
+
+impl super::interfaces::wl_display::HasObjman for Initializer {
+    fn objman(&mut self) -> &mut ObjectManager {
+        &mut self.objman
     }
 }
 
@@ -333,6 +318,7 @@ impl super::interfaces::wl_registry::EvHandler for Initializer {
                     id: ObjectId(unsafe { NonZeroU32::new_unchecked(7) }),
                     name: name.try_into().unwrap(),
                 });
+                self.objman.set_fractional_scale_support(true);
             }
             "wl_output" => {
                 if version < 4 {
@@ -371,29 +357,23 @@ impl super::interfaces::wl_shm::EvHandler for Initializer {
             }
             super::interfaces::wl_shm::format::XBGR8888 => {
                 debug!("available shm format: Xbgr");
-                if !self.forced_shm_format && pixel_format() == PixelFormat::Xrgb {
-                    unsafe { PIXEL_FORMAT = PixelFormat::Xbgr }
+                if !self.forced_shm_format && self.pixel_format == PixelFormat::Xrgb {
+                    self.pixel_format = PixelFormat::Xbgr;
                 }
             }
             super::interfaces::wl_shm::format::RGB888 => {
                 debug!("available shm format: Rbg");
-                if !self.forced_shm_format && pixel_format() != PixelFormat::Bgr {
-                    unsafe { PIXEL_FORMAT = PixelFormat::Rgb }
+                if !self.forced_shm_format && self.pixel_format != PixelFormat::Bgr {
+                    self.pixel_format = PixelFormat::Rgb
                 }
             }
             super::interfaces::wl_shm::format::BGR888 => {
                 debug!("available shm format: Bgr");
                 if !self.forced_shm_format {
-                    unsafe { PIXEL_FORMAT = PixelFormat::Bgr }
+                    self.pixel_format = PixelFormat::Bgr
                 }
             }
             _ => (),
         }
-    }
-}
-
-impl Drop for Initializer {
-    fn drop(&mut self) {
-        debug!("Initialization Over");
     }
 }

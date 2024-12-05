@@ -67,6 +67,7 @@ pub struct ObjectManager {
     objects: Vec<Option<WlDynObj>>,
     /// the next id we ought to generate
     next: u32,
+    fractional_scale_support: bool,
 }
 
 impl ObjectManager {
@@ -77,6 +78,7 @@ impl ObjectManager {
         Self {
             objects: Vec::new(),
             next: 0,
+            fractional_scale_support: false,
         }
     }
 
@@ -87,7 +89,7 @@ impl ObjectManager {
     ///   * 'None' if the object was already deleted
     #[must_use]
     pub fn get(&self, object_id: ObjectId) -> Option<WlDynObj> {
-        let offset = Self::BASE_OFFSET + globals::fractional_scale_support() as u32;
+        let offset = Self::BASE_OFFSET + self.fractional_scale_support as u32;
         let pos = object_id.get() - offset;
         self.objects[pos as usize]
     }
@@ -95,7 +97,7 @@ impl ObjectManager {
     /// creates a new Id to use in requests
     #[must_use]
     pub fn create(&mut self, object: WlDynObj) -> ObjectId {
-        let offset = Self::BASE_OFFSET + globals::fractional_scale_support() as u32;
+        let offset = Self::BASE_OFFSET + self.fractional_scale_support as u32;
         if self.next as usize == self.objects.len() {
             self.next += 1;
             self.objects.push(Some(object));
@@ -122,12 +124,20 @@ impl ObjectManager {
     /// Removing the same element twice currently works just fine and does not panic,
     /// but that may change in the future
     pub fn remove(&mut self, object_id: ObjectId) {
-        let offset = Self::BASE_OFFSET + globals::fractional_scale_support() as u32;
+        let offset = Self::BASE_OFFSET + self.fractional_scale_support as u32;
         let pos = object_id.get() - offset;
         self.objects[pos as usize] = None;
         if pos < self.next {
             self.next = pos;
         }
+    }
+
+    pub fn set_fractional_scale_support(&mut self, fractional_scale_support: bool) {
+        self.fractional_scale_support = fractional_scale_support;
+    }
+
+    pub fn fractional_scale_support(&self) -> bool {
+        self.fractional_scale_support
     }
 }
 

@@ -263,7 +263,7 @@ pub unsafe fn send_unchecked(msg: &[u8], fds: &[BorrowedFd]) -> rustix::io::Resu
     net::sendmsg(wayland_fd(), &[iov], &mut control, net::SendFlags::NOSIGNAL).map(|_| ())
 }
 
-impl<'a> WlSlice<'a> {
+impl WlSlice<'_> {
     #[must_use]
     pub const fn get(&self) -> &[u8] {
         self.0
@@ -302,7 +302,7 @@ where
     }
 }
 
-impl<'a> WlStr<'a> {
+impl WlStr<'_> {
     #[must_use]
     pub const fn get(&self) -> &str {
         self.0
@@ -381,7 +381,7 @@ impl From<&WlFixed> for f64 {
     }
 }
 
-impl<'a> NewId<'a> {
+impl NewId<'_> {
     #[must_use]
     pub const fn id(&self) -> &ObjectId {
         &self.id

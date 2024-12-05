@@ -8,7 +8,7 @@
 use super::{
     globals,
     wire::{WaylandPayload, WireMsg, WireMsgBuilder, WlFixed},
-    ObjectId,
+    ObjectId, ObjectManager,
 };
 
 ///core global object
@@ -18,7 +18,13 @@ use super::{
 pub mod wl_display {
     use super::*;
 
-    pub trait EvHandler {
+    /// This is a special interface to make it possible to have a generic implementation for this
+    /// interface
+    pub trait HasObjman {
+        fn objman(&mut self) -> &mut ObjectManager;
+    }
+
+    pub trait EvHandler: HasObjman {
         ///fatal error event
         ///
         ///The error event is sent out when a fatal (non-recoverable)
@@ -36,7 +42,7 @@ pub mod wl_display {
                 globals::WL_SHM => "wl_shm",
                 globals::WP_VIEWPORTER => "wp_viewporter",
                 globals::ZWLR_LAYER_SHELL_V1 => "zwlr_layer_shell_v1",
-                other => match super::super::globals::object_type_get(other) {
+                other => match self.objman().get(other) {
                     Some(super::super::WlDynObj::Output) => "wl_output",
                     Some(super::super::WlDynObj::Surface) => "wl_surface",
                     Some(super::super::WlDynObj::Region) => "wl_region",
