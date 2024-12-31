@@ -15,8 +15,8 @@ use rustix::{
 
 use wallpaper::Wallpaper;
 use wayland::{
-    globals::{self, FractionalScaleManager, Initializer},
-    ObjectId,
+    globals::{self, InitState},
+    ObjectId, ObjectManager,
 };
 
 use std::{
@@ -31,7 +31,9 @@ use std::{
 };
 
 use animations::{ImageAnimator, TransitionAnimator};
-use common::ipc::{Answer, BgInfo, ImageReq, IpcSocket, RequestRecv, RequestSend, Scale, Server};
+use common::ipc::{
+    Answer, BgInfo, ImageReq, IpcSocket, PixelFormat, RequestRecv, RequestSend, Scale, Server,
+};
 use common::mmap::MmappedStr;
 
 // We need this because this might be set by signals, so we can't keep it in the daemon
@@ -50,83 +52,58 @@ extern "C" fn signal_handler(_s: libc::c_int) {
 }
 
 struct Daemon {
+    objman: ObjectManager,
+    pixel_format: PixelFormat,
     wallpapers: Vec<Rc<RefCell<Wallpaper>>>,
     transition_animators: Vec<TransitionAnimator>,
     image_animators: Vec<ImageAnimator>,
     use_cache: bool,
-    fractional_scale_manager: Option<FractionalScaleManager>,
+    fractional_scale_manager: Option<ObjectId>,
     poll_time: PollTime,
 }
 
 impl Daemon {
-    fn new(initializer: &Initializer, no_cache: bool) -> Self {
-        log::info!(
-            "Selected wl_shm format: {:?}",
-            wayland::globals::pixel_format()
+    fn new(init_state: InitState, no_cache: bool) -> Self {
+        let InitState {
+            output_names,
+            fractional_scale,
+            objman,
+            pixel_format,
+        } = init_state;
+
+        assert_eq!(
+            fractional_scale.is_some(),
+            objman.fractional_scale_support()
         );
-        let fractional_scale_manager = initializer.fractional_scale().cloned();
 
-        let wallpapers = Vec::new();
+        log::info!("Selected wl_shm format: {pixel_format:?}");
 
-        Self {
-            wallpapers,
+        let mut daemon = Self {
+            objman,
+            pixel_format,
+            wallpapers: Vec::new(),
             transition_animators: Vec::new(),
             image_animators: Vec::new(),
             use_cache: !no_cache,
-            fractional_scale_manager,
+            fractional_scale_manager: fractional_scale.map(|x| x.id()),
             poll_time: PollTime::Never,
+        };
+
+        for output_name in output_names {
+            daemon.new_output(output_name);
         }
+
+        daemon
     }
 
     fn new_output(&mut self, output_name: u32) {
-        use wayland::interfaces::*;
-        let output = globals::object_create(wayland::WlDynObj::Output);
-        wl_registry::req::bind(output_name, output, "wl_output", 4).unwrap();
-
-        let surface = globals::object_create(wayland::WlDynObj::Surface);
-        wl_compositor::req::create_surface(surface).unwrap();
-
-        let region = globals::object_create(wayland::WlDynObj::Region);
-        wl_compositor::req::create_region(region).unwrap();
-
-        wl_surface::req::set_input_region(surface, Some(region)).unwrap();
-        wl_region::req::destroy(region).unwrap();
-
-        let layer_surface = globals::object_create(wayland::WlDynObj::LayerSurface);
-        zwlr_layer_shell_v1::req::get_layer_surface(
-            layer_surface,
-            surface,
-            Some(output),
-            zwlr_layer_shell_v1::layer::BACKGROUND,
-            "swww-daemon",
-        )
-        .unwrap();
-
-        let viewport = globals::object_create(wayland::WlDynObj::Viewport);
-        wp_viewporter::req::get_viewport(viewport, surface).unwrap();
-
-        let wp_fractional = if let Some(fract_man) = self.fractional_scale_manager.as_ref() {
-            let fractional = globals::object_create(wayland::WlDynObj::FractionalScale);
-            wp_fractional_scale_manager_v1::req::get_fractional_scale(
-                fract_man.id(),
-                fractional,
-                surface,
-            )
-            .unwrap();
-            Some(fractional)
-        } else {
-            None
-        };
-
-        debug!("New output: {output_name}");
-        self.wallpapers.push(Rc::new(RefCell::new(Wallpaper::new(
-            output,
+        let wallpaper = Rc::new(RefCell::new(Wallpaper::new(
+            &mut self.objman,
+            self.pixel_format,
+            self.fractional_scale_manager,
             output_name,
-            surface,
-            viewport,
-            wp_fractional,
-            layer_surface,
-        ))));
+        )));
+        self.wallpapers.push(wallpaper);
     }
 
     fn recv_socket_msg(&mut self, stream: IpcSocket<Server>) {
@@ -146,9 +123,9 @@ impl Daemon {
                 for wallpaper in &wallpapers {
                     let mut wallpaper = wallpaper.borrow_mut();
                     wallpaper.set_img_info(common::ipc::BgImg::Color(clear.color));
-                    wallpaper.clear(clear.color);
+                    wallpaper.clear(&mut self.objman, self.pixel_format, clear.color);
                 }
-                crate::wallpaper::attach_buffers_and_damage_surfaces(&wallpapers);
+                crate::wallpaper::attach_buffers_and_damage_surfaces(&mut self.objman, &wallpapers);
                 crate::wallpaper::commit_wallpapers(&wallpapers);
                 Answer::Ok
             }
@@ -178,10 +155,14 @@ impl Daemon {
                     };
                     let wallpapers = self.find_wallpapers_by_names(&names);
                     self.stop_animations(&wallpapers);
-                    if let Some(mut transition) =
-                        TransitionAnimator::new(wallpapers, &transition, img, animation)
-                    {
-                        transition.frame();
+                    if let Some(mut transition) = TransitionAnimator::new(
+                        wallpapers,
+                        &transition,
+                        self.pixel_format,
+                        img,
+                        animation,
+                    ) {
+                        transition.frame(&mut self.objman, self.pixel_format);
                         self.transition_animators.push(transition);
                     }
                 }
@@ -197,7 +178,7 @@ impl Daemon {
     fn wallpapers_info(&self) -> Box<[BgInfo]> {
         self.wallpapers
             .iter()
-            .map(|wallpaper| wallpaper.borrow().get_bg_info())
+            .map(|wallpaper| wallpaper.borrow().get_bg_info(self.pixel_format))
             .collect()
     }
 
@@ -235,10 +216,13 @@ impl Daemon {
                     spin_sleep(time);
                 }
 
-                wallpaper::attach_buffers_and_damage_surfaces(&animator.wallpapers);
+                wallpaper::attach_buffers_and_damage_surfaces(
+                    &mut self.objman,
+                    &animator.wallpapers,
+                );
                 wallpaper::commit_wallpapers(&animator.wallpapers);
                 animator.updt_time();
-                if animator.frame() {
+                if animator.frame(&mut self.objman, self.pixel_format) {
                     let animator = self.transition_animators.swap_remove(i);
                     if let Some(anim) = animator.into_image_animator() {
                         self.image_animators.push(anim);
@@ -266,10 +250,13 @@ impl Daemon {
                     spin_sleep(time);
                 }
 
-                wallpaper::attach_buffers_and_damage_surfaces(&animator.wallpapers);
+                wallpaper::attach_buffers_and_damage_surfaces(
+                    &mut self.objman,
+                    &animator.wallpapers,
+                );
                 wallpaper::commit_wallpapers(&animator.wallpapers);
                 animator.updt_time();
-                animator.frame();
+                animator.frame(&mut self.objman, self.pixel_format);
             }
         }
     }
@@ -294,10 +281,16 @@ impl Daemon {
     }
 }
 
+impl wayland::interfaces::wl_display::HasObjman for Daemon {
+    fn objman(&mut self) -> &mut ObjectManager {
+        &mut self.objman
+    }
+}
+
 impl wayland::interfaces::wl_display::EvHandler for Daemon {
     fn delete_id(&mut self, id: u32) {
         if let Some(id) = NonZeroU32::new(id) {
-            globals::object_remove(ObjectId::new(id));
+            self.objman.remove(ObjectId::new(id));
         }
     }
 }
@@ -374,7 +367,7 @@ impl wayland::interfaces::wl_output::EvHandler for Daemon {
             if wallpaper.borrow().has_output(sender_id) {
                 if wallpaper
                     .borrow_mut()
-                    .commit_surface_changes(self.use_cache)
+                    .commit_surface_changes(&mut self.objman, self.use_cache)
                 {
                     self.stop_animations(&[wallpaper.clone()]);
                 }
@@ -502,7 +495,7 @@ impl wayland::interfaces::wp_fractional_scale_v1::EvHandler for Daemon {
                         wallpaper.borrow_mut().set_scale(Scale::Fractional(factor));
                         if wallpaper
                             .borrow_mut()
-                            .commit_surface_changes(self.use_cache)
+                            .commit_surface_changes(&mut self.objman, self.use_cache)
                         {
                             self.stop_animations(&[wallpaper.clone()]);
                         }
@@ -521,7 +514,7 @@ fn main() -> Result<(), String> {
     make_logger(cli.quiet);
 
     // initialize the wayland connection, getting all the necessary globals
-    let initializer = wayland::globals::init(cli.format);
+    let init_state = wayland::globals::init(cli.format);
 
     // create the socket listener and setup the signal handlers
     // this will also return an error if there is an `swww-daemon` instance already
@@ -530,11 +523,7 @@ fn main() -> Result<(), String> {
     setup_signals();
 
     // use the initializer to create the Daemon, then drop it to free up the memory
-    let mut daemon = Daemon::new(&initializer, cli.no_cache);
-    for &output_name in initializer.output_names() {
-        daemon.new_output(output_name);
-    }
-    drop(initializer);
+    let mut daemon = Daemon::new(init_state, cli.no_cache);
 
     if let Ok(true) = sd_notify::booted() {
         if let Err(e) = sd_notify::notify(true, &[sd_notify::NotifyState::Ready]) {
@@ -574,7 +563,7 @@ fn main() -> Result<(), String> {
                 globals::WP_VIEWPORTER => error!("wp_viewporter has no events"),
                 globals::ZWLR_LAYER_SHELL_V1 => error!("zwlr_layer_shell_v1 has no events"),
                 other => {
-                    let obj_id = globals::object_type_get(other);
+                    let obj_id = daemon.objman.get(other);
                     match obj_id {
                         Some(WlDynObj::Output) => wl_output::event(&mut daemon, msg, payload),
                         Some(WlDynObj::Surface) => wl_surface::event(&mut daemon, msg, payload),
