@@ -27,7 +27,7 @@ while true; do
 			# and pick again if no more unused images are remaining
 			[ -z "$img" ] && read -r img || break 2
 			swww img --resize "$RESIZE_TYPE" --outputs "$d" "$img"
-			unset -v $img
+			unset -v $img # Each image should only be used once per loop
 		done
 		sleep "${2:-$DEFAULT_INTERVAL}"
 	done
