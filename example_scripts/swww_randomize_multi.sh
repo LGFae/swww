@@ -25,9 +25,9 @@ while true; do
 		for d in $(swww query | grep -Po "^[^:]+"); do # see swww-query(1)
 			# Get next random image for this display, or re-shuffle images
 			# and pick again if no more unused images are remaining
-			[ -z "$img" ] && read -r img || break 2
+			[ -z "$img" ] && if read -r img; then true; else break 2; fi
 			swww img --resize "$RESIZE_TYPE" --outputs "$d" "$img"
-			unset -v $img # Each image should only be used once per loop
+			unset -v img # Each image should only be used once per loop
 		done
 		sleep "${2:-$DEFAULT_INTERVAL}"
 	done
