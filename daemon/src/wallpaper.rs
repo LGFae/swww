@@ -107,7 +107,7 @@ impl Wallpaper {
             layer_surface,
             wl_surface,
             Some(output),
-            zwlr_layer_shell_v1::layer::BACKGROUND,
+            zwlr_layer_shell_v1::layer::BOTTOM,
             "swww-daemon",
         )
         .unwrap();
