@@ -1,32 +1,28 @@
-#!/bin/bash
+#!/bin/sh
+# Changes the wallpaper to a randomly chosen image in a given directory
+# at a set interval.
 
-# This script will randomly go through the files of a directory, setting it
-# up as the wallpaper at regular intervals
-#
-# NOTE: this script is in bash (not posix shell), because the RANDOM variable
-# we use is not defined in posix
+DEFAULT_INTERVAL=300 # In seconds
 
-if [[ $# -lt 1 ]] || [[ ! -d $1   ]]; then
-	echo "Usage:
-	$0 <dir containing images>"
+if [ $# -lt 1 ] || [ ! -d "$1" ]; then
+	printf "Usage:\n\t\e[1m%s\e[0m \e[4mDIRECTORY\e[0m [\e[4mINTERVAL\e[0m]\n" "$0"
+	printf "\tChanges the wallpaper to a randomly chosen image in DIRECTORY every\n\tINTERVAL seconds (or every %d seconds if unspecified)." "$DEFAULT_INTERVAL"
 	exit 1
 fi
 
-# Edit below to control the images transition
-export SWWW_TRANSITION_FPS=60
-export SWWW_TRANSITION_STEP=2
-
-# This controls (in seconds) when to switch to the next image
-INTERVAL=300
+# See swww-img(1)
+RESIZE_TYPE="fit"
+export SWWW_TRANSITION_FPS="${SWWW_TRANSITION_FPS:-60}"
+export SWWW_TRANSITION_STEP="${SWWW_TRANSITION_STEP:-2}"
 
 while true; do
 	find "$1" -type f \
-		| while read -r img; do
-			echo "$((RANDOM % 1000)):$img"
-		done \
-		| sort -n | cut -d':' -f2- \
-		| while read -r img; do
-			swww img "$img"
-			sleep $INTERVAL
-		done
+	| while read -r img; do
+		echo "$(</dev/urandom tr -dc a-zA-Z0-9 | head -c 8):$img"
+	done \
+	| sort -n | cut -d':' -f2- \
+	| while read -r img; do
+		swww img --resize="$RESIZE_TYPE" "$img"
+		sleep "${2:-$DEFAULT_INTERVAL}"
+	done
 done
