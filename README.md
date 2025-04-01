@@ -112,9 +112,9 @@ swww img <path/to/img>
 # You can also specify outputs:
 swww img -o <outputs> <path/to/img>
 
-# Control how smoothly the transition will happen and/or it's frame rate
-# For the step, smaller values = more smooth. Default = 20
-# For the frame rate, default is 30.
+# Control how smoothly the transition will happen, as well as its frame rate.
+# --transition-step: smaller values = smoother. Default is 2 if --transition-type is `simple`, and 90 if it is not.
+# --transition-fps: Default = 30.
 swww img <path/to/img> --transition-step <1 to 255> --transition-fps <1 to 255>
 
 # There are also many different transition effects:
@@ -158,10 +158,10 @@ The `left`, `right`, `top` and `bottom` transitions all work similarly.
 
 ![outer transition demonstration](../demos/assets/outer.gif)
 
-The `center` transition is the opposite: it starts from the center and goes 
+The `center` transition is the opposite: it starts from the center and goes
 towards the edges.
 
-There is also `simple`, which simply fades into the new image, `any`, which 
+There is also `simple`, which simply fades into the new image, `any`, which
 starts at a random point with either `center` of `outer` transitions, and `random`,
 which selects a transition effect at random.
 
