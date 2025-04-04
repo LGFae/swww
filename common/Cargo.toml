@@ -10,7 +10,7 @@ license-file.workspace = true
 workspace = true
 
 [dependencies]
-rustix = { version = "0.38", default-features = false, features = [
+rustix = { version = "1.0", default-features = false, features = [
   "std",
   "net",
   "shm",
@@ -23,7 +23,7 @@ rustix = { version = "0.38", default-features = false, features = [
 pkg-config = "0.3"
 
 [dev-dependencies]
-fastrand = { version = "2.1", default-features = false, features = ["std"] }
+fastrand = { version = "2.3", default-features = false, features = ["std"] }
 criterion = { version = "0.5", default-features = false }
 
 [[bench]]

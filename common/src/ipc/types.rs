@@ -249,7 +249,7 @@ impl BgInfo {
             pixel_format,
         } = self;
 
-        let len = name.as_bytes().len();
+        let len = name.len();
         buf[0..4].copy_from_slice(&(len as u32).to_ne_bytes());
         buf[4..4 + len].copy_from_slice(name.as_bytes());
         let mut i = 4 + len;
@@ -278,7 +278,7 @@ impl BgInfo {
             BgImg::Img(path) => {
                 buf[i] = 1;
                 i += 1;
-                let len = path.as_bytes().len();
+                let len = path.len();
                 buf[i..i + 4].copy_from_slice(&(len as u32).to_ne_bytes());
                 buf[i + 4..i + 4 + len].copy_from_slice(path.as_bytes());
                 i += 4 + len;

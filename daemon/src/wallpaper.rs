@@ -1,14 +1,16 @@
 use common::ipc::{BgImg, BgInfo, PixelFormat, Scale};
 use log::{debug, error, warn};
+use waybackend::{objman::ObjectManager, types::ObjectId, Waybackend};
 
 use std::{cell::RefCell, num::NonZeroI32, rc::Rc, sync::atomic::AtomicBool};
 
-use crate::wayland::{
-    bump_pool::BumpPool,
-    interfaces::{
-        wl_output, wl_surface, wp_fractional_scale_v1, wp_viewport, zwlr_layer_surface_v1,
+use crate::{
+    wayland::{
+        bump_pool::BumpPool, wl_compositor, wl_output, wl_region, wl_registry, wl_surface,
+        wp_fractional_scale_manager_v1, wp_fractional_scale_v1, wp_viewport, wp_viewporter,
+        zwlr_layer_shell_v1, zwlr_layer_surface_v1,
     },
-    ObjectId, ObjectManager, WlDynObj,
+    WaylandObject,
 };
 
 struct FrameCallbackHandler {
@@ -17,31 +19,40 @@ struct FrameCallbackHandler {
 }
 
 impl FrameCallbackHandler {
-    fn new(objman: &mut ObjectManager, surface: ObjectId) -> Self {
-        let callback = objman.create(WlDynObj::Callback);
-        wl_surface::req::frame(surface, callback).unwrap();
+    fn new(
+        backend: &mut Waybackend,
+        objman: &mut ObjectManager<WaylandObject>,
+        surface: ObjectId,
+    ) -> Self {
+        let callback = objman.create(WaylandObject::Callback);
+        wl_surface::req::frame(backend, surface, callback).unwrap();
         FrameCallbackHandler {
             done: true, // we do not have to wait for the first frame
             callback,
         }
     }
 
-    fn request_frame_callback(&mut self, objman: &mut ObjectManager, surface: ObjectId) {
-        let callback = objman.create(WlDynObj::Callback);
-        wl_surface::req::frame(surface, callback).unwrap();
+    fn request_frame_callback(
+        &mut self,
+        backend: &mut Waybackend,
+        objman: &mut ObjectManager<WaylandObject>,
+        surface: ObjectId,
+    ) {
+        let callback = objman.create(WaylandObject::Callback);
+        wl_surface::req::frame(backend, surface, callback).unwrap();
         self.callback = callback;
     }
 }
 
 /// Owns all the necessary information for drawing.
 #[derive(Clone, Debug)]
-struct WallpaperInner {
-    name: Option<String>,
-    desc: Option<String>,
+pub struct WallpaperInner {
+    pub name: Option<String>,
+    pub desc: Option<String>,
     width: NonZeroI32,
     height: NonZeroI32,
     scale_factor: Scale,
-    transform: u32,
+    transform: wl_output::Transform,
 }
 
 impl Default for WallpaperInner {
@@ -52,7 +63,7 @@ impl Default for WallpaperInner {
             width: unsafe { NonZeroI32::new_unchecked(4) },
             height: unsafe { NonZeroI32::new_unchecked(4) },
             scale_factor: Scale::Whole(unsafe { NonZeroI32::new_unchecked(1) }),
-            transform: wl_output::transform::NORMAL,
+            transform: wl_output::Transform::normal,
         }
     }
 }
@@ -60,13 +71,12 @@ impl Default for WallpaperInner {
 pub(super) struct Wallpaper {
     output: ObjectId,
     output_name: u32,
-    wl_surface: ObjectId,
-    wp_viewport: ObjectId,
-    #[allow(unused)]
-    wp_fractional: Option<ObjectId>,
-    layer_surface: ObjectId,
+    pub wl_surface: ObjectId,
+    pub wp_viewport: ObjectId,
+    pub wp_fractional: Option<ObjectId>,
+    pub layer_surface: ObjectId,
 
-    inner: WallpaperInner,
+    pub inner: WallpaperInner,
     inner_staging: WallpaperInner,
 
     pub configured: AtomicBool,
@@ -83,42 +93,50 @@ impl std::cmp::PartialEq for Wallpaper {
 }
 
 impl Wallpaper {
-    pub(crate) fn new(
-        objman: &mut ObjectManager,
-        pixel_format: PixelFormat,
-        fractional_scale_manager: Option<ObjectId>,
-        output_name: u32,
-    ) -> Self {
-        use crate::wayland::{self, interfaces::*};
-        let output = objman.create(wayland::WlDynObj::Output);
-        wl_registry::req::bind(output_name, output, "wl_output", 4).unwrap();
+    pub(crate) fn new(daemon: &mut crate::Daemon, output_name: u32) -> Self {
+        let crate::Daemon {
+            objman,
+            backend,
+            pixel_format,
+            registry,
+            compositor,
+            shm,
+            viewporter,
+            fractional_scale_manager,
+            layer_shell,
+            ..
+        } = daemon;
+        let output = objman.create(WaylandObject::Output);
+        wl_registry::req::bind(backend, *registry, output_name, output, "wl_output", 4).unwrap();
 
-        let wl_surface = objman.create(wayland::WlDynObj::Surface);
-        wl_compositor::req::create_surface(wl_surface).unwrap();
+        let wl_surface = objman.create(WaylandObject::Surface);
+        wl_compositor::req::create_surface(backend, *compositor, wl_surface).unwrap();
 
-        let region = objman.create(wayland::WlDynObj::Region);
-        wl_compositor::req::create_region(region).unwrap();
+        let region = objman.create(WaylandObject::Region);
+        wl_compositor::req::create_region(backend, *compositor, region).unwrap();
 
-        wl_surface::req::set_input_region(wl_surface, Some(region)).unwrap();
-        wl_region::req::destroy(region).unwrap();
+        wl_surface::req::set_input_region(backend, wl_surface, Some(region)).unwrap();
+        wl_region::req::destroy(backend, region).unwrap();
 
-        let layer_surface = objman.create(wayland::WlDynObj::LayerSurface);
+        let layer_surface = objman.create(WaylandObject::LayerSurface);
         zwlr_layer_shell_v1::req::get_layer_surface(
+            backend,
+            *layer_shell,
             layer_surface,
             wl_surface,
             Some(output),
-            zwlr_layer_shell_v1::layer::BACKGROUND,
+            zwlr_layer_shell_v1::Layer::background,
             "swww-daemon",
         )
         .unwrap();
 
-        let wp_viewport = objman.create(wayland::WlDynObj::Viewport);
-        wp_viewporter::req::get_viewport(wp_viewport, wl_surface).unwrap();
+        let wp_viewport = objman.create(WaylandObject::Viewport);
+        wp_viewporter::req::get_viewport(backend, *viewporter, wp_viewport, wl_surface).unwrap();
 
         let wp_fractional = if let Some(fract_man) = fractional_scale_manager {
-            let fractional = objman.create(wayland::WlDynObj::FractionalScale);
+            let fractional = objman.create(WaylandObject::FractionalScale);
             wp_fractional_scale_manager_v1::req::get_fractional_scale(
-                fract_man, fractional, wl_surface,
+                backend, *fract_man, fractional, wl_surface,
             )
             .unwrap();
             Some(fractional)
@@ -130,21 +148,30 @@ impl Wallpaper {
         let inner_staging = WallpaperInner::default();
 
         // Configure the layer surface
-        zwlr_layer_surface_v1::req::set_anchor(layer_surface, 15).unwrap();
-        zwlr_layer_surface_v1::req::set_exclusive_zone(layer_surface, -1).unwrap();
-        zwlr_layer_surface_v1::req::set_margin(layer_surface, 0, 0, 0, 0).unwrap();
-        zwlr_layer_surface_v1::req::set_keyboard_interactivity(
+        zwlr_layer_surface_v1::req::set_anchor(
+            backend,
             layer_surface,
-            zwlr_layer_surface_v1::keyboard_interactivity::NONE,
+            zwlr_layer_surface_v1::Anchor::TOP
+                | zwlr_layer_surface_v1::Anchor::BOTTOM
+                | zwlr_layer_surface_v1::Anchor::RIGHT
+                | zwlr_layer_surface_v1::Anchor::LEFT,
         )
         .unwrap();
-        wl_surface::req::set_buffer_scale(wl_surface, 1).unwrap();
+        zwlr_layer_surface_v1::req::set_exclusive_zone(backend, layer_surface, -1).unwrap();
+        zwlr_layer_surface_v1::req::set_margin(backend, layer_surface, 0, 0, 0, 0).unwrap();
+        zwlr_layer_surface_v1::req::set_keyboard_interactivity(
+            backend,
+            layer_surface,
+            zwlr_layer_surface_v1::KeyboardInteractivity::None,
+        )
+        .unwrap();
+        wl_surface::req::set_buffer_scale(backend, wl_surface, 1).unwrap();
 
-        let frame_callback_handler = FrameCallbackHandler::new(objman, wl_surface);
+        let frame_callback_handler = FrameCallbackHandler::new(backend, objman, wl_surface);
         // commit so that the compositor send the initial configuration
-        wl_surface::req::commit(wl_surface).unwrap();
+        wl_surface::req::commit(backend, wl_surface).unwrap();
 
-        let pool = BumpPool::new(256, 256, objman, pixel_format);
+        let pool = BumpPool::new(backend, objman, *shm, 256, 256, *pixel_format);
 
         debug!("New output: {output_name}");
         Self {
@@ -211,7 +238,7 @@ impl Wallpaper {
         }
     }
 
-    pub fn set_transform(&mut self, transform: u32) {
+    pub fn set_transform(&mut self, transform: wl_output::Transform) {
         self.inner_staging.transform = transform;
     }
 
@@ -248,8 +275,13 @@ impl Wallpaper {
         }
     }
 
-    pub fn commit_surface_changes(&mut self, objman: &mut ObjectManager, use_cache: bool) -> bool {
-        use wl_output::transform;
+    pub fn commit_surface_changes(
+        &mut self,
+        backend: &mut Waybackend,
+        objman: &mut ObjectManager<WaylandObject>,
+        use_cache: bool,
+    ) -> bool {
+        use wl_output::Transform;
         let inner = &mut self.inner;
         let staging = &self.inner_staging;
 
@@ -273,7 +305,7 @@ impl Wallpaper {
 
         let (width, height) = if matches!(
             staging.transform,
-            transform::_90 | transform::_270 | transform::FLIPPED_90 | transform::FLIPPED_270
+            Transform::_90 | Transform::_270 | Transform::flipped_90 | Transform::flipped_270
         ) {
             (staging.height, staging.width)
         } else {
@@ -284,13 +316,18 @@ impl Wallpaper {
             match staging.scale_factor {
                 Scale::Whole(i) => {
                     // unset destination
-                    wp_viewport::req::set_destination(self.wp_viewport, -1, -1).unwrap();
-                    wl_surface::req::set_buffer_scale(self.wl_surface, i.get()).unwrap();
+                    wp_viewport::req::set_destination(backend, self.wp_viewport, -1, -1).unwrap();
+                    wl_surface::req::set_buffer_scale(backend, self.wl_surface, i.get()).unwrap();
                 }
                 Scale::Fractional(_) => {
-                    wl_surface::req::set_buffer_scale(self.wl_surface, 1).unwrap();
-                    wp_viewport::req::set_destination(self.wp_viewport, width.get(), height.get())
-                        .unwrap();
+                    wl_surface::req::set_buffer_scale(backend, self.wl_surface, 1).unwrap();
+                    wp_viewport::req::set_destination(
+                        backend,
+                        self.wp_viewport,
+                        width.get(),
+                        height.get(),
+                    )
+                    .unwrap();
                 }
             }
         }
@@ -308,6 +345,7 @@ impl Wallpaper {
         let scale_factor = staging.scale_factor;
 
         zwlr_layer_surface_v1::req::set_size(
+            backend,
             self.layer_surface,
             width.get() as u32,
             height.get() as u32,
@@ -315,11 +353,11 @@ impl Wallpaper {
         .unwrap();
 
         let (w, h) = scale_factor.mul_dim(width.get(), height.get());
-        self.pool.resize(w, h);
+        self.pool.resize(backend, w, h);
 
         self.frame_callback_handler
-            .request_frame_callback(objman, self.wl_surface);
-        wl_surface::req::commit(self.wl_surface).unwrap();
+            .request_frame_callback(backend, objman, self.wl_surface);
+        wl_surface::req::commit(backend, self.wl_surface).unwrap();
         self.configured
             .store(true, std::sync::atomic::Ordering::Release);
         true
@@ -350,11 +388,12 @@ impl Wallpaper {
 
     pub(super) fn try_set_buffer_release_flag(
         &mut self,
+        backend: &mut Waybackend,
         buffer: ObjectId,
         rc_strong_count: usize,
     ) -> bool {
         self.pool
-            .set_buffer_release_flag(buffer, rc_strong_count != 1)
+            .set_buffer_release_flag(backend, buffer, rc_strong_count != 1)
     }
 
     pub fn is_draw_ready(&self) -> bool {
@@ -379,14 +418,15 @@ impl Wallpaper {
 
     pub(super) fn canvas_change<F, T>(
         &mut self,
-        objman: &mut ObjectManager,
+        backend: &mut Waybackend,
+        objman: &mut ObjectManager<WaylandObject>,
         pixel_format: PixelFormat,
         f: F,
     ) -> T
     where
         F: FnOnce(&mut [u8]) -> T,
     {
-        f(self.pool.get_drawable(objman, pixel_format))
+        f(self.pool.get_drawable(backend, objman, pixel_format))
     }
 
     pub(super) fn frame_callback_completed(&mut self) {
@@ -395,11 +435,12 @@ impl Wallpaper {
 
     pub(super) fn clear(
         &mut self,
-        objman: &mut ObjectManager,
+        backend: &mut Waybackend,
+        objman: &mut ObjectManager<WaylandObject>,
         pixel_format: PixelFormat,
         color: [u8; 3],
     ) {
-        self.canvas_change(objman, pixel_format, |canvas| {
+        self.canvas_change(backend, objman, pixel_format, |canvas| {
             for pixel in canvas.chunks_exact_mut(pixel_format.channels().into()) {
                 pixel[0..3].copy_from_slice(&color);
             }
@@ -410,104 +451,63 @@ impl Wallpaper {
         debug!("output {:?} - drawing: {}", self.inner.name, img_info);
         self.img = img_info;
     }
-}
 
-/// attaches all pending buffers and damages all surfaces with one single request
-pub(crate) fn attach_buffers_and_damage_surfaces(
-    objman: &mut ObjectManager,
-    wallpapers: &[Rc<RefCell<Wallpaper>>],
-) {
-    #[rustfmt::skip]
-    // Note this is little-endian specific
-    const MSG: [u8; 56] = [
-        0, 0, 0, 0,             // wl_surface object id (to be filled)
-        1, 0,                   // attach opcode
-        20, 0,                  // msg length
-        0, 0, 0, 0,             // attach buffer id (to be filled)
-        0, 0, 0, 0, 0, 0, 0, 0, // attach arguments
-        0, 0, 0, 0,             // wl_surface object id (to be filled)
-        9, 0,                   // damage opcode
-        24, 0,                  // msg length
-        0, 0, 0, 0, 0, 0, 0, 0, // damage first arguments
-        0, 0, 0, 0, 0, 0, 0, 0, // damage second arguments (to be filled)
-        0, 0, 0, 0,             // wl_surface object id (to be filled)
-        3, 0,                   // frame opcode
-        12, 0,                  // msg length
-        0, 0, 0, 0,             // wl_callback object id (to be filled)
-    ];
-    let msg: Box<[u8]> = wallpapers
-        .iter()
-        .flat_map(|wallpaper| {
-            let mut wallpaper = wallpaper.borrow_mut();
-            let mut msg = MSG;
+    pub(super) fn destroy(&mut self, backend: &mut Waybackend) {
+        // carefull not to panic here, since we call this on drop
 
-            let buf = wallpaper.pool.get_commitable_buffer();
-            let inner = &wallpaper.inner;
-            let (width, height) = inner
-                .scale_factor
-                .mul_dim(inner.width.get(), inner.height.get());
-
-            // attach
-            msg[0..4].copy_from_slice(&wallpaper.wl_surface.get().to_ne_bytes());
-            msg[8..12].copy_from_slice(&buf.get().to_ne_bytes());
-
-            //damage buffer
-            msg[20..24].copy_from_slice(&wallpaper.wl_surface.get().to_ne_bytes());
-            msg[36..40].copy_from_slice(&width.to_ne_bytes());
-            msg[40..44].copy_from_slice(&height.to_ne_bytes());
-
-            // frame callback
-            let callback = objman.create(WlDynObj::Callback);
-            wallpaper.frame_callback_handler.callback = callback;
-            msg[44..48].copy_from_slice(&wallpaper.wl_surface.get().to_ne_bytes());
-            msg[52..56].copy_from_slice(&callback.get().to_ne_bytes());
-            msg
-        })
-        .collect();
-    unsafe { crate::wayland::wire::send_unchecked(msg.as_ref(), &[]).unwrap() }
-}
-
-/// commits multiple wallpapers at once with a single message through the socket
-pub(crate) fn commit_wallpapers(wallpapers: &[Rc<RefCell<Wallpaper>>]) {
-    // Note this is little-endian specific
-    #[rustfmt::skip]
-    const MSG: [u8; 8] = [
-        0, 0, 0, 0, // wl_surface object id (to be filled)
-        6, 0,       // commit opcode
-        8, 0,       // msg length
-    ];
-    let msg: Box<[u8]> = wallpapers
-        .iter()
-        .flat_map(|wallpaper| {
-            let mut msg = MSG;
-            msg[0..4].copy_from_slice(&wallpaper.borrow().wl_surface.get().to_ne_bytes());
-            msg
-        })
-        .collect();
-    unsafe { crate::wayland::wire::send_unchecked(msg.as_ref(), &[]).unwrap() }
-}
-
-impl Drop for Wallpaper {
-    fn drop(&mut self) {
-        // note we shouldn't panic in a drop implementation
-
-        if let Err(e) = wp_viewport::req::destroy(self.wp_viewport) {
+        if let Err(e) = wp_viewport::req::destroy(backend, self.wp_viewport) {
             error!("error destroying wp_viewport: {e:?}");
         }
+
         if let Some(fractional) = self.wp_fractional {
-            if let Err(e) = wp_fractional_scale_v1::req::destroy(fractional) {
+            if let Err(e) = wp_fractional_scale_v1::req::destroy(backend, fractional) {
                 error!("error destroying wp_fractional_scale_v1: {e:?}");
             }
         }
-        if let Err(e) = zwlr_layer_surface_v1::req::destroy(self.layer_surface) {
+
+        if let Err(e) = zwlr_layer_surface_v1::req::destroy(backend, self.layer_surface) {
             error!("error destroying zwlr_layer_surface_v1: {e:?}");
         }
+
+        self.pool.destroy(backend);
 
         debug!(
             "Destroyed output {} - {}",
             self.inner.name.as_ref().unwrap_or(&"?".to_string()),
             self.inner.desc.as_ref().unwrap_or(&"?".to_string())
         );
+    }
+}
+
+/// attaches all pending buffers and damages all surfaces with one single request
+pub(crate) fn attach_buffers_and_damage_surfaces(
+    backend: &mut Waybackend,
+    objman: &mut ObjectManager<WaylandObject>,
+    wallpapers: &[Rc<RefCell<Wallpaper>>],
+) {
+    for wallpaper in wallpapers {
+        let mut wallpaper = wallpaper.borrow_mut();
+
+        let surface = wallpaper.wl_surface;
+        let buf = wallpaper.pool.get_commitable_buffer();
+        let inner = &wallpaper.inner;
+        let (width, height) = inner
+            .scale_factor
+            .mul_dim(inner.width.get(), inner.height.get());
+
+        wl_surface::req::attach(backend, surface, Some(buf), 0, 0).unwrap();
+        wl_surface::req::damage_buffer(backend, surface, 0, 0, width, height).unwrap();
+        wallpaper
+            .frame_callback_handler
+            .request_frame_callback(backend, objman, surface);
+    }
+}
+
+/// commits multiple wallpapers at once with a single message through the socket
+pub(crate) fn commit_wallpapers(backend: &mut Waybackend, wallpapers: &[Rc<RefCell<Wallpaper>>]) {
+    for wallpaper in wallpapers {
+        let wallpaper = wallpaper.borrow();
+        wl_surface::req::commit(backend, wallpaper.wl_surface).unwrap();
     }
 }
 

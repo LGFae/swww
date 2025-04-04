@@ -10,17 +10,18 @@ license-file.workspace = true
 workspace = true
 
 [dependencies]
+common = { workspace = true }
+
+waybackend = { version = "0.2" }
 log = { version = "0.4", default-features = false, features = [
   "max_level_debug",
   "release_max_level_info",
   "std",
 ] }
-
-rustix = { version = "0.38", default-features = false, features = ["event"] }
+rustix = { version = "1.0", default-features = false, features = ["event"] }
 libc = "0.2"
-
 keyframe = "1.1"
+sd-notify = { version = "0.4" }
 
-sd-notify = { version = "0.4.1" }
-
-common = { workspace = true }
+[build-dependencies]
+waybackend-scanner = { version = "0.2", features = ["build-script"] }

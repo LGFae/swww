@@ -28,13 +28,10 @@ image = { version = "0.25", default-features = false, features = [
   "tiff",
   "webp",
 ] }
-fast_image_resize = "5.0"
+fast_image_resize = "5.1"
 clap = { version = "4.5", features = ["derive", "wrap_help", "env"] }
-fastrand = { version = "2.1", default-features = false, features = ["std"] }
+fastrand = { version = "2.3", default-features = false, features = ["std"] }
 common = { workspace = true }
-
-[dev-dependencies]
-assert_cmd = "2.0"
 
 [build-dependencies]
 clap = { version = "4.5", features = ["derive", "env"] }

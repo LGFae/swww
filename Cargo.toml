@@ -1,7 +1,7 @@
 [workspace]
 # cargo complains that this defaults to one in virtual package manifests (for some reason)
 resolver = "2"
-members = ["client", "daemon", "common"]
+members = ["client", "daemon", "common", "tests"]
 default-members = ["client", "daemon"]
 
 [workspace.package]
