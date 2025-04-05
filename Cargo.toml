@@ -9,7 +9,7 @@ version = "0.9.5-masterV3"
 authors = ["Leonardo Gibrowski Faé <leonardo.fae44@gmail.com>"]
 edition = "2021"
 license-file = "LICENSE"
-rust-version = "1.82"
+rust-version = "1.85"
 
 [workspace.dependencies]
 common = { path = "common" }
