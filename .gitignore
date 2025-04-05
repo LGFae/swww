@@ -1,5 +1,5 @@
 target/*
 completions/*
-test_images/*
+tests/test_images/*
 # Nix
 result
