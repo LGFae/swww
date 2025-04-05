@@ -15,7 +15,7 @@ use rustix::mm::MapFlags;
 use rustix::mm::ProtFlags;
 use rustix::shm;
 use rustix::shm::Mode;
-use rustix::shm::ShmOFlags;
+use rustix::shm::OFlags;
 
 #[derive(Debug)]
 pub struct Mmap {
@@ -69,13 +69,13 @@ impl Mmap {
             .map(|time| time.duration_since(UNIX_EPOCH).unwrap().subsec_nanos())
             .map(|stamp| format!("/swww-ipc-{stamp}",));
 
-        let flags = ShmOFlags::CREATE | ShmOFlags::EXCL | ShmOFlags::RDWR;
+        let flags = OFlags::CREATE | OFlags::EXCL | OFlags::RDWR;
         let mode = Mode::RUSR | Mode::WUSR;
 
         loop {
             let filename = filenames.next().expect("infinite generator");
-            match shm::shm_open(filename.as_str(), flags, mode) {
-                Ok(fd) => return shm::shm_unlink(filename.as_str()).map(|()| fd),
+            match shm::open(filename.as_str(), flags, mode) {
+                Ok(fd) => return shm::unlink(filename.as_str()).map(|()| fd),
                 Err(Errno::EXIST | Errno::INTR) => continue,
                 Err(err) => return Err(err),
             }
@@ -86,9 +86,8 @@ impl Mmap {
     fn memfd() -> io::Result<OwnedFd> {
         use rustix::fs::MemfdFlags;
         use rustix::fs::SealFlags;
-        use std::ffi::CStr;
 
-        let name = CStr::from_bytes_with_nul(b"swww-ipc\0").unwrap();
+        let name = c"swww-ipc";
         let flags = MemfdFlags::ALLOW_SEALING | MemfdFlags::CLOEXEC;
 
         loop {

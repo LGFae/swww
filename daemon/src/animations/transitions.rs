@@ -1,11 +1,12 @@
 use std::{cell::RefCell, rc::Rc, time::Instant};
 
-use crate::{wallpaper::Wallpaper, wayland::ObjectManager};
+use crate::{wallpaper::Wallpaper, WaylandObject};
 use common::ipc::{PixelFormat, Transition, TransitionType};
 
 use keyframe::{
     functions::BezierCurve, keyframes, mint::Vector2, num_traits::Pow, AnimationSequence,
 };
+use waybackend::{objman::ObjectManager, Waybackend};
 
 fn bezier_seq(transition: &Transition, start: f32, end: f32) -> (AnimationSequence<f32>, Instant) {
     let bezier = BezierCurve::from(
@@ -44,14 +45,17 @@ impl None {
 
     fn run(
         &mut self,
-        objman: &mut ObjectManager,
+        backend: &mut Waybackend,
+        objman: &mut ObjectManager<WaylandObject>,
         pixel_format: PixelFormat,
         wallpapers: &mut [Rc<RefCell<Wallpaper>>],
         img: &[u8],
     ) -> bool {
         wallpapers.iter().for_each(|w| {
             w.borrow_mut()
-                .canvas_change(objman, pixel_format, |canvas| canvas.copy_from_slice(img))
+                .canvas_change(backend, objman, pixel_format, |canvas| {
+                    canvas.copy_from_slice(img)
+                })
         });
         true
     }
@@ -83,19 +87,20 @@ impl Effect {
 
     pub fn execute(
         &mut self,
-        objman: &mut ObjectManager,
+        backend: &mut Waybackend,
+        objman: &mut ObjectManager<WaylandObject>,
         pixel_format: PixelFormat,
         wallpapers: &mut [Rc<RefCell<Wallpaper>>],
         img: &[u8],
     ) -> bool {
         let done = match self {
-            Effect::None(effect) => effect.run(objman, pixel_format, wallpapers, img),
-            Effect::Simple(effect) => effect.run(objman, pixel_format, wallpapers, img),
-            Effect::Fade(effect) => effect.run(objman, pixel_format, wallpapers, img),
-            Effect::Wave(effect) => effect.run(objman, pixel_format, wallpapers, img),
-            Effect::Wipe(effect) => effect.run(objman, pixel_format, wallpapers, img),
-            Effect::Grow(effect) => effect.run(objman, pixel_format, wallpapers, img),
-            Effect::Outer(effect) => effect.run(objman, pixel_format, wallpapers, img),
+            Effect::None(effect) => effect.run(backend, objman, pixel_format, wallpapers, img),
+            Effect::Simple(effect) => effect.run(backend, objman, pixel_format, wallpapers, img),
+            Effect::Fade(effect) => effect.run(backend, objman, pixel_format, wallpapers, img),
+            Effect::Wave(effect) => effect.run(backend, objman, pixel_format, wallpapers, img),
+            Effect::Wipe(effect) => effect.run(backend, objman, pixel_format, wallpapers, img),
+            Effect::Grow(effect) => effect.run(backend, objman, pixel_format, wallpapers, img),
+            Effect::Outer(effect) => effect.run(backend, objman, pixel_format, wallpapers, img),
         };
         // we only finish for real if we are doing a None or a Simple transition
         if done {
@@ -123,7 +128,8 @@ impl Simple {
     }
     fn run(
         &mut self,
-        objman: &mut ObjectManager,
+        backend: &mut Waybackend,
+        objman: &mut ObjectManager<WaylandObject>,
         pixel_format: PixelFormat,
         wallpapers: &mut [Rc<RefCell<Wallpaper>>],
         img: &[u8],
@@ -133,7 +139,7 @@ impl Simple {
         for wallpaper in wallpapers.iter() {
             wallpaper
                 .borrow_mut()
-                .canvas_change(objman, pixel_format, |canvas| {
+                .canvas_change(backend, objman, pixel_format, |canvas| {
                     for (old, new) in canvas.iter_mut().zip(img) {
                         change_byte(step, old, new);
                     }
@@ -158,7 +164,8 @@ impl Fade {
     }
     fn run(
         &mut self,
-        objman: &mut ObjectManager,
+        backend: &mut Waybackend,
+        objman: &mut ObjectManager<WaylandObject>,
         pixel_format: PixelFormat,
         wallpapers: &mut [Rc<RefCell<Wallpaper>>],
         img: &[u8],
@@ -166,7 +173,7 @@ impl Fade {
         for wallpaper in wallpapers.iter() {
             wallpaper
                 .borrow_mut()
-                .canvas_change(objman, pixel_format, |canvas| {
+                .canvas_change(backend, objman, pixel_format, |canvas| {
                     for (old, new) in canvas.iter_mut().zip(img) {
                         let x = *old as u16 * (256 - self.step);
                         let y = *new as u16 * self.step;
@@ -240,7 +247,8 @@ impl Wave {
     }
     fn run(
         &mut self,
-        objman: &mut ObjectManager,
+        backend: &mut Waybackend,
+        objman: &mut ObjectManager<WaylandObject>,
         pixel_format: PixelFormat,
         wallpapers: &mut [Rc<RefCell<Wallpaper>>],
         img: &[u8],
@@ -281,7 +289,7 @@ impl Wave {
         for wallpaper in wallpapers.iter() {
             wallpaper
                 .borrow_mut()
-                .canvas_change(objman, pixel_format, |canvas| {
+                .canvas_change(backend, objman, pixel_format, |canvas| {
                     // divide in 3 sections: the one we know will not be drawn to, the one we know
                     // WILL be drawn to, and the one we need to do a more expensive check on.
                     // We do this by creating 2 lines: the first tangential to the wave's peaks,
@@ -385,7 +393,8 @@ impl Wipe {
     }
     fn run(
         &mut self,
-        objman: &mut ObjectManager,
+        backend: &mut Waybackend,
+        objman: &mut ObjectManager<WaylandObject>,
         pixel_format: PixelFormat,
         wallpapers: &mut [Rc<RefCell<Wallpaper>>],
         img: &[u8],
@@ -407,7 +416,7 @@ impl Wipe {
         for wallpaper in wallpapers.iter() {
             wallpaper
                 .borrow_mut()
-                .canvas_change(objman, pixel_format, |canvas| {
+                .canvas_change(backend, objman, pixel_format, |canvas| {
                     // line formula: (x-h)*a + (y-k)*b + C = r^2
                     // https://www.desmos.com/calculator/vpvzk12yar
                     for line in 0..height {
@@ -481,7 +490,8 @@ impl Grow {
     }
     fn run(
         &mut self,
-        objman: &mut ObjectManager,
+        backend: &mut Waybackend,
+        objman: &mut ObjectManager<WaylandObject>,
         pixel_format: PixelFormat,
         wallpapers: &mut [Rc<RefCell<Wallpaper>>],
         img: &[u8],
@@ -501,7 +511,7 @@ impl Grow {
         for wallpaper in wallpapers.iter() {
             wallpaper
                 .borrow_mut()
-                .canvas_change(objman, pixel_format, |canvas| {
+                .canvas_change(backend, objman, pixel_format, |canvas| {
                     let line_begin = center_y.saturating_sub(dist_center as usize);
                     let line_end = height.min(center_y + dist_center as usize);
 
@@ -574,7 +584,8 @@ impl Outer {
     }
     fn run(
         &mut self,
-        objman: &mut ObjectManager,
+        backend: &mut Waybackend,
+        objman: &mut ObjectManager<WaylandObject>,
         pixel_format: PixelFormat,
         wallpapers: &mut [Rc<RefCell<Wallpaper>>],
         img: &[u8],
@@ -593,7 +604,7 @@ impl Outer {
         for wallpaper in wallpapers.iter() {
             wallpaper
                 .borrow_mut()
-                .canvas_change(objman, pixel_format, |canvas| {
+                .canvas_change(backend, objman, pixel_format, |canvas| {
                     // to plot half a circle with radius r, we do sqrt(r^2 - x^2)
                     for line in 0..height {
                         let offset = (dist_center.powi(2) - (center_y as f32 - line as f32).powi(2))
