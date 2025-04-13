@@ -17,6 +17,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+      - run: sudo apt install -y libwayland-dev wayland-protocols
       - run: cargo clippy --version
       - run: cargo clippy --workspace --locked --tests
 

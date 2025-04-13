@@ -100,7 +100,7 @@ impl IpcSocket<Client> {
         // this will be overwriten, Rust just doesn't know it
         let mut error = Errno::INVAL;
         for _ in 0..tries {
-            match net::connect_unix(&socket, &addr) {
+            match net::connect(&socket, &addr) {
                 Ok(()) => {
                     #[cfg(debug_assertions)]
                     let timeout = Duration::from_secs(30); //Some operations take a while to respond in debug mode
@@ -140,7 +140,7 @@ impl IpcSocket<Server> {
             None,
         )
         .context(IpcErrorKind::Socket)?;
-        net::bind_unix(&socket, &addr).context(IpcErrorKind::Bind)?;
+        net::bind(&socket, &addr).context(IpcErrorKind::Bind)?;
         net::listen(&socket, 0).context(IpcErrorKind::Listen)?;
         Ok(Self::new(socket))
     }
