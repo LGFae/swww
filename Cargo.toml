@@ -1,7 +1,7 @@
 [workspace]
 # cargo complains that this defaults to one in virtual package manifests (for some reason)
 resolver = "2"
-members = ["client", "daemon", "common"]
+members = ["client", "daemon", "common", "tests"]
 default-members = ["client", "daemon"]
 
 [workspace.package]
@@ -9,7 +9,7 @@ version = "0.9.5-masterV3"
 authors = ["Leonardo Gibrowski Faé <leonardo.fae44@gmail.com>"]
 edition = "2021"
 license-file = "LICENSE"
-rust-version = "1.82"
+rust-version = "1.85"
 
 [workspace.dependencies]
 common = { path = "common" }

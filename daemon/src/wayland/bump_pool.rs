@@ -1,6 +1,7 @@
 use common::{ipc::PixelFormat, mmap::Mmap};
+use waybackend::{objman::ObjectManager, types::ObjectId, Waybackend};
 
-use super::{ObjectId, ObjectManager};
+use crate::WaylandObject;
 
 #[derive(Debug)]
 struct Buffer {
@@ -9,24 +10,25 @@ struct Buffer {
 }
 
 impl Buffer {
+    #[allow(clippy::too_many_arguments)]
     fn new(
-        objman: &mut ObjectManager,
+        backend: &mut Waybackend,
+        objman: &mut ObjectManager<WaylandObject>,
         pool_id: ObjectId,
         offset: i32,
         width: i32,
         height: i32,
         stride: i32,
-        format: u32,
+        format: super::wl_shm::Format,
     ) -> Self {
-        let released = true;
-        let object_id = objman.create(super::WlDynObj::Buffer);
-        super::interfaces::wl_shm_pool::req::create_buffer(
-            pool_id, object_id, offset, width, height, stride, format,
+        let object_id = objman.create(WaylandObject::Buffer);
+        super::wl_shm_pool::req::create_buffer(
+            backend, pool_id, object_id, offset, width, height, stride, format,
         )
         .expect("WlShmPool failed to create buffer");
         Self {
             object_id,
-            released,
+            released: true,
         }
     }
 
@@ -42,8 +44,8 @@ impl Buffer {
         self.released = false;
     }
 
-    fn destroy(self) {
-        if let Err(e) = super::interfaces::wl_buffer::req::destroy(self.object_id) {
+    fn destroy(self, backend: &mut Waybackend) {
+        if let Err(e) = super::wl_buffer::req::destroy(backend, self.object_id) {
             log::error!("failed to destroy wl_buffer: {e:?}");
         }
     }
@@ -68,15 +70,17 @@ pub(crate) struct BumpPool {
 impl BumpPool {
     /// We assume `width` and `height` have already been multiplied by their scale factor
     pub(crate) fn new(
+        backend: &mut Waybackend,
+        objman: &mut ObjectManager<WaylandObject>,
+        shm: ObjectId,
         width: i32,
         height: i32,
-        objman: &mut ObjectManager,
         pixel_format: PixelFormat,
     ) -> Self {
         let len = width as usize * height as usize * pixel_format.channels() as usize;
         let mmap = Mmap::create(len);
-        let pool_id = objman.create(super::WlDynObj::ShmPool);
-        super::interfaces::wl_shm::req::create_pool(pool_id, &mmap.fd(), len as i32)
+        let pool_id = objman.create(WaylandObject::ShmPool);
+        super::wl_shm::req::create_pool(backend, shm, pool_id, &mmap.fd(), len as i32)
             .expect("failed to create WlShmPool object");
         let buffers = Vec::with_capacity(2);
 
@@ -96,6 +100,7 @@ impl BumpPool {
     /// been released
     pub(crate) fn set_buffer_release_flag(
         &mut self,
+        backend: &mut Waybackend,
         buffer_id: ObjectId,
         is_animating: bool,
     ) -> bool {
@@ -103,7 +108,7 @@ impl BumpPool {
             b.set_released();
             if !is_animating && self.buffers.iter().all(|b| b.is_released()) {
                 for buffer in self.buffers.drain(..) {
-                    buffer.destroy();
+                    buffer.destroy(backend);
                 }
                 self.mmap.unmap();
             }
@@ -126,7 +131,12 @@ impl BumpPool {
     }
 
     /// resizes the pool and creates a new WlBuffer at the next free offset
-    fn grow(&mut self, objman: &mut ObjectManager, pixel_format: PixelFormat) {
+    fn grow(
+        &mut self,
+        backend: &mut Waybackend,
+        objman: &mut ObjectManager<WaylandObject>,
+        pixel_format: PixelFormat,
+    ) {
         let len = self.buffer_len(pixel_format);
         let new_len = self.occupied_bytes(pixel_format) + len;
 
@@ -139,18 +149,19 @@ impl BumpPool {
                 panic!("Buffers have grown too big. We cannot allocate any more.")
             }
             self.mmap.remap(new_len);
-            super::interfaces::wl_shm_pool::req::resize(self.pool_id, new_len as i32).unwrap();
+            super::wl_shm_pool::req::resize(backend, self.pool_id, new_len as i32).unwrap();
         }
 
         let new_buffer_index = self.buffers.len();
         self.buffers.push(Buffer::new(
+            backend,
             objman,
             self.pool_id,
             self.buffer_offset(new_buffer_index, pixel_format) as i32,
             self.width,
             self.height,
             self.width * pixel_format.channels() as i32,
-            super::globals::wl_shm_format(pixel_format),
+            wl_shm_format(pixel_format),
         ));
 
         log::info!(
@@ -165,22 +176,22 @@ impl BumpPool {
     /// This function automatically handles copying the previous buffer over onto the new one
     pub(crate) fn get_drawable(
         &mut self,
-        objman: &mut ObjectManager,
+        backend: &mut Waybackend,
+        objman: &mut ObjectManager<WaylandObject>,
         pixel_format: PixelFormat,
     ) -> &mut [u8] {
-        let (i, buf) = match self
+        let i = match self
             .buffers
             .iter_mut()
             .enumerate()
             .find(|(_, b)| b.is_released())
         {
-            Some((i, buf)) => (i, buf),
+            Some((i, _)) => i,
             None => {
-                self.grow(objman, pixel_format);
-                (self.buffers.len() - 1, self.buffers.last_mut().unwrap())
+                self.grow(backend, objman, pixel_format);
+                self.buffers.len() - 1
             }
         };
-        buf.unset_released();
 
         let len = self.buffer_len(pixel_format);
         let offset = self.buffer_offset(i, pixel_format);
@@ -197,28 +208,39 @@ impl BumpPool {
     }
 
     /// gets the last buffer we've drawn to
-    pub(crate) fn get_commitable_buffer(&self) -> ObjectId {
-        self.buffers[self.last_used_buffer].object_id
+    pub(crate) fn get_commitable_buffer(&mut self) -> ObjectId {
+        let buf = &mut self.buffers[self.last_used_buffer];
+        buf.unset_released();
+        buf.object_id
     }
 
     /// We assume `width` and `height` have already been multiplied by their scale factor
-    pub(crate) fn resize(&mut self, width: i32, height: i32) {
+    pub(crate) fn resize(&mut self, backend: &mut Waybackend, width: i32, height: i32) {
         self.width = width;
         self.height = height;
         self.last_used_buffer = 0;
         for buffer in self.buffers.drain(..) {
-            buffer.destroy();
+            buffer.destroy(backend);
+        }
+    }
+
+    pub(crate) fn destroy(&mut self, backend: &mut Waybackend) {
+        for buffer in self.buffers.drain(..) {
+            buffer.destroy(backend);
+        }
+
+        if let Err(e) = super::wl_shm_pool::req::destroy(backend, self.pool_id) {
+            log::error!("failed to destroy wl_shm_pool: {e}");
         }
     }
 }
 
-impl Drop for BumpPool {
-    fn drop(&mut self) {
-        for buffer in self.buffers.drain(..) {
-            buffer.destroy();
-        }
-        if let Err(e) = super::interfaces::wl_shm_pool::req::destroy(self.pool_id) {
-            log::error!("failed to destroy wl_shm_pool: {e}");
-        }
+const fn wl_shm_format(pixel_format: PixelFormat) -> super::wl_shm::Format {
+    use super::wl_shm::Format;
+    match pixel_format {
+        PixelFormat::Bgr => Format::bgr888,
+        PixelFormat::Rgb => Format::rgb888,
+        PixelFormat::Xbgr => Format::xbgr8888,
+        PixelFormat::Xrgb => Format::xrgb8888,
     }
 }

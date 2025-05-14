@@ -57,7 +57,7 @@ unsafe fn count_different(s1: &[u8], s2: &[u8], mut i: usize) -> usize {
         let mask = (mask & (mask >> 1) & (mask >> 2)) & 0b001001001001001;
         if mask != 0 {
             let tz = mask.trailing_zeros() as usize;
-            diff += (tz + 2) / 3;
+            diff += tz.div_ceil(3);
             return diff;
         }
         diff += 5;
@@ -139,7 +139,11 @@ mod tests {
             for x in &mut b[..i] {
                 *x = 1;
             }
-            assert_eq!(unsafe { count_different(&a, &b, 0) }, (i + 2) / 3, "i: {i}");
+            assert_eq!(
+                unsafe { count_different(&a, &b, 0) },
+                i.div_ceil(3),
+                "i: {i}"
+            );
         }
     }
 

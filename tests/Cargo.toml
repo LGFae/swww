@@ -1,0 +1,24 @@
+[package]
+name = "tests"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license-file.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+assert_cmd = "2.0"
+image = { version = "0.25", default-features = false, features = [] }
+
+[lints]
+workspace = true
+
+[[test]]
+name = "integration"
+path = "integration.rs"
+
+[[test]]
+name = "spell-check"
+path = "spell_check.rs"

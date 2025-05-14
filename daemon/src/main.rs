@@ -5,25 +5,19 @@
 mod animations;
 mod cli;
 mod wallpaper;
-#[allow(dead_code)]
 mod wayland;
 use log::{debug, error, info, warn, LevelFilter};
-use rustix::{
-    event::{poll, PollFd, PollFlags},
-    fd::OwnedFd,
-};
+use rustix::{fd::OwnedFd, fs::Timespec};
 
 use wallpaper::Wallpaper;
-use wayland::{
-    globals::{self, InitState},
-    ObjectId, ObjectManager,
-};
+
+use waybackend::{objman, types::ObjectId, wire, Global};
 
 use std::{
     cell::RefCell,
     fs,
     io::{IsTerminal, Write},
-    num::{NonZeroI32, NonZeroU32},
+    num::NonZeroI32,
     path::Path,
     rc::Rc,
     sync::atomic::{AtomicBool, Ordering},
@@ -52,57 +46,86 @@ extern "C" fn signal_handler(_s: libc::c_int) {
 }
 
 struct Daemon {
-    objman: ObjectManager,
+    backend: waybackend::Waybackend,
+    objman: objman::ObjectManager<WaylandObject>,
+    registry: ObjectId,
+    compositor: ObjectId,
+    shm: ObjectId,
+    viewporter: ObjectId,
+    layer_shell: ObjectId,
     pixel_format: PixelFormat,
     wallpapers: Vec<Rc<RefCell<Wallpaper>>>,
     transition_animators: Vec<TransitionAnimator>,
     image_animators: Vec<ImageAnimator>,
     use_cache: bool,
     fractional_scale_manager: Option<ObjectId>,
-    poll_time: PollTime,
+
+    /// We use PollTime as a way of making sure we draw at the right time.
+    /// when we call `Daemon::draw` before the frame callback returned, we need to *not* draw and
+    /// instead wait for the next callback, which we do with a short poll time.
+    poll_time: Option<Timespec>,
+
+    forced_shm_format: bool,
+
+    // This are the globals we have received before we figured out which shm format to use
+    output_globals: Option<Vec<Global>>,
+    // This callback is from the sync request we make when calling `Daemon::new`
+    callback: Option<ObjectId>,
 }
 
 impl Daemon {
-    fn new(init_state: InitState, no_cache: bool) -> Self {
-        let InitState {
-            output_names,
-            fractional_scale,
+    fn new(
+        mut backend: waybackend::Waybackend,
+        mut objman: objman::ObjectManager<WaylandObject>,
+        shm_format: Option<PixelFormat>,
+        no_cache: bool,
+        output_globals: Vec<Global>,
+    ) -> Self {
+        let registry = objman.get_first(WaylandObject::Registry).unwrap();
+        let compositor = objman.get_first(WaylandObject::Compositor).unwrap();
+        let shm = objman.get_first(WaylandObject::Shm).unwrap();
+        let layer_shell = objman.get_first(WaylandObject::LayerShell).unwrap();
+        let viewporter = objman.get_first(WaylandObject::Viewporter).unwrap();
+        let fractional_scale_manager = objman.get_first(WaylandObject::LayerSurface);
+
+        let callback = objman.create(WaylandObject::Callback);
+        wayland::wl_display::req::sync(&mut backend, waybackend::WL_DISPLAY, callback).unwrap();
+
+        Self {
+            backend,
             objman,
-            pixel_format,
-        } = init_state;
-
-        assert_eq!(
-            fractional_scale.is_some(),
-            objman.fractional_scale_support()
-        );
-
-        log::info!("Selected wl_shm format: {pixel_format:?}");
-
-        let mut daemon = Self {
-            objman,
-            pixel_format,
+            registry,
+            compositor,
+            shm,
+            viewporter,
+            layer_shell,
+            pixel_format: shm_format.unwrap_or(PixelFormat::Xrgb),
             wallpapers: Vec::new(),
             transition_animators: Vec::new(),
             image_animators: Vec::new(),
             use_cache: !no_cache,
-            fractional_scale_manager: fractional_scale.map(|x| x.id()),
-            poll_time: PollTime::Never,
-        };
-
-        for output_name in output_names {
-            daemon.new_output(output_name);
+            fractional_scale_manager,
+            poll_time: None,
+            forced_shm_format: shm_format.is_some(),
+            output_globals: Some(output_globals),
+            callback: Some(callback),
         }
+    }
 
-        daemon
+    /// always sets the poll time to the smalest value
+    fn set_poll_time(&mut self, new_time: Timespec) {
+        match self.poll_time {
+            None => self.poll_time = Some(new_time),
+            Some(t1) => {
+                if new_time < t1 {
+                    self.poll_time = Some(new_time)
+                }
+            }
+        }
     }
 
     fn new_output(&mut self, output_name: u32) {
-        let wallpaper = Rc::new(RefCell::new(Wallpaper::new(
-            &mut self.objman,
-            self.pixel_format,
-            self.fractional_scale_manager,
-            output_name,
-        )));
+        let wallpaper = Rc::new(RefCell::new(Wallpaper::new(self, output_name)));
         self.wallpapers.push(wallpaper);
     }
 
@@ -123,10 +146,19 @@ impl Daemon {
                 for wallpaper in &wallpapers {
                     let mut wallpaper = wallpaper.borrow_mut();
                     wallpaper.set_img_info(common::ipc::BgImg::Color(clear.color));
-                    wallpaper.clear(&mut self.objman, self.pixel_format, clear.color);
+                    wallpaper.clear(
+                        &mut self.backend,
+                        &mut self.objman,
+                        self.pixel_format,
+                        clear.color,
+                    );
                 }
-                crate::wallpaper::attach_buffers_and_damage_surfaces(&mut self.objman, &wallpapers);
-                crate::wallpaper::commit_wallpapers(&wallpapers);
+                crate::wallpaper::attach_buffers_and_damage_surfaces(
+                    &mut self.backend,
+                    &mut self.objman,
+                    &wallpapers,
+                );
+                crate::wallpaper::commit_wallpapers(&mut self.backend, &wallpapers);
                 Answer::Ok
             }
             RequestRecv::Ping => Answer::Ping(self.wallpapers.iter().all(|w| {
@@ -162,11 +194,14 @@ impl Daemon {
                         img,
                         animation,
                     ) {
-                        transition.frame(&mut self.objman, self.pixel_format);
+                        transition.frame(&mut self.backend, &mut self.objman, self.pixel_format);
                         self.transition_animators.push(transition);
                     }
                 }
-                self.poll_time = PollTime::Instant;
+                self.set_poll_time(Timespec {
+                    tv_sec: 0,
+                    tv_nsec: 0,
+                });
                 Answer::Ok
             }
         };
@@ -195,7 +230,7 @@ impl Daemon {
     }
 
     fn draw(&mut self) {
-        self.poll_time = PollTime::Never;
+        self.poll_time = None;
 
         let mut i = 0;
         while i < self.transition_animators.len() {
@@ -206,8 +241,11 @@ impl Daemon {
                 .all(|w| w.borrow().is_draw_ready())
             {
                 let time = animator.time_to_draw();
-                if time > Duration::from_micros(1200) {
-                    self.poll_time = PollTime::Short;
+                if time > Duration::from_micros(1000) {
+                    self.set_poll_time(Timespec {
+                        tv_sec: time.as_secs() as i64,
+                        tv_nsec: time.subsec_nanos().saturating_sub(500_000) as i64,
+                    });
                     i += 1;
                     continue;
                 }
@@ -217,12 +255,14 @@ impl Daemon {
                 }
 
                 wallpaper::attach_buffers_and_damage_surfaces(
+                    &mut self.backend,
                     &mut self.objman,
                     &animator.wallpapers,
                 );
-                wallpaper::commit_wallpapers(&animator.wallpapers);
+
+                wallpaper::commit_wallpapers(&mut self.backend, &animator.wallpapers);
                 animator.updt_time();
-                if animator.frame(&mut self.objman, self.pixel_format) {
+                if animator.frame(&mut self.backend, &mut self.objman, self.pixel_format) {
                     let animator = self.transition_animators.swap_remove(i);
                     if let Some(anim) = animator.into_image_animator() {
                         self.image_animators.push(anim);
@@ -230,19 +270,30 @@ impl Daemon {
                     continue;
                 }
             }
+            let time = animator.time_to_draw();
+            self.set_poll_time(Timespec {
+                tv_sec: time.as_secs() as i64,
+                tv_nsec: time.subsec_nanos().saturating_sub(500_000) as i64,
+            });
             i += 1;
         }
 
         self.image_animators.retain(|a| !a.wallpapers.is_empty());
-        for animator in &mut self.image_animators {
+        let mut i = 0;
+        while i < self.image_animators.len() {
+            let animator = &mut self.image_animators[i];
             if animator
                 .wallpapers
                 .iter()
                 .all(|w| w.borrow().is_draw_ready())
             {
                 let time = animator.time_to_draw();
-                if time > Duration::from_micros(1200) {
-                    self.poll_time = PollTime::Short;
+                if time > Duration::from_micros(1000) {
+                    self.set_poll_time(Timespec {
+                        tv_sec: time.as_secs() as i64,
+                        tv_nsec: time.subsec_nanos().saturating_sub(500_000) as i64,
+                    });
+                    i += 1;
                     continue;
                 }
 
@@ -251,13 +302,20 @@ impl Daemon {
                 }
 
                 wallpaper::attach_buffers_and_damage_surfaces(
+                    &mut self.backend,
                     &mut self.objman,
                     &animator.wallpapers,
                 );
-                wallpaper::commit_wallpapers(&animator.wallpapers);
+                wallpaper::commit_wallpapers(&mut self.backend, &animator.wallpapers);
                 animator.updt_time();
-                animator.frame(&mut self.objman, self.pixel_format);
+                animator.frame(&mut self.backend, &mut self.objman, self.pixel_format);
             }
+            let time = animator.time_to_draw();
+            self.set_poll_time(Timespec {
+                tv_sec: time.as_secs() as i64,
+                tv_nsec: time.subsec_nanos().saturating_sub(500_000) as i64,
+            });
+            i += 1;
         }
     }
 
@@ -281,22 +339,21 @@ impl Daemon {
     }
 }
 
-impl wayland::interfaces::wl_display::HasObjman for Daemon {
-    fn objman(&mut self) -> &mut ObjectManager {
-        &mut self.objman
-    }
-}
-
-impl wayland::interfaces::wl_display::EvHandler for Daemon {
-    fn delete_id(&mut self, id: u32) {
-        if let Some(id) = NonZeroU32::new(id) {
-            self.objman.remove(ObjectId::new(id));
+impl wayland::wl_display::EvHandler for Daemon {
+    fn delete_id(&mut self, _: ObjectId, id: u32) {
+        if let Ok(id) = ObjectId::try_new(id) {
+            self.objman.remove(id);
         }
     }
+
+    fn error(&mut self, _: ObjectId, object_id: ObjectId, code: u32, message: &str) {
+        error!("WAYLAND PROTOCOL ERROR: object: {object_id}, code: {code}, message: {message}");
+        exit_daemon();
+    }
 }
 
-impl wayland::interfaces::wl_registry::EvHandler for Daemon {
-    fn global(&mut self, name: u32, interface: &str, version: u32) {
+impl wayland::wl_registry::EvHandler for Daemon {
+    fn global(&mut self, _: ObjectId, name: u32, interface: &str, version: u32) {
         if interface == "wl_output" {
             if version < 4 {
                 error!("your compositor must support at least version 4 of wl_output");
@@ -306,27 +363,48 @@ impl wayland::interfaces::wl_registry::EvHandler for Daemon {
         }
     }
 
-    fn global_remove(&mut self, name: u32) {
+    fn global_remove(&mut self, _: ObjectId, name: u32) {
         if let Some(i) = self
             .wallpapers
             .iter()
             .position(|w| w.borrow().has_output_name(name))
         {
             let w = self.wallpapers.remove(i);
+            w.borrow_mut().destroy(&mut self.backend);
             self.stop_animations(&[w]);
         }
     }
 }
 
-impl wayland::interfaces::wl_shm::EvHandler for Daemon {
-    fn format(&mut self, format: u32) {
-        warn!(
-            "received a wl_shm format after initialization: {format}. This shouldn't be possible"
-        );
+impl wayland::wl_shm::EvHandler for Daemon {
+    fn format(&mut self, _: ObjectId, format: wayland::wl_shm::Format) {
+        use wayland::wl_shm::Format;
+        match format {
+            Format::xrgb8888 => debug!("available shm format: Xrbg"),
+            Format::xbgr8888 => {
+                debug!("available shm format: Xbgr");
+                if !self.forced_shm_format && self.pixel_format == PixelFormat::Xrgb {
+                    self.pixel_format = PixelFormat::Xbgr;
+                }
+            }
+            Format::rgb888 => {
+                debug!("available shm format: Rbg");
+                if !self.forced_shm_format && self.pixel_format != PixelFormat::Bgr {
+                    self.pixel_format = PixelFormat::Rgb
+                }
+            }
+            Format::bgr888 => {
+                debug!("available shm format: Bgr");
+                if !self.forced_shm_format {
+                    self.pixel_format = PixelFormat::Bgr
+                }
+            }
+            _ => (),
+        }
     }
 }
 
-impl wayland::interfaces::wl_output::EvHandler for Daemon {
+impl wayland::wl_output::EvHandler for Daemon {
     fn geometry(
         &mut self,
         sender_id: ObjectId,
@@ -334,25 +412,32 @@ impl wayland::interfaces::wl_output::EvHandler for Daemon {
         _y: i32,
         _physical_width: i32,
         _physical_height: i32,
-        _subpixel: i32,
+        _subpixel: wayland::wl_output::Subpixel,
         _make: &str,
         _model: &str,
-        transform: i32,
+        transform: wayland::wl_output::Transform,
     ) {
         for wallpaper in self.wallpapers.iter() {
             let mut wallpaper = wallpaper.borrow_mut();
             if wallpaper.has_output(sender_id) {
-                if transform as u32 > wayland::interfaces::wl_output::transform::FLIPPED_270 {
-                    error!("received invalid transform value from compositor: {transform}")
+                if transform == wayland::wl_output::Transform::flipped_270 {
+                    error!("received invalid transform value from compositor: {transform:?}")
                 } else {
-                    wallpaper.set_transform(transform as u32);
+                    wallpaper.set_transform(transform);
                 }
                 break;
             }
         }
     }
 
-    fn mode(&mut self, sender_id: ObjectId, _flags: u32, width: i32, height: i32, _refresh: i32) {
+    fn mode(
+        &mut self,
+        sender_id: ObjectId,
+        _flags: wayland::wl_output::Mode,
+        width: i32,
+        height: i32,
+        _refresh: i32,
+    ) {
         for wallpaper in self.wallpapers.iter() {
             let mut wallpaper = wallpaper.borrow_mut();
             if wallpaper.has_output(sender_id) {
@@ -365,10 +450,11 @@ impl wayland::interfaces::wl_output::EvHandler for Daemon {
     fn done(&mut self, sender_id: ObjectId) {
         for wallpaper in self.wallpapers.iter() {
             if wallpaper.borrow().has_output(sender_id) {
-                if wallpaper
-                    .borrow_mut()
-                    .commit_surface_changes(&mut self.objman, self.use_cache)
-                {
+                if wallpaper.borrow_mut().commit_surface_changes(
+                    &mut self.backend,
+                    &mut self.objman,
+                    self.use_cache,
+                ) {
                     self.stop_animations(&[wallpaper.clone()]);
                 }
                 break;
@@ -410,7 +496,7 @@ impl wayland::interfaces::wl_output::EvHandler for Daemon {
     }
 }
 
-impl wayland::interfaces::wl_surface::EvHandler for Daemon {
+impl wayland::wl_surface::EvHandler for Daemon {
     fn enter(&mut self, _sender_id: ObjectId, output: ObjectId) {
         debug!("Output {}: Surface Enter", output.get());
     }
@@ -432,43 +518,70 @@ impl wayland::interfaces::wl_surface::EvHandler for Daemon {
         }
     }
 
-    fn preferred_buffer_transform(&mut self, _sender_id: ObjectId, _transform: u32) {
+    fn preferred_buffer_transform(
+        &mut self,
+        _sender_id: ObjectId,
+        _transform: wayland::wl_output::Transform,
+    ) {
         warn!("Received PreferredBufferTransform. We currently ignore those")
     }
 }
 
-impl wayland::interfaces::wl_buffer::EvHandler for Daemon {
+impl wayland::wl_region::EvHandler for Daemon {}
+
+impl wayland::wl_buffer::EvHandler for Daemon {
     fn release(&mut self, sender_id: ObjectId) {
         for wallpaper in self.wallpapers.iter() {
             let strong_count = Rc::strong_count(wallpaper);
-            if wallpaper
-                .borrow_mut()
-                .try_set_buffer_release_flag(sender_id, strong_count)
-            {
-                break;
+            if wallpaper.borrow_mut().try_set_buffer_release_flag(
+                &mut self.backend,
+                sender_id,
+                strong_count,
+            ) {
+                return;
             }
         }
+        error!("We failed to find wayland buffer with id: {sender_id}. This should be impossible.");
     }
 }
 
-impl wayland::interfaces::wl_callback::EvHandler for Daemon {
+impl wayland::wl_callback::EvHandler for Daemon {
     fn done(&mut self, sender_id: ObjectId, _callback_data: u32) {
+        if self.callback.is_some_and(|obj| obj == sender_id) {
+            info!("selected pixel format: {:?}", self.pixel_format);
+
+            let output_globals = self.output_globals.take();
+            for output in output_globals.unwrap() {
+                self.new_output(output.name());
+            }
+            self.callback = None;
+
+            return;
+        }
+
         for wallpaper in self.wallpapers.iter() {
             if wallpaper.borrow().has_callback(sender_id) {
                 wallpaper.borrow_mut().frame_callback_completed();
-                self.draw();
                 break;
             }
         }
     }
 }
 
-impl wayland::interfaces::zwlr_layer_surface_v1::EvHandler for Daemon {
+impl wayland::wl_compositor::EvHandler for Daemon {}
+impl wayland::wl_shm_pool::EvHandler for Daemon {}
+
+impl wayland::zwlr_layer_shell_v1::EvHandler for Daemon {}
+impl wayland::zwlr_layer_surface_v1::EvHandler for Daemon {
     fn configure(&mut self, sender_id: ObjectId, serial: u32, _width: u32, _height: u32) {
         for wallpaper in self.wallpapers.iter() {
             if wallpaper.borrow().has_layer_surface(sender_id) {
-                wayland::interfaces::zwlr_layer_surface_v1::req::ack_configure(sender_id, serial)
-                    .unwrap();
+                wayland::zwlr_layer_surface_v1::req::ack_configure(
+                    &mut self.backend,
+                    sender_id,
+                    serial,
+                )
+                .unwrap();
                 break;
             }
         }
@@ -481,22 +594,24 @@ impl wayland::interfaces::zwlr_layer_surface_v1::EvHandler for Daemon {
             .position(|w| w.borrow().has_layer_surface(sender_id))
         {
             let w = self.wallpapers.remove(i);
+            w.borrow_mut().destroy(&mut self.backend);
             self.stop_animations(&[w]);
         }
     }
 }
 
-impl wayland::interfaces::wp_fractional_scale_v1::EvHandler for Daemon {
+impl wayland::wp_fractional_scale_v1::EvHandler for Daemon {
     fn preferred_scale(&mut self, sender_id: ObjectId, scale: u32) {
         for wallpaper in self.wallpapers.iter() {
             if wallpaper.borrow().has_fractional_scale(sender_id) {
                 match NonZeroI32::new(scale as i32) {
                     Some(factor) => {
                         wallpaper.borrow_mut().set_scale(Scale::Fractional(factor));
-                        if wallpaper
-                            .borrow_mut()
-                            .commit_surface_changes(&mut self.objman, self.use_cache)
-                        {
+                        if wallpaper.borrow_mut().commit_surface_changes(
+                            &mut self.backend,
+                            &mut self.objman,
+                            self.use_cache,
+                        ) {
                             self.stop_animations(&[wallpaper.clone()]);
                         }
                     }
@@ -508,13 +623,87 @@ impl wayland::interfaces::wp_fractional_scale_v1::EvHandler for Daemon {
     }
 }
 
-fn main() -> Result<(), String> {
+impl wayland::wp_viewporter::EvHandler for Daemon {}
+impl wayland::wp_viewport::EvHandler for Daemon {}
+impl wayland::wp_fractional_scale_manager_v1::EvHandler for Daemon {}
+
+impl Drop for Daemon {
+    fn drop(&mut self) {
+        for wallpaper in self.wallpapers.iter() {
+            let mut w = wallpaper.borrow_mut();
+            w.destroy(&mut self.backend);
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum WaylandObject {
+    // standard stuff
+    Display,
+    Registry,
+    Callback,
+    Compositor,
+    Shm,
+    ShmPool,
+    Buffer,
+    Surface,
+    Region,
+    Output,
+
+    // layer shell
+    LayerShell,
+    LayerSurface,
+
+    // Viewporter
+    Viewporter,
+    Viewport,
+
+    // Fractional Scaling
+    FractionalScaler,
+    FractionalScale,
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     // first, get the command line arguments and make the logger
     let cli = cli::Cli::new();
     make_logger(cli.quiet);
 
-    // initialize the wayland connection, getting all the necessary globals
-    let init_state = wayland::globals::init(cli.format);
+    // next, initialize all wayland stuff
+    let mut backend = waybackend::connect()?;
+    let mut receiver = wire::Receiver::new();
+    let mut objman = objman::ObjectManager::<WaylandObject>::new(WaylandObject::Display);
+    let registry = objman.create(WaylandObject::Registry);
+    let callback = objman.create(WaylandObject::Callback);
+    let (mut globals, delete_callback) =
+        waybackend::roundtrip(&mut backend, &mut receiver, registry, callback)?;
+
+    if delete_callback {
+        objman.remove(callback);
+    }
+
+    // macro to help binding the globals
+    macro_rules! match_global {
+        ($global:ident, $(($interface:ident, $object:path)),*$(,)?) => {
+            match $global.interface() {
+                $($interface::NAME => $global.bind(&mut backend, registry, &mut objman, $object)?),*,
+                _ => (),
+            }
+        }
+    }
+
+    for global in &globals {
+        use wayland::*;
+        use WaylandObject::*;
+        match_global!(
+            global,
+            (wl_compositor, Compositor),
+            (wl_shm, Shm),
+            (zwlr_layer_shell_v1, LayerShell),
+            (wp_viewporter, Viewporter),
+            (wp_fractional_scale_manager_v1, FractionalScaler),
+        );
+    }
+    globals.retain(|global| global.interface() == wayland::wl_output::NAME);
 
     // create the socket listener and setup the signal handlers
     // this will also return an error if there is an `swww-daemon` instance already
@@ -523,7 +712,7 @@ fn main() -> Result<(), String> {
     setup_signals();
 
     // use the initializer to create the Daemon, then drop it to free up the memory
-    let mut daemon = Daemon::new(init_state, cli.no_cache);
+    let mut daemon = Daemon::new(backend, objman, cli.format, cli.no_cache, globals);
 
     if let Ok(true) = sd_notify::booted() {
         if let Err(e) = sd_notify::notify(true, &[sd_notify::NotifyState::Ready]) {
@@ -531,68 +720,85 @@ fn main() -> Result<(), String> {
         }
     }
 
-    let wayland_fd = wayland::globals::wayland_fd();
-    let mut fds = [
-        PollFd::new(&wayland_fd, PollFlags::IN),
-        PollFd::new(&listener.0, PollFlags::IN),
-    ];
+    // dispatch macro
+    macro_rules! match_enum_with_interface {
+        ($handler:ident, $object:ident, $msg:ident, $(($variant:path, $interface:ident)),*$(,)?) => {
+            match $object {
+                $($variant => $interface::event(&mut $handler, &mut $msg)?),*,
+            }
+        }
+    }
 
     // main loop
     while !should_daemon_exit() {
-        use wayland::{interfaces::*, wire, WlDynObj};
+        use rustix::event::{PollFd, PollFlags};
+        use wayland::*;
+        use WaylandObject::*;
 
-        if let Err(e) = poll(&mut fds, daemon.poll_time.into()) {
-            match e {
-                rustix::io::Errno::INTR => continue,
-                _ => return Err(format!("failed to poll file descriptors: {e:?}")),
-            }
+        daemon.backend.flush()?;
+
+        let mut fds = [
+            PollFd::new(&daemon.backend.wayland_fd, PollFlags::IN),
+            PollFd::new(&listener.0, PollFlags::IN),
+        ];
+
+        // Note: we cannot use rustix::io::retry_on_intr because it makes CTRL-C fail on the
+        // terminal
+        match rustix::event::poll(&mut fds, daemon.poll_time.as_ref()) {
+            Ok(_) => (),
+            Err(rustix::io::Errno::INTR | rustix::io::Errno::WOULDBLOCK) => continue,
+            Err(e) => return Err(Box::new(e)),
         }
 
-        if !fds[0].revents().is_empty() {
-            let (msg, payload) = match wire::WireMsg::recv() {
-                Ok((msg, payload)) => (msg, payload),
-                Err(rustix::io::Errno::INTR) => continue,
-                Err(e) => return Err(format!("failed to receive wire message: {e:?}")),
-            };
+        let wayland_event = !fds[0].revents().is_empty();
+        let socket_event = !fds[1].revents().is_empty();
 
-            match msg.sender_id() {
-                globals::WL_DISPLAY => wl_display::event(&mut daemon, msg, payload),
-                globals::WL_REGISTRY => wl_registry::event(&mut daemon, msg, payload),
-                globals::WL_COMPOSITOR => error!("wl_compositor has no events"),
-                globals::WL_SHM => wl_shm::event(&mut daemon, msg, payload),
-                globals::WP_VIEWPORTER => error!("wp_viewporter has no events"),
-                globals::ZWLR_LAYER_SHELL_V1 => error!("zwlr_layer_shell_v1 has no events"),
-                other => {
-                    let obj_id = daemon.objman.get(other);
-                    match obj_id {
-                        Some(WlDynObj::Output) => wl_output::event(&mut daemon, msg, payload),
-                        Some(WlDynObj::Surface) => wl_surface::event(&mut daemon, msg, payload),
-                        Some(WlDynObj::Region) => error!("wl_region has no events"),
-                        Some(WlDynObj::LayerSurface) => {
-                            zwlr_layer_surface_v1::event(&mut daemon, msg, payload)
-                        }
-                        Some(WlDynObj::Buffer) => wl_buffer::event(&mut daemon, msg, payload),
-                        Some(WlDynObj::ShmPool) => error!("wl_shm_pool has no events"),
-                        Some(WlDynObj::Callback) => wl_callback::event(&mut daemon, msg, payload),
-                        Some(WlDynObj::Viewport) => error!("wp_viewport has no events"),
-                        Some(WlDynObj::FractionalScale) => {
-                            wp_fractional_scale_v1::event(&mut daemon, msg, payload)
-                        }
-                        None => error!("Received event for deleted object ({other:?})"),
-                    }
+        if wayland_event {
+            let mut msg = receiver.recv(&daemon.backend.wayland_fd)?;
+            while msg.has_next()? {
+                let sender_id = msg.sender_id();
+                if sender_id == waybackend::WL_DISPLAY {
+                    wl_display::event(&mut daemon, &mut msg)?;
+                } else {
+                    let sender = daemon
+                        .objman
+                        .get(sender_id)
+                        .expect("received wayland message from unknown object");
+                    match_enum_with_interface!(
+                        daemon,
+                        sender,
+                        msg,
+                        (Display, wl_display),
+                        (Registry, wl_registry),
+                        (Callback, wl_callback),
+                        (Compositor, wl_compositor),
+                        (Shm, wl_shm),
+                        (ShmPool, wl_shm_pool),
+                        (Buffer, wl_buffer),
+                        (Surface, wl_surface),
+                        (Region, wl_region),
+                        (Output, wl_output),
+                        (LayerShell, zwlr_layer_shell_v1),
+                        (LayerSurface, zwlr_layer_surface_v1),
+                        (Viewporter, wp_viewporter),
+                        (Viewport, wp_viewport),
+                        (FractionalScaler, wp_fractional_scale_manager_v1),
+                        (FractionalScale, wp_fractional_scale_v1),
+                    );
                 }
             }
         }
 
-        if !fds[1].revents().is_empty() {
+        if socket_event {
+            // See above note about rustix::retry_on_intr
             match rustix::net::accept(&listener.0) {
                 Ok(stream) => daemon.recv_socket_msg(IpcSocket::new(stream)),
                 Err(rustix::io::Errno::INTR | rustix::io::Errno::WOULDBLOCK) => continue,
-                Err(e) => return Err(format!("failed to accept incoming connection: {e}")),
+                Err(e) => return Err(Box::new(e)),
             }
         }
 
-        if !matches!(daemon.poll_time, PollTime::Never) {
+        if daemon.poll_time.is_some() {
             daemon.draw();
         }
     }
@@ -676,26 +882,6 @@ impl Drop for SocketWrapper {
             error!("Failed to remove socket at {addr}: {e}");
         }
         info!("Removed socket at {addr}");
-    }
-}
-
-#[repr(i32)]
-#[derive(Clone, Copy)]
-/// We use PollTime as a way of making sure we draw at the right time
-/// when we call `Daemon::draw` before the frame callback returned, we need to *not* draw and
-/// instead wait for the next callback, which we do with a short poll time.
-///
-/// The instant poll time is for when we receive an img request, after we set up the requested
-/// transitions
-enum PollTime {
-    Never = -1,
-    Instant = 0,
-    Short = 1,
-}
-
-impl From<PollTime> for i32 {
-    fn from(value: PollTime) -> Self {
-        value as i32
     }
 }
 
