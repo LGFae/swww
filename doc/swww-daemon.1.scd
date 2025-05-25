@@ -16,6 +16,13 @@ swww-daemon [-q|--quiet] [-f|--format <xrgb|xbgr|rgb|bgr>] [--no-cache]
 	initialization; this is only here for fallback, debug, and workaround
 	purposes.
 
+*-l*,*--layer* <background|bottom>
+	Which layer to display the background in. Defaults to `background`.
+
+	We do not accept layers `top` and `overlay` because those would make your
+	desktoop unusable by simply putting an image on top of everything else. If
+	there is ever a use case for these, we can reconsider it.
+
 *--no-cache*
 	Don't search the cache for the last wallpaper for each output.
 	Useful if you always want to select which image 'swww' loads manually using
