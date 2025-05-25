@@ -6,9 +6,11 @@ use std::{cell::RefCell, num::NonZeroI32, rc::Rc, sync::atomic::AtomicBool};
 
 use crate::{
     wayland::{
-        bump_pool::BumpPool, wl_compositor, wl_output, wl_region, wl_registry, wl_surface,
+        bump_pool::BumpPool,
+        wl_compositor, wl_output, wl_region, wl_registry, wl_surface,
         wp_fractional_scale_manager_v1, wp_fractional_scale_v1, wp_viewport, wp_viewporter,
-        zwlr_layer_shell_v1, zwlr_layer_surface_v1,
+        zwlr_layer_shell_v1::{self, Layer},
+        zwlr_layer_surface_v1,
     },
     WaylandObject,
 };
@@ -93,7 +95,7 @@ impl std::cmp::PartialEq for Wallpaper {
 }
 
 impl Wallpaper {
-    pub(crate) fn new(daemon: &mut crate::Daemon, output_name: u32) -> Self {
+    pub(crate) fn new(daemon: &mut crate::Daemon, layer: Layer, output_name: u32) -> Self {
         let crate::Daemon {
             objman,
             backend,
@@ -125,7 +127,7 @@ impl Wallpaper {
             layer_surface,
             wl_surface,
             Some(output),
-            zwlr_layer_shell_v1::Layer::background,
+            layer,
             "swww-daemon",
         )
         .unwrap();
