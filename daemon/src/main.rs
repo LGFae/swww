@@ -12,6 +12,7 @@ use rustix::{fd::OwnedFd, fs::Timespec};
 use wallpaper::Wallpaper;
 
 use waybackend::{objman, types::ObjectId, wire, Global};
+use wayland::zwlr_layer_shell_v1::Layer;
 
 use std::{
     cell::RefCell,
@@ -53,6 +54,7 @@ struct Daemon {
     shm: ObjectId,
     viewporter: ObjectId,
     layer_shell: ObjectId,
+    layer: Layer,
     pixel_format: PixelFormat,
     wallpapers: Vec<Rc<RefCell<Wallpaper>>>,
     transition_animators: Vec<TransitionAnimator>,
@@ -77,8 +79,7 @@ impl Daemon {
     fn new(
         mut backend: waybackend::Waybackend,
         mut objman: objman::ObjectManager<WaylandObject>,
-        shm_format: Option<PixelFormat>,
-        no_cache: bool,
+        args: cli::Cli,
         output_globals: Vec<Global>,
     ) -> Self {
         let registry = objman.get_first(WaylandObject::Registry).unwrap();
@@ -99,14 +100,15 @@ impl Daemon {
             shm,
             viewporter,
             layer_shell,
-            pixel_format: shm_format.unwrap_or(PixelFormat::Xrgb),
+            layer: args.layer,
+            pixel_format: args.format.unwrap_or(PixelFormat::Xrgb),
             wallpapers: Vec::new(),
             transition_animators: Vec::new(),
             image_animators: Vec::new(),
-            use_cache: !no_cache,
+            use_cache: !args.no_cache,
             fractional_scale_manager,
             poll_time: None,
-            forced_shm_format: shm_format.is_some(),
+            forced_shm_format: args.format.is_some(),
             output_globals: Some(output_globals),
             callback: Some(callback),
         }
@@ -125,7 +127,7 @@ impl Daemon {
     }
 
     fn new_output(&mut self, output_name: u32) {
-        let wallpaper = Rc::new(RefCell::new(Wallpaper::new(self, output_name)));
+        let wallpaper = Rc::new(RefCell::new(Wallpaper::new(self, self.layer, output_name)));
         self.wallpapers.push(wallpaper);
     }
 
@@ -712,7 +714,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     setup_signals();
 
     // use the initializer to create the Daemon, then drop it to free up the memory
-    let mut daemon = Daemon::new(backend, objman, cli.format, cli.no_cache, globals);
+    let mut daemon = Daemon::new(backend, objman, cli, globals);
 
     if let Ok(true) = sd_notify::booted() {
         if let Err(e) = sd_notify::notify(true, &[sd_notify::NotifyState::Ready]) {
