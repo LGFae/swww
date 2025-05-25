@@ -1,5 +1,29 @@
 use common::compression::{Compressor, Decompressor};
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use tiny_bench::black_box;
+
+pub fn main() {
+    let (prev, cur) = generate_data();
+
+    let mut compressor = Compressor::new();
+    tiny_bench::bench_labeled("compression", || {
+        black_box(
+            compressor
+                .compress(&prev, &cur, common::ipc::PixelFormat::Xrgb)
+                .is_some(),
+        )
+    });
+
+    let bitpack = compressor
+        .compress(&prev, &cur, common::ipc::PixelFormat::Xrgb)
+        .unwrap();
+    let mut canvas = buf_from(&prev);
+
+    let mut decompressor = Decompressor::new();
+
+    tiny_bench::bench_labeled("decompression 4 channels", || {
+        black_box(decompressor.decompress(&bitpack, &mut canvas, common::ipc::PixelFormat::Xrgb))
+    });
+}
 
 fn generate_data() -> (Box<[u8]>, Box<[u8]>) {
     let v1 = vec![120; 1920 * 1080 * 3];
@@ -35,42 +59,3 @@ fn buf_from(slice: &[u8]) -> Vec<u8> {
     }
     v
 }
-
-pub fn compression_and_decompression(c: &mut Criterion) {
-    let (prev, cur) = generate_data();
-
-    let mut compressor = Compressor::new();
-    let mut comp = c.benchmark_group("compression");
-    comp.bench_function("Full", |b| {
-        b.iter(|| {
-            black_box(
-                compressor
-                    .compress(&prev, &cur, common::ipc::PixelFormat::Xrgb)
-                    .is_some(),
-            )
-        })
-    });
-    comp.finish();
-
-    let mut decomp = c.benchmark_group("decompression 4 channels");
-    let bitpack = compressor
-        .compress(&prev, &cur, common::ipc::PixelFormat::Xrgb)
-        .unwrap();
-    let mut canvas = buf_from(&prev);
-
-    let mut decompressor = Decompressor::new();
-    decomp.bench_function("Full", |b| {
-        b.iter(|| {
-            black_box(decompressor.decompress(
-                &bitpack,
-                &mut canvas,
-                common::ipc::PixelFormat::Xrgb,
-            ))
-        })
-    });
-
-    decomp.finish();
-}
-
-criterion_group!(compression, compression_and_decompression);
-criterion_main!(compression);

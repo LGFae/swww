@@ -13,7 +13,7 @@ pub(super) fn unpack_bytes_4channels(buf: &mut [u8], diff: &[u8]) {
         "Poorly formed BitPack"
     );
     // use the most efficient implementation available:
-    #[cfg(not(test))] // when testing, we want to use the specific implementation
+    #[cfg(not(debug_assertions))]
     {
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         if super::cpu::features::ssse3() {

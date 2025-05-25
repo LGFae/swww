@@ -78,7 +78,7 @@ unsafe fn count_different(s1: &[u8], s2: &[u8], mut i: usize) -> usize {
 #[inline(always)]
 pub(super) unsafe fn pack_bytes(cur: &[u8], goal: &[u8], v: &mut Vec<u8>) {
     // use the most efficient implementation available:
-    #[cfg(not(test))] // when testing, we want to use the specific implementation
+    #[cfg(not(debug_assertions))]
     {
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         if super::cpu::features::sse2() {
