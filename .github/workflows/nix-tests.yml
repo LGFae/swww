@@ -13,6 +13,5 @@ jobs:
           experimental-features = nix-command flakes
           access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
     - run: nix flake show
-    - run: nix-env -i nixpkgs#wayland nixpkgs#wayland-protocols
     - run: nix flake check --print-build-logs
     - run: nix build --print-build-logs

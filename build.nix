@@ -7,6 +7,8 @@
   installShellFiles,
   scdoc,
   nix-gitignore,
+  wayland,
+  wayland-protocols,
 }: let
   version = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).workspace.package.version;
   src = nix-gitignore.gitignoreSource [] ./.;
@@ -21,6 +23,8 @@ rustPlatform.buildRustPackage {
   buildInputs = [
     lz4
     libxkbcommon
+    wayland
+    wayland-protocols
   ];
 
   doCheck = false; # Integration tests do not work in sandbox environment

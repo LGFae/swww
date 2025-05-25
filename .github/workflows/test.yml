@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: mozilla-actions/sccache-action@v0.0.3
+      - uses: mozilla-actions/sccache-action@v0.0.9
       - uses: dtolnay/rust-toolchain@nightly
       - uses: taiki-e/install-action@cargo-nextest
       - run: sudo apt install -y libwayland-dev wayland-protocols
@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: mozilla-actions/sccache-action@v0.0.3
+      - uses: mozilla-actions/sccache-action@v0.0.9
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@cargo-nextest
       - run: sudo apt install -y libwayland-dev wayland-protocols
@@ -35,7 +35,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: mozilla-actions/sccache-action@v0.0.3
+      - uses: mozilla-actions/sccache-action@v0.0.9
       - uses: SebRollen/toml-action@v1.0.2
         id: msrv
         with:
