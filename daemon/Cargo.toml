@@ -12,7 +12,7 @@ workspace = true
 [dependencies]
 common = { workspace = true }
 
-waybackend = { version = "0.3" }
+waybackend = { version = "0.4" }
 log = { version = "0.4", default-features = false, features = [
   "max_level_debug",
   "release_max_level_info",
@@ -24,4 +24,4 @@ keyframe = "1.1"
 sd-notify = { version = "0.4" }
 
 [build-dependencies]
-waybackend-scanner = { version = "0.3", features = ["build-script"] }
+waybackend-scanner = { version = "0.4", features = ["build-script"] }
