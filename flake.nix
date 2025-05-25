@@ -41,6 +41,8 @@
         pkg-config,
         lz4,
         libxkbcommon,
+        wayland,
+        wayland-protocols,
         swww,
       }:
         mkShell {
