@@ -1,6 +1,78 @@
 ### Unreleased
 
 
+### 0.10.0
+
+Okay, this one's a doozy.
+
+#### Additions
+
+  * new `--layer` option for `swww-daemon`
+  * new `--resize stretch` option, by @rexept
+  * cache now stores the image filter, by @kerty0
+  * we can now read images from stanard input, by @iynaix
+  * new `swww_randomize_multi.sh` example script, by @cplir-c
+
+#### Fixes
+
+Note: because there were *many* changes between the previous version and this
+one, some of these things may resurface as problems. Unfortunately, many of
+these issues I either cannot reproduce in my system, or the whole application
+has changed so much that testing them in isolation would be challenging.
+
+  * fixed output transforms
+  * animation timings could be slightly off
+  * examples scripts are more POSIX-friendly, by @Fawn
+  * fixed memory leak and halted animation when connecting/disconnecting
+  monitor, by @kerty0
+  * some stuff wasn't working when files were behind symlinks, fixed by @mendess
+  * fixed connecting to Wayland via WAYLAND_SOCKET, by @mstoeckl
+
+#### Improvements
+
+  * reimplemented the communication from the client and the daemon from scratch,
+  allowing for much more efficient data transfer
+  * the above was then made type-safe by @rkuklik
+  * using a custom log implementation that looks much nicer
+  * rewrote the transitions code to be more SIMD friendly -- will improve
+  animation stuttering in some systems. Furthermore, and more importantly,
+  the animations are now fast enough that we no longer need `rayon` as a
+  dependency.
+  * more generaly, we have completed nuked the multi-threaded code.
+  `swww-daemon` now only spawns a single thread, letting us get rid of every
+  `Arc` wrapper, and other annoying, fragile, synchronization code.
+  * we are using `rustix` instead of the `std` as much as possible, for lower
+  syscall overhead
+  * remove dependency on `spin-sleep`
+  * `flake-lock` by @JohnRTitor
+  * `waybackend` based implementation -- this is much more lightweight than
+  `wayland-rs`, and lets us make the daemon very resource efficient.
+  * can now use hexcodes instead of image path, which we detect automatically,
+  by @flick0
+
+#### Other contributions
+
+  * fixes to some internal documentation by @JaKooLit, @Axlefublr, @filip-rs,
+  @rexept, @Not-Glunk
+  * @rkuklik did a big refactor on the project's overall organization
+  * BREAKING CHANGE: dropped the `init` subcommand for the client, by
+  @WhyNotHugo
+
+
+Note there have also been other contributions that were rendered obsolete in the
+meantime, since so much has changed from the last released version (in fact, the
+last release was roughly a whole year ago!). The daemon codebase itself has gone
+through 3 very large refactors, and now I am finally mostly satisfied with how
+it looks. Unfortunately, this does mean some things will inevitably break. I
+apologize in advance for any inconveniences.
+
+On the other hand, I believe the rewrite has fixed some old-standing bugs we
+have. Though those will have to be tested again on systems that can actually
+reproduce them reliably.
+
+I also apologize if I forgot to mention anything/anyone in the above summary. If
+I missed your contribution, please feel free to open a PR adding it.
+
 ### 0.9.5
 
 This is mostly just fixes and small improvements.
