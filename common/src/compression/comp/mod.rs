@@ -142,7 +142,11 @@ mod tests {
             for x in &mut b[..i] {
                 *x = 1;
             }
-            assert_eq!(unsafe { count_different(&a, &b, 0) }, (i + 2) / 3, "i: {i}");
+            assert_eq!(
+                unsafe { count_different(&a, &b, 0) },
+                i.div_ceil(3),
+                "i: {i}"
+            );
         }
     }
 }

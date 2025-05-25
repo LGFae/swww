@@ -1,4 +1,5 @@
 use log::error;
+use waybackend::{objman::ObjectManager, Waybackend};
 
 use std::{
     cell::RefCell,
@@ -12,7 +13,7 @@ use common::{
     mmap::MmappedBytes,
 };
 
-use crate::{wallpaper::Wallpaper, wayland::ObjectManager};
+use crate::{wallpaper::Wallpaper, WaylandObject};
 
 mod transitions;
 use transitions::Effect;
@@ -70,7 +71,12 @@ impl TransitionAnimator {
         self.now = Instant::now();
     }
 
-    pub fn frame(&mut self, objman: &mut ObjectManager, pixel_format: PixelFormat) -> bool {
+    pub fn frame(
+        &mut self,
+        backend: &mut Waybackend,
+        objman: &mut ObjectManager<WaylandObject>,
+        pixel_format: PixelFormat,
+    ) -> bool {
         let Self {
             wallpapers,
             effect,
@@ -79,8 +85,8 @@ impl TransitionAnimator {
             ..
         } = self;
         if !*over {
-            *over = effect.execute(objman, pixel_format, wallpapers, img.bytes());
-            false
+            *over = effect.execute(backend, objman, pixel_format, wallpapers, img.bytes());
+            *over
         } else {
             true
         }
@@ -122,7 +128,12 @@ impl ImageAnimator {
         self.now = Instant::now();
     }
 
-    pub fn frame(&mut self, objman: &mut ObjectManager, pixel_format: PixelFormat) {
+    pub fn frame(
+        &mut self,
+        backend: &mut Waybackend,
+        objman: &mut ObjectManager<WaylandObject>,
+        pixel_format: PixelFormat,
+    ) {
         let Self {
             wallpapers,
             animation,
@@ -135,11 +146,12 @@ impl ImageAnimator {
 
         let mut j = 0;
         while j < wallpapers.len() {
-            let result = wallpapers[j]
-                .borrow_mut()
-                .canvas_change(objman, pixel_format, |canvas| {
-                    decompressor.decompress(frame, canvas, pixel_format)
-                });
+            let result =
+                wallpapers[j]
+                    .borrow_mut()
+                    .canvas_change(backend, objman, pixel_format, |canvas| {
+                        decompressor.decompress(frame, canvas, pixel_format)
+                    });
 
             if let Err(e) = result {
                 error!("failed to unpack frame: {e}");

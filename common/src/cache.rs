@@ -75,19 +75,12 @@ pub fn get_previous_image_path(output_name: &str) -> io::Result<(String, String)
 
     let mut buf = Vec::with_capacity(64);
     File::open(filepath)?.read_to_end(&mut buf)?;
-    let buf = String::from_utf8(buf).map_err(|e| {
-        std::io::Error::new(
-            std::io::ErrorKind::Other,
-            format!("failed to decode bytes: {e}"),
-        )
-    })?;
+    let buf = String::from_utf8(buf)
+        .map_err(|e| std::io::Error::other(format!("failed to decode bytes: {e}")))?;
 
     match buf.split_once("\n") {
         Some(buf) => Ok((buf.0.to_string(), buf.1.to_string())),
-        None => Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "failed to read image filter",
-        )),
+        None => Err(std::io::Error::other("failed to read image filter")),
     }
 }
 
@@ -100,9 +93,8 @@ pub fn load(output_name: &str) -> io::Result<()> {
     if let Ok(mut child) = std::process::Command::new("pidof").arg("swww").spawn() {
         if let Ok(status) = child.wait() {
             if status.success() {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    "there is already another swww process running".to_string(),
+                return Err(std::io::Error::other(
+                    "there is already another swww process running",
                 ));
             }
         }
@@ -181,9 +173,8 @@ fn cache_dir() -> io::Result<PathBuf> {
         create_dir(&path)?;
         Ok(path)
     } else {
-        Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "failed to read both $XDG_CACHE_HOME and $HOME environment variables".to_string(),
+        Err(std::io::Error::other(
+            "failed to read both $XDG_CACHE_HOME and $HOME environment variables",
         ))
     }
 }

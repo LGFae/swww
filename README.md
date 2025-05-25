@@ -6,9 +6,7 @@
 
 ## Dependencies
 
- - a compositor that implements:
-   * wlr-layer-shell (typically wlroots based compositors)
-   * xdg-output
+ - a compositor that implements the wlr-layer-shell (typically wlroots based compositors)
  - [lz4](https://github.com/lz4/lz4) (for compressing frames when animating)
 
 **Note that this means `swww` will not run on Gnome, because it does not implement the `wlr-layer-shell` protocol**.
@@ -21,7 +19,8 @@
 
 ### Dependencies:
 
-  - Up to date stable rustc compiler and cargo (specifically, MSRV is 1.82.0)
+ - wayland-client and wayland-protocol `.xml` files installed in your system (`pkg-config` must be able to find it)
+ - Up to date stable rustc compiler and cargo (specifically, MSRV is 1.82.0)
 
 To build, clone this repository and run:
 ```

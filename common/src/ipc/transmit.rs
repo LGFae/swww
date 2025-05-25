@@ -1,3 +1,4 @@
+use std::mem::MaybeUninit;
 use std::thread;
 use std::time::Duration;
 
@@ -232,7 +233,7 @@ impl<T> IpcSocket<T> {
         let mut payload = [0u8; 16];
         payload[0..8].copy_from_slice(&msg.code.into().to_ne_bytes());
 
-        let mut ancillary_buf = [0u8; rustix::cmsg_space!(ScmRights(1))];
+        let mut ancillary_buf = [MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(1))];
         let mut ancillary = net::SendAncillaryBuffer::new(&mut ancillary_buf);
 
         let fd;
@@ -255,7 +256,7 @@ impl<T> IpcSocket<T> {
 
     pub fn recv(&self) -> Result<RawMsg, IpcError> {
         let mut buf = [0u8; 16];
-        let mut ancillary_buf = [0u8; rustix::cmsg_space!(ScmRights(1))];
+        let mut ancillary_buf = [MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(1))];
 
         let mut control = net::RecvAncillaryBuffer::new(&mut ancillary_buf);
 
