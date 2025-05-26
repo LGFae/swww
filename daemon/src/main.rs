@@ -7,7 +7,11 @@ mod cli;
 mod wallpaper;
 mod wayland;
 use log::{debug, error, info, warn, LevelFilter};
-use rustix::{fd::OwnedFd, fs::Timespec};
+use rustix::{
+    event::{Nsecs, Secs},
+    fd::OwnedFd,
+    fs::Timespec,
+};
 
 use wallpaper::Wallpaper;
 
@@ -245,8 +249,8 @@ impl Daemon {
                 let time = animator.time_to_draw();
                 if time > Duration::from_micros(1000) {
                     self.set_poll_time(Timespec {
-                        tv_sec: time.as_secs() as i64,
-                        tv_nsec: time.subsec_nanos().saturating_sub(500_000) as i64,
+                        tv_sec: time.as_secs() as Secs,
+                        tv_nsec: time.subsec_nanos().saturating_sub(500_000) as Nsecs,
                     });
                     i += 1;
                     continue;
@@ -274,8 +278,8 @@ impl Daemon {
             }
             let time = animator.time_to_draw();
             self.set_poll_time(Timespec {
-                tv_sec: time.as_secs() as i64,
-                tv_nsec: time.subsec_nanos().saturating_sub(500_000) as i64,
+                tv_sec: time.as_secs() as Secs,
+                tv_nsec: time.subsec_nanos().saturating_sub(500_000) as Nsecs,
             });
             i += 1;
         }
@@ -292,8 +296,8 @@ impl Daemon {
                 let time = animator.time_to_draw();
                 if time > Duration::from_micros(1000) {
                     self.set_poll_time(Timespec {
-                        tv_sec: time.as_secs() as i64,
-                        tv_nsec: time.subsec_nanos().saturating_sub(500_000) as i64,
+                        tv_sec: time.as_secs() as Secs,
+                        tv_nsec: time.subsec_nanos().saturating_sub(500_000) as Nsecs,
                     });
                     i += 1;
                     continue;
@@ -314,8 +318,8 @@ impl Daemon {
             }
             let time = animator.time_to_draw();
             self.set_poll_time(Timespec {
-                tv_sec: time.as_secs() as i64,
-                tv_nsec: time.subsec_nanos().saturating_sub(500_000) as i64,
+                tv_sec: time.as_secs() as Secs,
+                tv_nsec: time.subsec_nanos().saturating_sub(500_000) as Nsecs,
             });
             i += 1;
         }
