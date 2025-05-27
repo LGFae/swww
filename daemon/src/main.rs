@@ -91,7 +91,7 @@ impl Daemon {
         let shm = objman.get_first(WaylandObject::Shm).unwrap();
         let layer_shell = objman.get_first(WaylandObject::LayerShell).unwrap();
         let viewporter = objman.get_first(WaylandObject::Viewporter).unwrap();
-        let fractional_scale_manager = objman.get_first(WaylandObject::LayerSurface);
+        let fractional_scale_manager = objman.get_first(WaylandObject::FractionalScaler);
 
         let callback = objman.create(WaylandObject::Callback);
         wayland::wl_display::req::sync(&mut backend, waybackend::WL_DISPLAY, callback).unwrap();
