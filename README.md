@@ -20,7 +20,7 @@
 ### Dependencies:
 
  - wayland-client and wayland-protocol `.xml` files installed in your system (`pkg-config` must be able to find it)
- - Up to date stable rustc compiler and cargo (specifically, MSRV is 1.82.0)
+ - Up to date stable rustc compiler and cargo (specifically, MSRV is 1.87.0)
 
 To build, clone this repository and run:
 ```
