@@ -80,7 +80,6 @@ impl<T> IpcSocket<T> {
     }
 
     /// Retrieves all currently in-use socket paths, for all namespaces
-    #[must_use]
     pub fn all_paths() -> std::io::Result<Vec<PathBuf>> {
         let p = SOCKET_PATH.get_or_init(Self::socket_file).clone();
         let parent = match p.parent() {
