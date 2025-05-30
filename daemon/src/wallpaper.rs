@@ -128,7 +128,7 @@ impl Wallpaper {
             wl_surface,
             Some(output),
             layer,
-            "swww-daemon",
+            &format!("swww-daemon{}", daemon.namespace),
         )
         .unwrap();
 
@@ -281,6 +281,7 @@ impl Wallpaper {
         &mut self,
         backend: &mut Waybackend,
         objman: &mut ObjectManager<WaylandObject>,
+        namespace: &str,
         use_cache: bool,
     ) -> bool {
         use wl_output::Transform;
@@ -294,11 +295,12 @@ impl Wallpaper {
                     || inner.height != staging.height))
         {
             let name = staging.name.clone().unwrap_or("".to_string());
+            let namespace = namespace.to_string();
             std::thread::Builder::new()
                 .name("cache loader".to_string())
                 .stack_size(1 << 14)
                 .spawn(move || {
-                    if let Err(e) = common::cache::load(&name) {
+                    if let Err(e) = common::cache::load(&name, &namespace) {
                         warn!("failed to load cache: {e}");
                     }
                 })

@@ -6,6 +6,7 @@ pub struct Cli {
     pub quiet: bool,
     pub no_cache: bool,
     pub layer: Layer,
+    pub namespace: String,
 }
 
 impl Cli {
@@ -14,6 +15,7 @@ impl Cli {
         let mut no_cache = false;
         let mut format = None;
         let mut layer = Layer::background;
+        let mut namespace = String::new();
         let mut args = std::env::args();
         args.next(); // skip the first argument
 
@@ -39,8 +41,17 @@ impl Cli {
                         }
                     }
                 }
-                "-q" | "--quiet" => quiet = true,
+                "-n" | "--namespace" => {
+                    namespace = match args.next() {
+                        Some(s) => s,
+                        None => {
+                            eprintln!("expected argument for option `--namespace`");
+                            std::process::exit(-4);
+                        }
+                    }
+                }
                 "--no-cache" => no_cache = true,
+                "-q" | "--quiet" => quiet = true,
                 "-h" | "--help" => {
                     println!(
                         "\
@@ -91,6 +102,7 @@ Options:
             quiet,
             no_cache,
             layer,
+            namespace,
         }
     }
 }
