@@ -7,20 +7,11 @@
   installShellFiles,
   scdoc,
   nix-gitignore,
-  wayland,
+  wayland-scanner,
   wayland-protocols,
 }: let
   version = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).workspace.package.version;
   src = nix-gitignore.gitignoreSource [] ./.;
-
-  # HACK: waybackend and pkg-config try to find wayland.xml in pkgs.wayland,
-  # but wayland.xml is not included in the package.
-  wayland' = wayland.overrideAttrs {
-    postInstall = ''
-      mkdir -p $out/share/wayland
-      install ../protocol/wayland.xml -t $out/share/wayland/
-    '';
-  };
 in
   rustPlatform.buildRustPackage {
     pname = "swww";
@@ -32,7 +23,7 @@ in
     buildInputs = [
       lz4
       libxkbcommon
-      wayland'
+      wayland-scanner
       wayland-protocols
     ];
 
