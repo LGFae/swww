@@ -1,6 +1,22 @@
 ### Unreleased
 
 
+### 0.10.1
+
+A small update with important bug fixes.
+
+#### Fixes
+
+  * Make `swww` work on systems where `c_long` is is not mapped to `i64`, by
+  @triallax
+  * Fix fractional scaling, by @cyuria
+  * @nullcubee and @iynaix helped me understand fix the nix build (thanks, guys)
+
+#### Improvements
+
+  * using `tiny-bench ` instead of `criterion` reduces our dependencies in
+  `debug` builds
+
 ### 0.10.0
 
 Okay, this one's a doozy.
