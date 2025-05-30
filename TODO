@@ -3,3 +3,6 @@ Fully automated, complete testing, for every option
 	testing many things with different setups. Maybe we can script it somehow?
 
 Write completions scripts for swww-daemon
+
+NEW STUFF:
+	MAKE ALL COMMANDS ACCEPT AN --all ARGUMENT TO ALL NAMESPACES AT ONCE

@@ -14,10 +14,89 @@ use crate::ipc::Animation;
 use crate::ipc::PixelFormat;
 use crate::mmap::Mmap;
 
-pub(crate) fn store(output_name: &str, img_path: &str, filter: &str) -> io::Result<()> {
-    let mut filepath = cache_dir()?;
-    filepath.push(output_name);
-    File::create(filepath)?.write_all(format!("{filter}\n{img_path}").as_bytes())
+pub struct CacheEntry<'a> {
+    namespace: &'a str,
+    filter: &'a str,
+    img_path: &'a str,
+}
+
+impl<'a> CacheEntry<'a> {
+    pub(crate) fn new(namespace: &'a str, filter: &'a str, img_path: &'a str) -> Self {
+        Self {
+            namespace,
+            filter,
+            img_path,
+        }
+    }
+
+    fn parse_file<'b>(output_name: &str, data: &'b [u8]) -> io::Result<Vec<CacheEntry<'b>>> {
+        use std::io::Error;
+
+        let mut v = Vec::new();
+        let mut strings = data.split(|ch| *ch == 0);
+        while let Some(namespace) = strings.next() {
+            let filter = match strings.next() {
+                Some(s) => s,
+                None => break,
+            };
+            let img_path = strings.next().ok_or_else(|| {
+                Error::other(format!(
+                    "cache file for output {output_name} is in the wrong format (no image path)"
+                ))
+            })?;
+
+            let err = format!("cache file for output {output_name} is not valid utf8");
+            let namespace = str::from_utf8(namespace).map_err(|_| Error::other(err.clone()))?;
+            let filter = str::from_utf8(filter).map_err(|_| Error::other(err.clone()))?;
+            let img_path = str::from_utf8(img_path).map_err(|_| Error::other(err))?;
+
+            v.push(CacheEntry {
+                namespace,
+                filter,
+                img_path,
+            })
+        }
+
+        Ok(v)
+    }
+
+    pub(crate) fn store(self, output_name: &str) -> io::Result<()> {
+        use std::io::Seek;
+
+        let mut filepath = cache_dir()?;
+        filepath.push(output_name);
+
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .read(true)
+            .create(true)
+            .open(filepath)?;
+
+        let mut data = Vec::new();
+        file.read_to_end(&mut data)?;
+        let mut entries = Self::parse_file(output_name, &data)?;
+
+        if let Some(entry) = entries
+            .iter_mut()
+            .find(|elem| elem.namespace == self.namespace)
+        {
+            entry.filter = self.filter;
+            entry.img_path = self.img_path;
+        } else {
+            entries.push(self);
+        }
+
+        file.seek(std::io::SeekFrom::Start(0))?;
+        for entry in entries {
+            let CacheEntry {
+                namespace,
+                filter,
+                img_path,
+            } = entry;
+            file.write_all(format!("{namespace}\0{filter}\0{img_path}\0").as_bytes())?;
+        }
+        Ok(())
+    }
 }
 
 pub(crate) fn store_animation_frames(
@@ -64,28 +143,27 @@ pub fn load_animation_frames(
     Ok(None)
 }
 
-pub fn get_previous_image_path(output_name: &str) -> io::Result<(String, String)> {
+pub fn get_previous_image_filter_and_path(
+    output_name: &str,
+    namespace: &str,
+) -> io::Result<(String, String)> {
     let mut filepath = cache_dir()?;
     clean_previous_verions(&filepath);
 
     filepath.push(output_name);
-    if !filepath.is_file() {
-        return Ok(("".to_string(), "".to_string()));
-    }
 
-    let mut buf = Vec::with_capacity(64);
-    File::open(filepath)?.read_to_end(&mut buf)?;
-    let buf = String::from_utf8(buf)
-        .map_err(|e| std::io::Error::other(format!("failed to decode bytes: {e}")))?;
+    let data = std::fs::read(filepath)?;
+    let entries = CacheEntry::parse_file(output_name, &data)?;
 
-    match buf.split_once("\n") {
-        Some(buf) => Ok((buf.0.to_string(), buf.1.to_string())),
-        None => Err(std::io::Error::other("failed to read image filter")),
+    match entries.iter().find(|entry| entry.namespace == namespace) {
+        Some(entry) => Ok((entry.filter.to_string(), entry.img_path.to_string())),
+        None => Ok(("".to_string(), "".to_string())),
     }
 }
 
-pub fn load(output_name: &str) -> io::Result<()> {
-    let (filter, img_path) = get_previous_image_path(output_name)?;
+pub fn load(output_name: &str, namespace: &str) -> io::Result<()> {
+    let (filter, img_path) = get_previous_image_filter_and_path(output_name, namespace)?;
+
     if img_path.is_empty() {
         return Ok(());
     }
@@ -105,6 +183,7 @@ pub fn load(output_name: &str) -> io::Result<()> {
         .args([
             &format!("--outputs={output_name}"),
             &format!("--filter={filter}"),
+            &format!("--namespace={namespace}"),
             "--transition-type=none",
             &img_path,
         ])
