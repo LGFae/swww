@@ -45,7 +45,7 @@ impl IpcErrorKind {
             Self::Connect => "failed to connect to socket",
             Self::Bind => "failed to bind to socket",
             Self::Listen => "failed to listen on socket",
-            Self::NoSocketFile => "Socket file not found. Are you sure swww-daemon is running?",
+            Self::NoSocketFile => "Socket file not found. Make sure swww-daemon is running, and that the --namespace argument matches for the client and the daemon",
             Self::SetTimeout => "failed to set read timeout for socket",
             Self::BadCode => "invalid message code",
             Self::MalformedMsg => "malformed ancillary message",
