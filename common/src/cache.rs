@@ -70,6 +70,7 @@ impl<'a> CacheEntry<'a> {
             .write(true)
             .read(true)
             .create(true)
+            .truncate(false)
             .open(filepath)?;
 
         let mut data = Vec::new();
