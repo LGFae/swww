@@ -96,6 +96,9 @@ impl<'a> CacheEntry<'a> {
             } = entry;
             file.write_all(format!("{namespace}\0{filter}\0{img_path}\0").as_bytes())?;
         }
+
+        let len = file.stream_position().unwrap_or(0);
+        file.set_len(len)?;
         Ok(())
     }
 }
