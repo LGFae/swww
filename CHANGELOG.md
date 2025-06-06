@@ -1,5 +1,17 @@
 ### Unreleased
 
+Another small update with **very** important bug fixes.
+
+#### Fixes
+
+  * We prioritize fractional-scale events over preferred-buffer-scale ones.
+  This should fix _many_ of our long-standing issues with fractional scaling.
+  Thanks a lot to @AryanRarestand who hard-coded a solution that led me to find
+  the problem.
+  * do not accept `wl_output` modes that not current, as they are considered
+  deprecated by the protocol.
+  * No longer spaming standard output with warnings that we are ignoring
+  `preferred-buffer-transform` events.
 
 ### 0.10.1
 
