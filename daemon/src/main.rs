@@ -473,7 +473,7 @@ impl wayland::wl_output::EvHandler for Daemon {
             let mut wallpaper = wallpaper.borrow_mut();
             if wallpaper.has_output(sender_id) {
                 match NonZeroI32::new(factor) {
-                    Some(factor) => wallpaper.set_scale(Scale::Whole(factor)),
+                    Some(factor) => wallpaper.set_scale(Scale::Output(factor)),
                     None => error!("received scale factor of 0 from compositor"),
                 }
                 break;
@@ -516,7 +516,7 @@ impl wayland::wl_surface::EvHandler for Daemon {
             let mut wallpaper = wallpaper.borrow_mut();
             if wallpaper.has_surface(sender_id) {
                 match NonZeroI32::new(factor) {
-                    Some(factor) => wallpaper.set_scale(Scale::Whole(factor)),
+                    Some(factor) => wallpaper.set_scale(Scale::Preferred(factor)),
                     None => error!("received scale factor of 0 from compositor"),
                 }
                 break;
@@ -529,7 +529,7 @@ impl wayland::wl_surface::EvHandler for Daemon {
         _sender_id: ObjectId,
         _transform: wayland::wl_output::Transform,
     ) {
-        warn!("Received PreferredBufferTransform. We currently ignore those")
+        //Ignore these for now
     }
 }
 
