@@ -15,33 +15,52 @@ use cli::{CliImage, Filter, ResizeStrategy, Swww};
 fn main() -> Result<(), String> {
     let swww = Swww::parse();
 
-    let namespace = match &swww {
-        Swww::Clear(clear) => &clear.namespace,
-        Swww::Restore(restore) => &restore.namespace,
+    let all = match &swww {
+        Swww::Clear(clear) => clear.all,
+        Swww::Restore(restore) => restore.all,
         Swww::ClearCache => {
             return cache::clean().map_err(|e| format!("failed to clean the cache: {e}"))
         }
-        Swww::Img(img) => &img.namespace,
-        Swww::Kill(kill) => &kill.namespace,
-        Swww::Query(query) => &query.namespace,
+        Swww::Img(img) => img.all,
+        Swww::Kill(kill) => kill.all,
+        Swww::Query(query) => query.all,
     };
 
-    let socket = IpcSocket::connect(namespace).map_err(|err| err.to_string())?;
-    loop {
-        RequestSend::Ping.send(&socket)?;
-        let bytes = socket.recv().map_err(|err| err.to_string())?;
-        let answer = Answer::receive(bytes);
-        if let Answer::Ping(configured) = answer {
-            if configured {
-                break;
+    let namespaces = if all {
+        IpcSocket::<Client>::all_namespaces().map_err(|e| e.to_string())?
+    } else {
+        let namespace = match &swww {
+            Swww::Clear(clear) => &clear.namespace,
+            Swww::Restore(restore) => &restore.namespace,
+            Swww::ClearCache => {
+                return cache::clean().map_err(|e| format!("failed to clean the cache: {e}"))
             }
-        } else {
-            return Err("Daemon did not return Answer::Ping, as expected".to_string());
-        }
-        std::thread::sleep(Duration::from_millis(1));
-    }
+            Swww::Img(img) => &img.namespace,
+            Swww::Kill(kill) => &kill.namespace,
+            Swww::Query(query) => &query.namespace,
+        };
+        vec![namespace.to_owned()]
+    };
 
-    process_swww_args(&swww, namespace)
+    for namespace in namespaces {
+        let socket = IpcSocket::connect(&namespace).map_err(|err| err.to_string())?;
+        loop {
+            RequestSend::Ping.send(&socket)?;
+            let bytes = socket.recv().map_err(|err| err.to_string())?;
+            let answer = Answer::receive(bytes);
+            if let Answer::Ping(configured) = answer {
+                if configured {
+                    break;
+                }
+            } else {
+                return Err("Daemon did not return Answer::Ping, as expected".to_string());
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+
+        process_swww_args(&swww, &namespace)?;
+    }
+    Ok(())
 }
 
 fn process_swww_args(args: &Swww, namespace: &str) -> Result<(), String> {
@@ -302,6 +321,7 @@ fn restore_output(output: &str, namespace: &str) -> Result<(), String> {
 
     process_swww_args(
         &Swww::Img(cli::Img {
+            all: false,
             image: cli::parse_image(&img_path)?,
             outputs: output.to_string(),
             namespace: namespace.to_string(),

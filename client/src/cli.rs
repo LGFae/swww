@@ -200,6 +200,10 @@ pub enum Swww {
 
 #[derive(Parser)]
 pub struct Clear {
+    /// Clear all swww-daemon instances (all namespaces)
+    #[arg(short, long, default_value = "false")]
+    pub all: bool,
+
     /// Color to fill the screen with.
     ///
     /// Must be given in rrggbb format (note there is no prepended '#').
@@ -270,6 +274,9 @@ pub enum ResizeStrategy {
 
 #[derive(Parser)]
 pub struct Restore {
+    /// Restore all swww-daemon instances (all namespaces)
+    #[arg(short, long, default_value = "false")]
+    pub all: bool,
     /// The daemon's namespace.
     ///
     /// The resulting namespace will be 'swww-daemon' appended to what you pass in this argument.
@@ -287,6 +294,10 @@ pub struct Restore {
 
 #[derive(Parser)]
 pub struct Img {
+    /// Set the image for all swww-daemon instances (all namespaces)
+    #[arg(short, long, default_value = "false")]
+    pub all: bool,
+
     /// Path of image or hexcode (starting with 0x) to display
     #[arg(value_parser = parse_image)]
     pub image: CliImage,
