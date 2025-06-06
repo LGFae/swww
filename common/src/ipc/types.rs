@@ -153,16 +153,31 @@ impl PixelFormat {
 
 #[derive(Clone, Copy, Debug)]
 pub enum Scale {
-    Whole(NonZeroI32),
+    /// sent by wl_output::scale events
+    Output(NonZeroI32),
+    /// sent by wl_surface::preferred_buffer_scale events
+    Preferred(NonZeroI32),
+    /// sent by wp_fractional_scale_v1::preferred_scale events
     Fractional(NonZeroI32),
 }
 
 impl Scale {
     #[inline]
     #[must_use]
+    pub fn priority(&self) -> u32 {
+        match self {
+            Scale::Output(_) => 0,
+            Scale::Preferred(_) => 1,
+            Scale::Fractional(_) => 2,
+        }
+    }
+
+    #[inline]
+    #[must_use]
     pub fn mul_dim(&self, width: i32, height: i32) -> (i32, i32) {
         match self {
-            Scale::Whole(i) => (width * i.get(), height * i.get()),
+            Scale::Output(i) => (width * i.get(), height * i.get()),
+            Scale::Preferred(i) => (width * i.get(), height * i.get()),
             Scale::Fractional(f) => {
                 let scale = f.get() as f64 / 120.0;
                 let width = (width as f64 * scale).round() as i32;
@@ -176,7 +191,8 @@ impl Scale {
     #[must_use]
     pub fn div_dim(&self, width: i32, height: i32) -> (i32, i32) {
         match self {
-            Scale::Whole(i) => (width / i.get(), height / i.get()),
+            Scale::Output(i) => (width / i.get(), height / i.get()),
+            Scale::Preferred(i) => (width / i.get(), height / i.get()),
             Scale::Fractional(f) => {
                 let scale = 120.0 / f.get() as f64;
                 let width = (width as f64 * scale).round() as i32;
@@ -190,10 +206,12 @@ impl Scale {
 impl PartialEq for Scale {
     fn eq(&self, other: &Self) -> bool {
         (match self {
-            Self::Whole(i) => i.get() * 120,
+            Self::Output(i) => i.get() * 120,
+            Self::Preferred(i) => i.get() * 120,
             Self::Fractional(f) => f.get(),
         }) == (match other {
-            Self::Whole(i) => i.get() * 120,
+            Self::Output(i) => i.get() * 120,
+            Self::Preferred(i) => i.get() * 120,
             Self::Fractional(f) => f.get(),
         })
     }
@@ -205,7 +223,8 @@ impl fmt::Display for Scale {
             f,
             "{}",
             match self {
-                Scale::Whole(i) => i.get() as f32,
+                Scale::Output(i) => i.get() as f32,
+                Scale::Preferred(i) => i.get() as f32,
                 Scale::Fractional(f) => f.get() as f32 / 120.0,
             }
         )
@@ -258,12 +277,16 @@ impl BgInfo {
         i += 8;
 
         match scale_factor {
-            Scale::Whole(value) => {
+            Scale::Output(value) => {
                 buf[i] = 0;
                 buf[i + 1..i + 5].copy_from_slice(&value.get().to_ne_bytes());
             }
-            Scale::Fractional(value) => {
+            Scale::Preferred(value) => {
                 buf[i] = 1;
+                buf[i + 1..i + 5].copy_from_slice(&value.get().to_ne_bytes());
+            }
+            Scale::Fractional(value) => {
+                buf[i] = 2;
                 buf[i + 1..i + 5].copy_from_slice(&value.get().to_ne_bytes());
             }
         }
@@ -302,7 +325,13 @@ impl BgInfo {
         i += 8;
 
         let scale_factor = if bytes[i] == 0 {
-            Scale::Whole(
+            Scale::Output(
+                i32::from_ne_bytes(bytes[i + 1..i + 5].try_into().unwrap())
+                    .try_into()
+                    .unwrap(),
+            )
+        } else if bytes[i] == 1 {
+            Scale::Preferred(
                 i32::from_ne_bytes(bytes[i + 1..i + 5].try_into().unwrap())
                     .try_into()
                     .unwrap(),

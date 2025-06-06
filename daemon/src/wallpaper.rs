@@ -64,7 +64,7 @@ impl Default for WallpaperInner {
             desc: None,
             width: unsafe { NonZeroI32::new_unchecked(4) },
             height: unsafe { NonZeroI32::new_unchecked(4) },
-            scale_factor: Scale::Whole(unsafe { NonZeroI32::new_unchecked(1) }),
+            scale_factor: Scale::Output(unsafe { NonZeroI32::new_unchecked(1) }),
             transform: wl_output::Transform::normal,
         }
     }
@@ -246,7 +246,7 @@ impl Wallpaper {
 
     pub fn set_scale(&mut self, scale: Scale) {
         let staging = &mut self.inner_staging;
-        if staging.scale_factor == scale {
+        if staging.scale_factor == scale || scale.priority() < staging.scale_factor.priority() {
             return;
         }
 
@@ -316,7 +316,12 @@ impl Wallpaper {
 
         if staging.scale_factor != inner.scale_factor || staging.transform != inner.transform {
             match staging.scale_factor {
-                Scale::Whole(i) => {
+                Scale::Output(i) => {
+                    // unset destination
+                    wp_viewport::req::set_destination(backend, self.wp_viewport, -1, -1).unwrap();
+                    wl_surface::req::set_buffer_scale(backend, self.wl_surface, i.get()).unwrap();
+                }
+                Scale::Preferred(i) => {
                     // unset destination
                     wp_viewport::req::set_destination(backend, self.wp_viewport, -1, -1).unwrap();
                     wl_surface::req::set_buffer_scale(backend, self.wl_surface, i.get()).unwrap();
