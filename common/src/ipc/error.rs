@@ -1,5 +1,6 @@
 use std::error::Error;
 use std::fmt;
+use std::path::PathBuf;
 
 use rustix::io::Errno;
 
@@ -27,7 +28,7 @@ pub enum IpcErrorKind {
     /// Listening on socket failed
     Listen,
     /// Socket file wasn't found
-    NoSocketFile,
+    NoSocketFile(PathBuf),
     /// Socket timeout couldn't be set
     SetTimeout,
     /// IPC contained invalid identification code
@@ -39,24 +40,30 @@ pub enum IpcErrorKind {
 }
 
 impl IpcErrorKind {
-    fn description(&self) -> &'static str {
+    fn description(&self) -> String {
         match self {
-            Self::Socket => "failed to create socket file descriptor",
-            Self::Connect => "failed to connect to socket",
-            Self::Bind => "failed to bind to socket",
-            Self::Listen => "failed to listen on socket",
-            Self::NoSocketFile => "Socket file not found. Are you sure swww-daemon is running?",
-            Self::SetTimeout => "failed to set read timeout for socket",
-            Self::BadCode => "invalid message code",
-            Self::MalformedMsg => "malformed ancillary message",
-            Self::Read => "failed to receive message",
+            Self::Socket => "failed to create socket file descriptor".to_string(),
+            Self::Connect => "failed to connect to socket".to_string(),
+            Self::Bind => "failed to bind to socket".to_string(),
+            Self::Listen => "failed to listen on socket".to_string(),
+            Self::NoSocketFile(path) => {
+                format!(
+                    "Socket file '{:?}' not found. Make sure swww-daemon is running, \
+                    and that the --namespace argument matches for the client and the daemon",
+                    path
+                )
+            }
+            Self::SetTimeout => "failed to set read timeout for socket".to_string(),
+            Self::BadCode => "invalid message code".to_string(),
+            Self::MalformedMsg => "malformed ancillary message".to_string(),
+            Self::Read => "failed to receive message".to_string(),
         }
     }
 }
 
 impl fmt::Display for IpcError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.kind.description())
+        write!(f, "{}", self.kind.description())
     }
 }
 

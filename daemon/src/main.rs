@@ -23,7 +23,6 @@ use std::{
     fs,
     io::{IsTerminal, Write},
     num::NonZeroI32,
-    path::Path,
     rc::Rc,
     sync::atomic::{AtomicBool, Ordering},
     time::Duration,
@@ -63,6 +62,7 @@ struct Daemon {
     wallpapers: Vec<Rc<RefCell<Wallpaper>>>,
     transition_animators: Vec<TransitionAnimator>,
     image_animators: Vec<ImageAnimator>,
+    namespace: String,
     use_cache: bool,
     fractional_scale_manager: Option<ObjectId>,
 
@@ -109,6 +109,7 @@ impl Daemon {
             wallpapers: Vec::new(),
             transition_animators: Vec::new(),
             image_animators: Vec::new(),
+            namespace: args.namespace,
             use_cache: !args.no_cache,
             fractional_scale_manager,
             poll_time: None,
@@ -462,6 +463,7 @@ impl wayland::wl_output::EvHandler for Daemon {
                 if wallpaper.borrow_mut().commit_surface_changes(
                     &mut self.backend,
                     &mut self.objman,
+                    &self.namespace,
                     self.use_cache,
                 ) {
                     self.stop_animations(&[wallpaper.clone()]);
@@ -619,6 +621,7 @@ impl wayland::wp_fractional_scale_v1::EvHandler for Daemon {
                         if wallpaper.borrow_mut().commit_surface_changes(
                             &mut self.backend,
                             &mut self.objman,
+                            &self.namespace,
                             self.use_cache,
                         ) {
                             self.stop_animations(&[wallpaper.clone()]);
@@ -717,7 +720,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // create the socket listener and setup the signal handlers
     // this will also return an error if there is an `swww-daemon` instance already
     // running
-    let listener = SocketWrapper::new()?;
+    let listener = SocketWrapper::new(&cli.namespace)?;
     setup_signals();
 
     // use the initializer to create the Daemon, then drop it to free up the memory
@@ -748,7 +751,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let mut fds = [
             PollFd::new(&daemon.backend.wayland_fd, PollFlags::IN),
-            PollFd::new(&listener.0, PollFlags::IN),
+            PollFd::new(&listener.fd, PollFlags::IN),
         ];
 
         // Note: we cannot use rustix::io::retry_on_intr because it makes CTRL-C fail on the
@@ -800,7 +803,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         if socket_event {
             // See above note about rustix::retry_on_intr
-            match rustix::net::accept(&listener.0) {
+            match rustix::net::accept(&listener.fd) {
                 Ok(stream) => daemon.recv_socket_msg(IpcSocket::new(stream)),
                 Err(rustix::io::Errno::INTR | rustix::io::Errno::WOULDBLOCK) => continue,
                 Err(e) => return Err(Box::new(e)),
@@ -843,14 +846,16 @@ fn setup_signals() {
 }
 
 /// This is a wrapper that makes sure to delete the socket when it is dropped
-struct SocketWrapper(OwnedFd);
+struct SocketWrapper {
+    fd: OwnedFd,
+    namespace: String,
+}
 impl SocketWrapper {
-    fn new() -> Result<Self, String> {
-        let addr = IpcSocket::<Server>::path();
-        let addr = Path::new(addr);
+    fn new(namespace: &str) -> Result<Self, String> {
+        let addr = IpcSocket::<Server>::path(namespace);
 
         if addr.exists() {
-            if is_daemon_running()? {
+            if is_daemon_running(namespace)? {
                 return Err(
                     "There is an swww-daemon instance already running on this socket!".to_string(),
                 );
@@ -859,7 +864,7 @@ impl SocketWrapper {
                     "socket file {} was not deleted when the previous daemon exited",
                     addr.to_string_lossy()
                 );
-                if let Err(e) = std::fs::remove_file(addr) {
+                if let Err(e) = std::fs::remove_file(&addr) {
                     return Err(format!("failed to delete previous socket: {e}"));
                 }
             }
@@ -877,20 +882,23 @@ impl SocketWrapper {
             }
         }
 
-        let socket = IpcSocket::server().map_err(|err| err.to_string())?;
+        let socket = IpcSocket::server(namespace).map_err(|err| err.to_string())?;
 
         debug!("Created socket in {:?}", addr);
-        Ok(Self(socket.to_fd()))
+        Ok(Self {
+            fd: socket.to_fd(),
+            namespace: namespace.to_string(),
+        })
     }
 }
 
 impl Drop for SocketWrapper {
     fn drop(&mut self) {
-        let addr = IpcSocket::<Server>::path();
-        if let Err(e) = fs::remove_file(Path::new(addr)) {
-            error!("Failed to remove socket at {addr}: {e}");
+        let addr = IpcSocket::<Server>::path(&self.namespace);
+        if let Err(e) = fs::remove_file(&addr) {
+            error!("Failed to remove socket at {addr:?}: {e}");
         }
-        info!("Removed socket at {addr}");
+        info!("Removed socket at {addr:?}");
     }
 }
 
@@ -951,8 +959,8 @@ fn make_logger(quiet: bool) {
     .unwrap();
 }
 
-pub fn is_daemon_running() -> Result<bool, String> {
-    let sock = match IpcSocket::connect() {
+pub fn is_daemon_running(namespace: &str) -> Result<bool, String> {
+    let sock = match IpcSocket::connect(namespace) {
         Ok(s) => s,
         // likely a connection refused; either way, this is a reliable signal there's no surviving
         // daemon.
