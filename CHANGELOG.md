@@ -1,5 +1,8 @@
 ### Unreleased
 
+
+### 0.10.2
+
 Another small update with **very** important bug fixes.
 
 #### Fixes
