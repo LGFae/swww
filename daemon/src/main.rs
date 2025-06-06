@@ -439,16 +439,19 @@ impl wayland::wl_output::EvHandler for Daemon {
     fn mode(
         &mut self,
         sender_id: ObjectId,
-        _flags: wayland::wl_output::Mode,
+        flags: wayland::wl_output::Mode,
         width: i32,
         height: i32,
         _refresh: i32,
     ) {
-        for wallpaper in self.wallpapers.iter() {
-            let mut wallpaper = wallpaper.borrow_mut();
-            if wallpaper.has_output(sender_id) {
-                wallpaper.set_dimensions(width, height);
-                break;
+        // the protocol states we should not rely on non-current modes
+        if matches!(flags, wayland::wl_output::Mode::CURRENT) {
+            for wallpaper in self.wallpapers.iter() {
+                let mut wallpaper = wallpaper.borrow_mut();
+                if wallpaper.has_output(sender_id) {
+                    wallpaper.set_dimensions(width, height);
+                    break;
+                }
             }
         }
     }
