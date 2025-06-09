@@ -1,5 +1,17 @@
 ### Unreleased
 
+#### BREAKING
+
+  * `swww query` now returns information in the following format:
+  `<namespace>: OUTPUT: SIZE, scale: SCALE, currently displaying: IMAGE_OR_COLOR` 
+
+#### Additions
+
+  * every command (except `clear-cache`) now accepts a `-n|--namespace`
+  argument. This namespace will then be appended to `swww-daemon` to make up the
+  wayland namespace of the daemon's layer surface.
+  * as a convenience, every command (except `clear-cache`) also accepts a
+  `-a|--all` flag, that lets the user send commands to all namespaces at once.
 
 ### 0.10.3
 
