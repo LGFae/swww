@@ -1,6 +1,12 @@
 ### Unreleased
 
 
+### 0.10.3
+
+@shumvgolove fixed a very dumb mistake I made when detecting the output
+current mode. This could potentially break a few setups, so I am releasing it
+now in a minor release. Apologies for the inconvenience.
+
 ### 0.10.2
 
 Another small update with **very** important bug fixes.
