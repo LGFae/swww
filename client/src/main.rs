@@ -73,7 +73,7 @@ fn process_swww_args(args: &Swww, namespace: &str) -> Result<(), String> {
     let bytes = socket.recv().map_err(|err| err.to_string())?;
     drop(socket);
     match Answer::receive(bytes) {
-        Answer::Info(info) => info.iter().for_each(|i| println!("{}", i)),
+        Answer::Info(info) => info.iter().for_each(|i| println!("{namespace}: {}", i)),
         Answer::Ok => {
             if let Swww::Kill(kill) = args {
                 #[cfg(debug_assertions)]
