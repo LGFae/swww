@@ -445,7 +445,7 @@ impl wayland::wl_output::EvHandler for Daemon {
         _refresh: i32,
     ) {
         // the protocol states we should not rely on non-current modes
-        if matches!(flags, wayland::wl_output::Mode::CURRENT) {
+        if flags.contains(wayland::wl_output::Mode::CURRENT) {
             for wallpaper in self.wallpapers.iter() {
                 let mut wallpaper = wallpaper.borrow_mut();
                 if wallpaper.has_output(sender_id) {
