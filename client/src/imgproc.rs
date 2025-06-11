@@ -22,7 +22,7 @@ use super::cli;
 
 pub enum Format {
     Image(ImageFormat),
-    Svg(Tree),
+    Svg(Box<Tree>),
 }
 
 impl std::fmt::Debug for Format {
@@ -70,7 +70,7 @@ impl ImgBuf {
             None => match Tree::from_data(&bytes, &Options::default()) {
                 Ok(tree) => {
                     return Ok(Self {
-                        format: Format::Svg(tree),
+                        format: Format::Svg(Box::new(tree)),
                         bytes: bytes.into_boxed_slice(),
                         is_animated: false,
                     })
@@ -132,10 +132,7 @@ impl ImgBuf {
             }
 
             Format::Svg(tree) => {
-                use resvg::{
-                    tiny_skia::{NonZeroRect, PixmapMut},
-                    usvg::Transform,
-                };
+                use resvg::{tiny_skia::PixmapMut, usvg::Transform};
                 let mut bytes = vec![0; (width * height * 4) as usize];
                 let mut pixmap = match PixmapMut::from_bytes(&mut bytes, width, height) {
                     Some(pixmap) => pixmap,
@@ -147,7 +144,6 @@ impl ImgBuf {
                     let w = width as f32;
                     let h = height as f32;
                     let img_r = w / h;
-                    //(w / size.width(), h / size.height())
                     if ratio < img_r {
                         let scale = h / size.height();
                         ((w - size.width() * scale) / 2.0, 0.0, scale, scale)
@@ -275,7 +271,7 @@ impl Image {
         }
     }
 
-    pub fn to_bytes(self) -> Box<[u8]> {
+    pub fn into_bytes(self) -> Box<[u8]> {
         self.bytes
     }
 }

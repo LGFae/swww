@@ -258,24 +258,9 @@ fn make_img_request(
                         };
                         let filter = img.filter.to_string();
                         let img_raw = imgbuf.decode(pixel_format, dim.0, dim.1)?;
-                        let img = match img.resize {
-                            ResizeStrategy::No => img_pad(&img_raw, dim, &img.fill_color)?,
-                            ResizeStrategy::Crop => {
-                                img_resize_crop(&img_raw, dim, make_filter(&img.filter))?
-                            }
-                            ResizeStrategy::Fit => img_resize_fit(
-                                &img_raw,
-                                dim,
-                                make_filter(&img.filter),
-                                &img.fill_color,
-                            )?,
-                            ResizeStrategy::Stretch => {
-                                img_resize_stretch(&img_raw, dim, make_filter(&img.filter))?
-                            }
-                        };
                         img_req_builder.push(
                             ipc::ImgSend {
-                                img,
+                                img: img_raw.into_bytes(),
                                 path,
                                 dim,
                                 format: pixel_format,
