@@ -8,6 +8,9 @@ swww-img
 
 # OPTIONS
 
+*-a*,*--all*
+	Send this command to all active `swww-daemon` namespaces.
+
 *-f*, *--filter* <FILTER>
 	Filter to use when scaling images
 
@@ -28,6 +31,20 @@ swww-img
 	case the *--filter* flag will have no effect.
 
 	Default is Lanczos3.
+
+*-n*,*--namespace* <namespace>
+	Which wayland namespace to send this command to.
+
+	You can specify this option multiple times to send commands to multiple
+	namespaces at once: `swww img -n <namespace1> -n <namespace 2>`.
+
+	This affects the name of the `swww-daemon` socket we will use to
+	communicate with. Specifically, our socket name is
+	`${WAYLAND_DISPLAY}-swww-daemon.<specified namespace>.socket`.
+
+	Some compositors can have several different wallpapers per output. This
+	allows you to differentiate between them. Most users will probably not have
+	to set anything in this option.
 
 *--no-resize*
 	Do not resize the image. Equivalent to *--resize* _no_.

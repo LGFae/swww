@@ -35,12 +35,12 @@ fn spell_check_code_and_man_pages() {
         }
         Err(e) => match e.kind() {
             std::io::ErrorKind::NotFound => {
-                eprintln!(
+                panic!(
                     "'codespell' not found. Please install in order to do spell checking:
                           `pip install codespell`"
                 );
             }
-            _ => eprintln!("{e}"),
+            _ => panic!("{e}"),
         },
     }
 }

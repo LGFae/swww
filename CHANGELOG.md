@@ -2,8 +2,15 @@
 
 #### BREAKING
 
+Note: though this are technically breaking changes, they are unlikely to break
+most setups. They are only a problem if you used scripts that relied on
+`swww query` output format, or if you relied on the `swww-daemon` socket file
+name.
+
   * `swww query` now returns information in the following format:
-  `<namespace>: OUTPUT: SIZE, scale: SCALE, currently displaying: IMAGE_OR_COLOR` 
+  `<namespace>: OUTPUT: SIZE, scale: SCALE, currently displaying: IMAGE_OR_COLOR`
+  * we are creating the socket in a slightly different location now:
+  `${XDG_RUNTIME_DIR}/${WAYLAND_DISPLAY}-swww-daemon.<specified namespace>.socket`
 
 #### Additions
 

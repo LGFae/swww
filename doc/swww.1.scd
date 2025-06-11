@@ -53,8 +53,10 @@ protocol*. Typically, _wlr-roots_ based compositors.
 
 # FILES
 *swww* will create the following files in your system:
-	- A socket in _${XDG_RUNTIME_DIR}/swww-${WAYLAND_DISPLAY}.socket_,  or
-	_/tmp/swww/swww-${WAYLAND_DISPLAY}.socket_, if $XDG_RUNTIME_DIR is not set.
+	- A socket in _${XDG_RUNTIME_DIR}/${WAYLAND_DISPLAY}-swww-daemon.<specified
+	namespace>.socket_,  or
+	_/tmp/swww/${WAYLAND_DISPLAY}-swww-daemon.<specificed namespace>.socket_, if
+	$XDG_RUNTIME_DIR is not set.
 	- Cache files in _$XDG_CACHE_HOME/swww_ or _$HOME/.cache/swww_ if
 	  $XDG_CACHE_HOME does not exist. These are used to set the wallpaper to the
 	  previous image when a monitor is (re)connected or turned on.
