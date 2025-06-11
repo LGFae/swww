@@ -29,6 +29,7 @@ image = { version = "0.25", default-features = false, features = [
   "tiff",
   "webp",
 ] }
+resvg = { version = "0.45" }
 fast_image_resize = "5.1"
 clap = { version = "4.5", features = ["derive", "wrap_help", "env"] }
 fastrand = { version = "2.3", default-features = false, features = ["std"] }
