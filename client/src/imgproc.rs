@@ -3,6 +3,8 @@ use image::{
     codecs::{gif::GifDecoder, png::PngDecoder, webp::WebPDecoder},
     AnimationDecoder, DynamicImage, Frames, GenericImageView, ImageFormat,
 };
+use resvg::usvg::{Options, Tree};
+
 use std::{
     io::{stdin, Cursor, Read},
     path::Path,
@@ -18,9 +20,23 @@ use crate::cli::ResizeStrategy;
 
 use super::cli;
 
+pub enum Format {
+    Image(ImageFormat),
+    Svg(Box<Tree>),
+}
+
+impl std::fmt::Debug for Format {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Image(arg0) => f.debug_tuple("Image").field(arg0).finish(),
+            Self::Svg(_) => f.debug_tuple("Svg").finish(),
+        }
+    }
+}
+
 pub struct ImgBuf {
     bytes: Box<[u8]>,
-    format: ImageFormat,
+    format: Format,
     is_animated: bool,
 }
 
@@ -39,7 +55,7 @@ impl ImgBuf {
 
         let reader = image::ImageReader::new(Cursor::new(&bytes))
             .with_guessed_format()
-            .map_err(|e| format!("failed to detect the image's format: {e}"))?;
+            .map_err(|e| format!("failed to read image: {e}"))?;
 
         let format = reader.format();
         let is_animated = match format {
@@ -51,12 +67,25 @@ impl ImgBuf {
                 .map_err(|e| format!("failed to decode Png Image: {e}"))?
                 .is_apng()
                 .map_err(|e| format!("failed to detect if Png is animated: {e}"))?,
-            None => return Err("Unknown image format".to_string()),
+            None => match Tree::from_data(&bytes, &Options::default()) {
+                Ok(tree) => {
+                    return Ok(Self {
+                        format: Format::Svg(Box::new(tree)),
+                        bytes: bytes.into_boxed_slice(),
+                        is_animated: false,
+                    })
+                }
+                Err(e) => {
+                    return Err(format!(
+                        "Unrecognized format by `image` crate. Also failed to decode as `svg`: {e}."
+                    ))
+                }
+            },
             _ => false,
         };
 
         Ok(Self {
-            format: format.unwrap(), // this is ok because we return err earlier if it is None
+            format: Format::Image(format.unwrap()), // this is ok because we return err earlier if it is None
             bytes: bytes.into_boxed_slice(),
             is_animated,
         })
@@ -66,10 +95,46 @@ impl ImgBuf {
         self.is_animated
     }
 
-    /// Decode the ImgBuf into am RgbImage
+    /// Decode the ImgBuf into an RgbImage
+    pub fn decode_prepare(&'_ self) -> DecodeBuffer<'_> {
+        match &self.format {
+            Format::Image(image_format) => {
+                DecodeBuffer::RasterImage(RasterImage((self, image_format)))
+            }
+            Format::Svg(tree) => DecodeBuffer::VectorImage(VectorImage(tree)),
+        }
+    }
+
+    /// Convert this ImgBuf into Frames
+    pub fn as_frames(&'_ self) -> Result<Frames<'_>, String> {
+        match self.format {
+            Format::Image(ImageFormat::Gif) => Ok(GifDecoder::new(Cursor::new(&self.bytes))
+                .map_err(|e| format!("failed to decode gif during animation: {e}"))?
+                .into_frames()),
+            Format::Image(ImageFormat::WebP) => Ok(WebPDecoder::new(Cursor::new(&self.bytes))
+                .map_err(|e| format!("failed to decode webp during animation: {e}"))?
+                .into_frames()),
+            Format::Image(ImageFormat::Png) => Ok(PngDecoder::new(Cursor::new(&self.bytes))
+                .map_err(|e| format!("failed to decode png during animation: {e}"))?
+                .apng()
+                .unwrap() // we detected this earlier
+                .into_frames()),
+            _ => Err(format!(
+                "requested format has no decoder: {:#?}",
+                self.format
+            )),
+        }
+    }
+}
+
+pub struct RasterImage<'a>((&'a ImgBuf, &'a ImageFormat));
+pub struct VectorImage<'a>(&'a Tree);
+
+impl<'a> RasterImage<'a> {
     pub fn decode(&self, format: PixelFormat) -> Result<Image, String> {
-        let mut reader = image::ImageReader::new(Cursor::new(&self.bytes));
-        reader.set_format(self.format);
+        let (imgbuf, image_format) = self.0;
+        let mut reader = image::ImageReader::new(Cursor::new(&imgbuf.bytes));
+        reader.set_format(*image_format);
         let dynimage = reader
             .decode()
             .map_err(|e| format!("failed to decode image: {e}"))?;
@@ -100,29 +165,76 @@ impl ImgBuf {
         })
     }
 
-    /// Convert this ImgBuf into Frames
-    pub fn as_frames(&self) -> Result<Frames, String> {
-        match self.format {
-            ImageFormat::Gif => Ok(GifDecoder::new(Cursor::new(&self.bytes))
-                .map_err(|e| format!("failed to decode gif during animation: {e}"))?
-                .into_frames()),
-            ImageFormat::WebP => Ok(WebPDecoder::new(Cursor::new(&self.bytes))
-                .map_err(|e| format!("failed to decode webp during animation: {e}"))?
-                .into_frames()),
-            ImageFormat::Png => Ok(PngDecoder::new(Cursor::new(&self.bytes))
-                .map_err(|e| format!("failed to decode png during animation: {e}"))?
-                .apng()
-                .unwrap() // we detected this earlier
-                .into_frames()),
-            _ => Err(format!(
-                "requested format has no decoder: {:#?}",
-                self.format
-            )),
-        }
+    pub fn is_animated(&self) -> bool {
+        self.0 .0.is_animated()
+    }
+
+    pub fn as_frames(&self) -> Result<Frames<'_>, String> {
+        self.0 .0.as_frames()
     }
 }
 
-/// Created by decoding an ImgBuf
+impl<'a> VectorImage<'a> {
+    pub fn decode(&self, format: PixelFormat, width: u32, height: u32) -> Result<Image, String> {
+        use resvg::{tiny_skia::PixmapMut, usvg::Transform};
+        let tree = self.0;
+        let scale = {
+            let size = tree.size();
+            let ratio = size.width() / size.height();
+            let w = width as f32;
+            let h = height as f32;
+            let img_r = w / h;
+            if ratio < img_r {
+                h / size.height()
+            } else {
+                w / size.width()
+            }
+        };
+        let transform = Transform::from_scale(scale, scale);
+
+        let (width, height) = (
+            (tree.size().width() * scale) as u32,
+            (tree.size().height() * scale) as u32,
+        );
+        let mut bytes = vec![0; (width * height * 4) as usize];
+        let mut pixmap = match PixmapMut::from_bytes(&mut bytes, width, height) {
+            Some(pixmap) => pixmap,
+            None => return Err("failed to create pixmap to render svg".to_string()),
+        };
+        resvg::render(tree, transform, &mut pixmap);
+        let dynimage =
+            DynamicImage::ImageRgba8(image::RgbaImage::from_raw(width, height, bytes).unwrap());
+
+        let bytes = {
+            let mut img = if format.channels() == 3 {
+                dynimage.into_rgb8().into_raw().into_boxed_slice()
+            } else {
+                dynimage.into_rgba8().into_raw().into_boxed_slice()
+            };
+
+            if format.must_swap_r_and_b_channels() {
+                for pixel in img.chunks_exact_mut(format.channels() as usize) {
+                    pixel.swap(0, 2);
+                }
+            }
+            img
+        };
+
+        Ok(Image {
+            width,
+            height,
+            bytes,
+            format,
+        })
+    }
+}
+
+pub enum DecodeBuffer<'a> {
+    RasterImage(RasterImage<'a>),
+    VectorImage(VectorImage<'a>),
+}
+
+/// Created by decoding a RasterImage or a VectorImage
 pub struct Image {
     width: u32,
     height: u32,
