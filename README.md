@@ -65,6 +65,8 @@ Then in `configuration.nix`:
 
  - Display animated gifs on your desktop
  - Display any image in the formats:
+   * avif
+   (note: must have `dav1d` dependency and compile with `--features=avif` flag)
    * jpeg
    * png
    * gif

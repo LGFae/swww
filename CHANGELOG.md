@@ -19,6 +19,8 @@ name.
   wayland namespace of the daemon's layer surface.
   * as a convenience, every command (except `clear-cache`) also accepts a
   `-a|--all` flag, that lets the user send commands to all namespaces at once.
+  * support `avif` decoding through `dav1d`, with the `--features=avif`
+  compilation option.
 
 ### 0.10.3
 

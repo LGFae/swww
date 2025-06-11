@@ -12,7 +12,8 @@ workspace = true
 [dependencies]
 image = { version = "0.25", default-features = false, features = [
   # all formats, except avif, since avif compiles just rav1d, which is just an
-  # encoder, which we do not care about
+  # encoder, which we do not care about. avif-native is an optional dependency,
+  # since it adds a dependency on dav1d
   "bmp",
   "dds",
   "exr",
@@ -32,6 +33,9 @@ fast_image_resize = "5.1"
 clap = { version = "4.5", features = ["derive", "wrap_help", "env"] }
 fastrand = { version = "2.3", default-features = false, features = ["std"] }
 common = { workspace = true }
+
+[features]
+avif = ["image/avif-native"]
 
 [build-dependencies]
 clap = { version = "4.5", features = ["derive", "env"] }
