@@ -15,47 +15,72 @@ use cli::{CliImage, Filter, ResizeStrategy, Swww};
 fn main() -> Result<(), String> {
     let swww = Swww::parse();
 
-    if let Swww::ClearCache = &swww {
-        return cache::clean().map_err(|e| format!("failed to clean the cache: {e}"));
-    }
-
-    let socket = IpcSocket::connect().map_err(|err| err.to_string())?;
-    loop {
-        RequestSend::Ping.send(&socket)?;
-        let bytes = socket.recv().map_err(|err| err.to_string())?;
-        let answer = Answer::receive(bytes);
-        if let Answer::Ping(configured) = answer {
-            if configured {
-                break;
-            }
-        } else {
-            return Err("Daemon did not return Answer::Ping, as expected".to_string());
+    let all = match &swww {
+        Swww::Clear(clear) => clear.all,
+        Swww::Restore(restore) => restore.all,
+        Swww::ClearCache => {
+            return cache::clean().map_err(|e| format!("failed to clean the cache: {e}"))
         }
-        std::thread::sleep(Duration::from_millis(1));
-    }
+        Swww::Img(img) => img.all,
+        Swww::Kill(kill) => kill.all,
+        Swww::Query(query) => query.all,
+    };
 
-    process_swww_args(&swww)
+    let namespaces = if all {
+        IpcSocket::<Client>::all_namespaces().map_err(|e| e.to_string())?
+    } else {
+        match &swww {
+            Swww::Clear(clear) => clear.namespace.clone(),
+            Swww::Restore(restore) => restore.namespace.clone(),
+            Swww::ClearCache => {
+                return cache::clean().map_err(|e| format!("failed to clean the cache: {e}"))
+            }
+            Swww::Img(img) => img.namespace.clone(),
+            Swww::Kill(kill) => kill.namespace.clone(),
+            Swww::Query(query) => query.namespace.clone(),
+        }
+    };
+
+    for namespace in namespaces {
+        let socket = IpcSocket::connect(&namespace).map_err(|err| err.to_string())?;
+        loop {
+            RequestSend::Ping.send(&socket)?;
+            let bytes = socket.recv().map_err(|err| err.to_string())?;
+            let answer = Answer::receive(bytes);
+            if let Answer::Ping(configured) = answer {
+                if configured {
+                    break;
+                }
+            } else {
+                return Err("Daemon did not return Answer::Ping, as expected".to_string());
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+
+        process_swww_args(&swww, &namespace)?;
+    }
+    Ok(())
 }
 
-fn process_swww_args(args: &Swww) -> Result<(), String> {
-    let request = match make_request(args)? {
+fn process_swww_args(args: &Swww, namespace: &str) -> Result<(), String> {
+    let request = match make_request(args, namespace)? {
         Some(request) => request,
         None => return Ok(()),
     };
-    let socket = IpcSocket::connect().map_err(|err| err.to_string())?;
+    let socket = IpcSocket::connect(namespace).map_err(|err| err.to_string())?;
     request.send(&socket)?;
     let bytes = socket.recv().map_err(|err| err.to_string())?;
     drop(socket);
     match Answer::receive(bytes) {
-        Answer::Info(info) => info.iter().for_each(|i| println!("{}", i)),
+        Answer::Info(info) => info.iter().for_each(|i| println!("{namespace}: {}", i)),
         Answer::Ok => {
-            if let Swww::Kill = args {
+            if let Swww::Kill(_) = args {
                 #[cfg(debug_assertions)]
                 let tries = 20;
                 #[cfg(not(debug_assertions))]
                 let tries = 10;
-                let path = IpcSocket::<Client>::path();
-                let path = Path::new(path);
+                let path = IpcSocket::<Client>::path(namespace);
+                let path = Path::new(&path);
                 for _ in 0..tries {
                     if !path.exists() {
                         return Ok(());
@@ -72,10 +97,10 @@ fn process_swww_args(args: &Swww) -> Result<(), String> {
     Ok(())
 }
 
-fn make_request(args: &Swww) -> Result<Option<RequestSend>, String> {
+fn make_request(args: &Swww, namespace: &str) -> Result<Option<RequestSend>, String> {
     match args {
         Swww::Clear(c) => {
-            let (format, _, _) = get_format_dims_and_outputs(&[])?;
+            let (format, _, _) = get_format_dims_and_outputs(&[], namespace)?;
             let mut color = c.color;
             if format.must_swap_r_and_b_channels() {
                 color.swap(0, 2);
@@ -88,26 +113,28 @@ fn make_request(args: &Swww) -> Result<Option<RequestSend>, String> {
         }
         Swww::Restore(restore) => {
             let requested_outputs = split_cmdline_outputs(&restore.outputs);
-            restore_from_cache(&requested_outputs)?;
+            restore_from_cache(&requested_outputs, namespace)?;
             Ok(None)
         }
         Swww::ClearCache => unreachable!("there is no request for clear-cache"),
         Swww::Img(img) => {
             let requested_outputs = split_cmdline_outputs(&img.outputs);
-            let (format, dims, outputs) = get_format_dims_and_outputs(&requested_outputs)?;
+            let (format, dims, outputs) =
+                get_format_dims_and_outputs(&requested_outputs, namespace)?;
             // let imgbuf = ImgBuf::new(&img.path)?;
 
-            let img_request = make_img_request(img, &dims, format, &outputs)?;
+            let img_request = make_img_request(img, namespace, &dims, format, &outputs)?;
 
             Ok(Some(RequestSend::Img(img_request)))
         }
-        Swww::Kill => Ok(Some(RequestSend::Kill)),
-        Swww::Query => Ok(Some(RequestSend::Query)),
+        Swww::Kill(_) => Ok(Some(RequestSend::Kill)),
+        Swww::Query(_) => Ok(Some(RequestSend::Query)),
     }
 }
 
 fn make_img_request(
     img: &cli::Img,
+    namespace: &str,
     dims: &[(u32, u32)],
     pixel_format: ipc::PixelFormat,
     outputs: &[Vec<String>],
@@ -131,6 +158,7 @@ fn make_img_request(
                         dim,
                         format: pixel_format,
                     },
+                    namespace.to_string(),
                     Filter::Lanczos3.to_string(),
                     outputs,
                     None,
@@ -203,6 +231,7 @@ fn make_img_request(
                         dim,
                         format: pixel_format,
                     },
+                    namespace.to_string(),
                     filter,
                     outputs,
                     animation,
@@ -217,12 +246,13 @@ fn make_img_request(
 #[allow(clippy::type_complexity)]
 fn get_format_dims_and_outputs(
     requested_outputs: &[String],
+    namespace: &str,
 ) -> Result<(ipc::PixelFormat, Vec<(u32, u32)>, Vec<Vec<String>>), String> {
     let mut outputs: Vec<Vec<String>> = Vec::new();
     let mut dims: Vec<(u32, u32)> = Vec::new();
     let mut imgs: Vec<ipc::BgImg> = Vec::new();
 
-    let socket = IpcSocket::connect().map_err(|err| err.to_string())?;
+    let socket = IpcSocket::connect(namespace).map_err(|err| err.to_string())?;
     RequestSend::Query.send(&socket)?;
     let bytes = socket.recv().map_err(|err| err.to_string())?;
     drop(socket);
@@ -269,11 +299,11 @@ fn split_cmdline_outputs(outputs: &str) -> Box<[String]> {
         .collect()
 }
 
-fn restore_from_cache(requested_outputs: &[String]) -> Result<(), String> {
-    let (_, _, outputs) = get_format_dims_and_outputs(requested_outputs)?;
+fn restore_from_cache(requested_outputs: &[String], namespace: &str) -> Result<(), String> {
+    let (_, _, outputs) = get_format_dims_and_outputs(requested_outputs, namespace)?;
 
     for output in outputs.iter().flatten() {
-        if let Err(e) = restore_output(output) {
+        if let Err(e) = restore_output(output, namespace) {
             eprintln!("WARNING: failed to load cache for output {output}: {e}");
         }
     }
@@ -281,32 +311,37 @@ fn restore_from_cache(requested_outputs: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-fn restore_output(output: &str) -> Result<(), String> {
-    let (filter, img_path) = common::cache::get_previous_image_path(output)
+fn restore_output(output: &str, namespace: &str) -> Result<(), String> {
+    let (filter, img_path) = common::cache::get_previous_image_filter_and_path(output, namespace)
         .map_err(|e| format!("failed to get previous image path: {e}"))?;
     if img_path.is_empty() {
         return Err("cache file does not exist".to_string());
     }
 
-    #[allow(deprecated)]
-    process_swww_args(&Swww::Img(cli::Img {
-        image: cli::parse_image(&img_path)?,
-        outputs: output.to_string(),
-        no_resize: false,
-        resize: ResizeStrategy::Crop,
-        fill_color: [0, 0, 0],
-        filter: Filter::from_str(&filter).unwrap_or(Filter::Lanczos3),
-        transition_type: cli::TransitionType::None,
-        transition_step: std::num::NonZeroU8::MAX,
-        transition_duration: 0.0,
-        transition_fps: 30,
-        transition_angle: 0.0,
-        transition_pos: cli::CliPosition {
-            x: cli::CliCoord::Pixel(0.0),
-            y: cli::CliCoord::Pixel(0.0),
-        },
-        invert_y: false,
-        transition_bezier: (0.0, 0.0, 0.0, 0.0),
-        transition_wave: (0.0, 0.0),
-    }))
+    process_swww_args(
+        &Swww::Img(cli::Img {
+            all: false,
+            image: cli::parse_image(&img_path)?,
+            outputs: output.to_string(),
+            namespace: vec![namespace.to_string()],
+            #[allow(deprecated)]
+            no_resize: false,
+            resize: ResizeStrategy::Crop,
+            fill_color: [0, 0, 0],
+            filter: Filter::from_str(&filter).unwrap_or(Filter::Lanczos3),
+            transition_type: cli::TransitionType::None,
+            transition_step: std::num::NonZeroU8::MAX,
+            transition_duration: 0.0,
+            transition_fps: 30,
+            transition_angle: 0.0,
+            transition_pos: cli::CliPosition {
+                x: cli::CliCoord::Pixel(0.0),
+                y: cli::CliCoord::Pixel(0.0),
+            },
+            invert_y: false,
+            transition_bezier: (0.0, 0.0, 0.0, 0.0),
+            transition_wave: (0.0, 0.0),
+        }),
+        namespace,
+    )
 }

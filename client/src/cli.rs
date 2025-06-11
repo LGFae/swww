@@ -189,28 +189,79 @@ pub enum Swww {
     Img(Img),
 
     ///Kills the daemon
-    Kill,
+    Kill(Kill),
 
     ///Asks the daemon to print output information (names and dimensions).
     ///
     ///You may use this to find out valid values for the <swww-img --outputs> option. If you want
     ///more detailed information about your outputs, I would recommend trying wlr-randr.
-    Query,
+    Query(Query),
 }
 
 #[derive(Parser)]
 pub struct Clear {
+    /// Clear all swww-daemon instances (all namespaces)
+    #[arg(short, long, default_value = "false")]
+    pub all: bool,
+
     /// Color to fill the screen with.
     ///
     /// Must be given in rrggbb format (note there is no prepended '#').
     #[arg(value_parser = from_hex, default_value = "000000")]
     pub color: [u8; 3],
 
+    /// The daemon's namespace.
+    ///
+    /// The resulting namespace will be 'swww-daemon' appended to what you pass in this argument.
+    /// For this to work, you must call `swww-daemon --namespace <custom_namespace>` with the same
+    /// value you use here.
+    ///
+    /// You can specify multiple namespaces at once with multiple `--namespaces` arguments. The
+    /// commands will be sent to every namespace you have specified.
+    #[arg(short, long, default_value = "")]
+    pub namespace: Vec<String>,
+
     /// Comma separated list of outputs to display the image at.
     ///
     /// If it isn't set, the image is displayed on all outputs.
     #[clap(short, long, default_value = "")]
     pub outputs: String,
+}
+
+#[derive(Parser)]
+pub struct Kill {
+    /// Kill all swww-daemon instances (all namespaces)
+    #[arg(short, long, default_value = "false")]
+    pub all: bool,
+
+    /// The daemon's namespace.
+    ///
+    /// The resulting namespace will be 'swww-daemon' appended to what you pass in this argument.
+    /// For this to work, you must call `swww-daemon --namespace <custom_namespace>` with the same
+    /// value you use here.
+    ///
+    /// You can specify multiple namespaces at once with multiple `--namespaces` arguments. The
+    /// commands will be sent to every namespace you have specified.
+    #[arg(short, long, default_value = "")]
+    pub namespace: Vec<String>,
+}
+
+#[derive(Parser)]
+pub struct Query {
+    /// Kill all swww-daemon instances (all namespaces)
+    #[arg(short, long, default_value = "false")]
+    pub all: bool,
+
+    /// The daemon's namespace.
+    ///
+    /// The resulting namespace will be 'swww-daemon' appended to what you pass in this argument.
+    /// For this to work, you must call `swww-daemon --namespace <custom_namespace>` with the same
+    /// value you use here.
+    ///
+    /// You can specify multiple namespaces at once with multiple `--namespaces` arguments. The
+    /// commands will be sent to every namespace you have specified.
+    #[arg(short, long, default_value = "")]
+    pub namespace: Vec<String>,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, ValueEnum)]
@@ -232,6 +283,20 @@ pub enum ResizeStrategy {
 
 #[derive(Parser)]
 pub struct Restore {
+    /// Restore all swww-daemon instances (all namespaces)
+    #[arg(short, long, default_value = "false")]
+    pub all: bool,
+    /// The daemon's namespace.
+    ///
+    /// The resulting namespace will be 'swww-daemon' appended to what you pass in this argument.
+    /// For this to work, you must call `swww-daemon --namespace <custom_namespace>` with the same
+    /// value you use here.
+    ///
+    /// You can specify multiple namespaces at once with multiple `--namespaces` arguments. The
+    /// commands will be sent to every namespace you have specified.
+    #[arg(short, long, default_value = "")]
+    pub namespace: Vec<String>,
+
     /// Comma separated list of outputs to restore.
     ///
     /// If it isn't set, all outputs will be restored.
@@ -241,6 +306,10 @@ pub struct Restore {
 
 #[derive(Parser)]
 pub struct Img {
+    /// Set the image for all swww-daemon instances (all namespaces)
+    #[arg(short, long, default_value = "false")]
+    pub all: bool,
+
     /// Path of image or hexcode (starting with 0x) to display
     #[arg(value_parser = parse_image)]
     pub image: CliImage,
@@ -250,6 +319,17 @@ pub struct Img {
     /// If it isn't set, the image is displayed on all outputs.
     #[arg(short, long, default_value = "")]
     pub outputs: String,
+
+    /// The daemon's namespace.
+    ///
+    /// The resulting namespace will be 'swww-daemon' appended to what you pass in this argument.
+    /// For this to work, you must call `swww-daemon --namespace <custom_namespace>` with the same
+    /// value you use here.
+    ///
+    /// You can specify multiple namespaces at once with multiple `--namespaces` arguments. The
+    /// commands will be sent to every namespace you have specified.
+    #[arg(short, long, default_value = "")]
+    pub namespace: Vec<String>,
 
     /// Do not resize the image. Equivalent to `--resize=no`
     ///
@@ -376,10 +456,6 @@ pub struct Img {
     #[arg(long, env = "SWWW_TRANSITION_POS", default_value = "center", value_parser=parse_coords)]
     pub transition_pos: CliPosition,
 
-    /// inverts the y position sent in 'transition_pos' flag
-    #[arg(long, env = "INVERT_Y", default_value = "false")]
-    pub invert_y: bool,
-
     ///bezier curve to use for the transition
     ///https://cubic-bezier.com is a good website to get these values from
     ///
@@ -390,6 +466,10 @@ pub struct Img {
     ///currently only used for 'wave' transition to control the width and height of each wave
     #[arg(long, env = "SWWW_TRANSITION_WAVE", default_value = "20,20", value_parser = parse_wave)]
     pub transition_wave: (f32, f32),
+
+    /// inverts the y position sent in 'transition_pos' flag
+    #[arg(long, env = "INVERT_Y", default_value = "false")]
+    pub invert_y: bool,
 }
 
 fn parse_wave(raw: &str) -> Result<(f32, f32), String> {

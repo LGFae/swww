@@ -4,7 +4,7 @@ swww-daemon(1)
 swww-daemon
 
 # SYNOPSIS
-swww-daemon [-q|--quiet] [-f|--format <xrgb|xbgr|rgb|bgr>] [--no-cache]
+swww-daemon [OPTIONS]
 
 # OPTIONS
 
@@ -22,6 +22,18 @@ swww-daemon [-q|--quiet] [-f|--format <xrgb|xbgr|rgb|bgr>] [--no-cache]
 	We do not accept layers `top` and `overlay` because those would make your
 	desktoop unusable by simply putting an image on top of everything else. If
 	there is ever a use case for these, we can reconsider it.
+
+*-n*,*--namespace* <namespace>
+	Which wayland namespace to append to `swww-daemon`.
+
+	The result namespace will the `swww-daemon<specified namespace>`. This also
+	affects the name of the `swww-daemon` socket we will use to communicate
+	with the `client`. Specifically, our socket name is
+	`${WAYLAND_DISPLAY}-swww-daemon.<specified namespace>.socket`.
+
+	Some compositors can have several different wallpapers per output. This
+	allows you to differentiate between them. Most users will probably not have
+	to set anything in this option.
 
 *--no-cache*
 	Don't search the cache for the last wallpaper for each output.
