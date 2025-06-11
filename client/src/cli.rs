@@ -215,8 +215,11 @@ pub struct Clear {
     /// The resulting namespace will be 'swww-daemon' appended to what you pass in this argument.
     /// For this to work, you must call `swww-daemon --namespace <custom_namespace>` with the same
     /// value you use here.
+    ///
+    /// You can specify multiple namespaces at once with multiple `--namespaces` arguments. The
+    /// commands will be sent to every namespace you have specified.
     #[arg(short, long, default_value = "")]
-    pub namespace: String,
+    pub namespace: Vec<String>,
 
     /// Comma separated list of outputs to display the image at.
     ///
@@ -236,8 +239,11 @@ pub struct Kill {
     /// The resulting namespace will be 'swww-daemon' appended to what you pass in this argument.
     /// For this to work, you must call `swww-daemon --namespace <custom_namespace>` with the same
     /// value you use here.
+    ///
+    /// You can specify multiple namespaces at once with multiple `--namespaces` arguments. The
+    /// commands will be sent to every namespace you have specified.
     #[arg(short, long, default_value = "")]
-    pub namespace: String,
+    pub namespace: Vec<String>,
 }
 
 #[derive(Parser)]
@@ -251,8 +257,11 @@ pub struct Query {
     /// The resulting namespace will be 'swww-daemon' appended to what you pass in this argument.
     /// For this to work, you must call `swww-daemon --namespace <custom_namespace>` with the same
     /// value you use here.
+    ///
+    /// You can specify multiple namespaces at once with multiple `--namespaces` arguments. The
+    /// commands will be sent to every namespace you have specified.
     #[arg(short, long, default_value = "")]
-    pub namespace: String,
+    pub namespace: Vec<String>,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, ValueEnum)]
@@ -282,8 +291,11 @@ pub struct Restore {
     /// The resulting namespace will be 'swww-daemon' appended to what you pass in this argument.
     /// For this to work, you must call `swww-daemon --namespace <custom_namespace>` with the same
     /// value you use here.
+    ///
+    /// You can specify multiple namespaces at once with multiple `--namespaces` arguments. The
+    /// commands will be sent to every namespace you have specified.
     #[arg(short, long, default_value = "")]
-    pub namespace: String,
+    pub namespace: Vec<String>,
 
     /// Comma separated list of outputs to restore.
     ///
@@ -313,8 +325,11 @@ pub struct Img {
     /// The resulting namespace will be 'swww-daemon' appended to what you pass in this argument.
     /// For this to work, you must call `swww-daemon --namespace <custom_namespace>` with the same
     /// value you use here.
+    ///
+    /// You can specify multiple namespaces at once with multiple `--namespaces` arguments. The
+    /// commands will be sent to every namespace you have specified.
     #[arg(short, long, default_value = "")]
-    pub namespace: String,
+    pub namespace: Vec<String>,
 
     /// Do not resize the image. Equivalent to `--resize=no`
     ///

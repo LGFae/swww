@@ -62,7 +62,7 @@ impl<T> IpcSocket<T> {
             format!("{}-swww-daemon", &wayland_socket[i..])
         } else {
             eprintln!("WARNING: WAYLAND_DISPLAY variable not set. Defaulting to wayland-0");
-            format!("wayland-0-swww-daemon")
+            "wayland-0-swww-daemon".to_string()
         };
 
         runtime.push(display);

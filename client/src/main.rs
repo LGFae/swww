@@ -29,17 +29,16 @@ fn main() -> Result<(), String> {
     let namespaces = if all {
         IpcSocket::<Client>::all_namespaces().map_err(|e| e.to_string())?
     } else {
-        let namespace = match &swww {
-            Swww::Clear(clear) => &clear.namespace,
-            Swww::Restore(restore) => &restore.namespace,
+        match &swww {
+            Swww::Clear(clear) => clear.namespace.clone(),
+            Swww::Restore(restore) => restore.namespace.clone(),
             Swww::ClearCache => {
                 return cache::clean().map_err(|e| format!("failed to clean the cache: {e}"))
             }
-            Swww::Img(img) => &img.namespace,
-            Swww::Kill(kill) => &kill.namespace,
-            Swww::Query(query) => &query.namespace,
-        };
-        vec![namespace.to_owned()]
+            Swww::Img(img) => img.namespace.clone(),
+            Swww::Kill(kill) => kill.namespace.clone(),
+            Swww::Query(query) => query.namespace.clone(),
+        }
     };
 
     for namespace in namespaces {
@@ -75,12 +74,12 @@ fn process_swww_args(args: &Swww, namespace: &str) -> Result<(), String> {
     match Answer::receive(bytes) {
         Answer::Info(info) => info.iter().for_each(|i| println!("{namespace}: {}", i)),
         Answer::Ok => {
-            if let Swww::Kill(kill) = args {
+            if let Swww::Kill(_) = args {
                 #[cfg(debug_assertions)]
                 let tries = 20;
                 #[cfg(not(debug_assertions))]
                 let tries = 10;
-                let path = IpcSocket::<Client>::path(&kill.namespace);
+                let path = IpcSocket::<Client>::path(namespace);
                 let path = Path::new(&path);
                 for _ in 0..tries {
                     if !path.exists() {
@@ -124,7 +123,7 @@ fn make_request(args: &Swww, namespace: &str) -> Result<Option<RequestSend>, Str
                 get_format_dims_and_outputs(&requested_outputs, namespace)?;
             // let imgbuf = ImgBuf::new(&img.path)?;
 
-            let img_request = make_img_request(img, &dims, format, &outputs)?;
+            let img_request = make_img_request(img, namespace, &dims, format, &outputs)?;
 
             Ok(Some(RequestSend::Img(img_request)))
         }
@@ -135,6 +134,7 @@ fn make_request(args: &Swww, namespace: &str) -> Result<Option<RequestSend>, Str
 
 fn make_img_request(
     img: &cli::Img,
+    namespace: &str,
     dims: &[(u32, u32)],
     pixel_format: ipc::PixelFormat,
     outputs: &[Vec<String>],
@@ -158,7 +158,7 @@ fn make_img_request(
                         dim,
                         format: pixel_format,
                     },
-                    img.namespace.clone(),
+                    namespace.to_string(),
                     Filter::Lanczos3.to_string(),
                     outputs,
                     None,
@@ -211,7 +211,6 @@ fn make_img_request(
                 };
 
                 let filter = img.filter.to_string();
-                let namespace = img.namespace.clone();
                 let img = match img.resize {
                     ResizeStrategy::No => img_pad(&img_raw, dim, &img.fill_color)?,
                     ResizeStrategy::Crop => {
@@ -232,7 +231,7 @@ fn make_img_request(
                         dim,
                         format: pixel_format,
                     },
-                    namespace,
+                    namespace.to_string(),
                     filter,
                     outputs,
                     animation,
@@ -324,7 +323,7 @@ fn restore_output(output: &str, namespace: &str) -> Result<(), String> {
             all: false,
             image: cli::parse_image(&img_path)?,
             outputs: output.to_string(),
-            namespace: namespace.to_string(),
+            namespace: vec![namespace.to_string()],
             #[allow(deprecated)]
             no_resize: false,
             resize: ResizeStrategy::Crop,
