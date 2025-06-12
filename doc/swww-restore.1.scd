@@ -19,7 +19,7 @@ swww-restore
 
 	This affects the name of the `swww-daemon` socket we will use to
 	communicate with. Specifically, our socket name is
-	`${WAYLAND_DISPLAY}-swww-daemon.<specified namespace>.socket`.
+	_${WAYLAND_DISPLAY}-swww-daemon.<specified namespace>.socket_.
 
 	Some compositors can have several different wallpapers per output. This
 	allows you to differentiate between them. Most users will probably not have
