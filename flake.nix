@@ -1,52 +1,102 @@
 {
   description = "swww, A Solution to your Wayland Wallpaper Woes";
 
-  # Nixpkgs / NixOS version to use.
-  inputs.nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
-  inputs.utils.url = "github:numtide/flake-utils";
-  inputs.flake-compat = {
-    url = "github:edolstra/flake-compat";
-    flake = false;
+  inputs = {
+    nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
+    flake-utils.url = "github:numtide/flake-utils";
+    flake-compat = {
+      url = "github:edolstra/flake-compat";
+      flake = false;
+    };
+    rust-overlay = {
+      url = "github:oxalica/rust-overlay";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs = {
     self,
     nixpkgs,
-    utils,
+    flake-utils,
+    rust-overlay,
     ...
   }:
     {
-      overlays.default = final: prev: {
-        swww = final.callPackage ./build.nix {};
-      };
+      overlays.default = final: prev: {inherit (self.packages.${prev.system}) swww;};
     }
-    // utils.lib.eachDefaultSystem (system: let
-      pkgs = import nixpkgs {
-        inherit system;
-        overlays = [self.overlays.default];
-      };
-    in {
-      packages = {
-        inherit (pkgs) swww;
-        default = pkgs.swww;
-      };
+    // flake-utils.lib.eachDefaultSystem (
+      system: let
+        inherit (nixpkgs) lib;
 
-      formatter = pkgs.alejandra;
+        pkgs = import nixpkgs {
+          inherit system;
+          overlays = [(import rust-overlay)];
+        };
 
-      devShells.default = pkgs.callPackage ({
-        mkShell,
-        rustc,
-        cargo,
-        gnumake,
-        pkg-config,
-        lz4,
-        libxkbcommon,
-        wayland,
-        wayland-protocols,
-        swww,
-      }:
-        mkShell {
-          inherit (swww) nativeBuildInputs buildInputs;
-        }) {};
-    });
+        cargo-toml = lib.importTOML ./Cargo.toml;
+        inherit (cargo-toml.workspace.package) rust-version;
+        rust = pkgs.rust-bin.stable.${rust-version}.default;
+
+        rustPlatform = pkgs.makeRustPlatform {
+          cargo = rust;
+          rustc = rust;
+        };
+      in {
+        packages = {
+          swww = rustPlatform.buildRustPackage {
+            pname = "swww";
+
+            src = pkgs.nix-gitignore.gitignoreSource [] ./.;
+            inherit (cargo-toml.workspace.package) version;
+
+            cargoLock.lockFile = ./Cargo.lock;
+
+            buildInputs = with pkgs; [
+              lz4
+              libxkbcommon
+              wayland-scanner
+              wayland-protocols
+            ];
+
+            doCheck = false; # Integration tests do not work in sandbox environment
+
+            nativeBuildInputs = with pkgs; [
+              pkg-config
+              installShellFiles
+              scdoc
+            ];
+
+            postInstall = ''
+              for f in doc/*.scd; do
+                local page="doc/$(basename "$f" .scd)"
+                scdoc < "$f" > "$page"
+                installManPage "$page"
+              done
+
+              installShellCompletion --cmd swww \
+                --bash completions/swww.bash \
+                --fish completions/swww.fish \
+                --zsh completions/_swww
+            '';
+
+            meta = {
+              description = "Efficient animated wallpaper daemon for wayland, controlled at runtime";
+              license = lib.licenses.gpl3;
+              platforms = lib.platforms.linux;
+              mainProgram = "swww";
+            };
+          };
+
+          default = self.packages.${system}.swww;
+        };
+
+        formatter = pkgs.alejandra;
+
+        devShells.default = pkgs.mkShell {
+          inputsFrom = [self.packages.${system}.swww];
+
+          packages = [pkgs.rust-bin.stable.${rust-version}.default];
+        };
+      }
+    );
 }
