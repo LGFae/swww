@@ -856,6 +856,8 @@ dependencies = [
 name = "swww-daemon"
 version = "0.10.3-master"
 dependencies = [
+ "clap",
+ "clap_complete",
  "common",
  "keyframe",
  "libc",

@@ -6,6 +6,8 @@ mod animations;
 mod cli;
 mod wallpaper;
 mod wayland;
+use clap::Parser;
+use cli::{Cli, LayerWrapper, PixelFormatWrapper};
 use log::{debug, error, info, warn, LevelFilter};
 use rustix::{
     event::{Nsecs, Secs},
@@ -83,7 +85,7 @@ impl Daemon {
     fn new(
         mut backend: waybackend::Waybackend,
         mut objman: objman::ObjectManager<WaylandObject>,
-        args: cli::Cli,
+        args: Cli,
         output_globals: Vec<Global>,
     ) -> Self {
         let registry = objman.get_first(WaylandObject::Registry).unwrap();
@@ -104,8 +106,18 @@ impl Daemon {
             shm,
             viewporter,
             layer_shell,
-            layer: args.layer,
-            pixel_format: args.format.unwrap_or(PixelFormat::Xrgb),
+            layer: match args.layer {
+                LayerWrapper::Background => Layer::background,
+                LayerWrapper::Bottom => Layer::bottom,
+            },
+            pixel_format: args
+                .format
+                .map_or(PixelFormat::Xrgb, |format| match format {
+                    PixelFormatWrapper::Rgb => PixelFormat::Rgb,
+                    PixelFormatWrapper::Bgr => PixelFormat::Bgr,
+                    PixelFormatWrapper::Xrgb => PixelFormat::Xrgb,
+                    PixelFormatWrapper::Xbgr => PixelFormat::Xbgr,
+                }),
             wallpapers: Vec::new(),
             transition_animators: Vec::new(),
             image_animators: Vec::new(),
@@ -677,7 +689,7 @@ enum WaylandObject {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // first, get the command line arguments and make the logger
-    let cli = cli::Cli::new();
+    let cli = Cli::parse();
     make_logger(cli.quiet);
 
     // next, initialize all wayland stuff
