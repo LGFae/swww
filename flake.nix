@@ -3,7 +3,6 @@
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
-    flake-utils.url = "github:numtide/flake-utils";
     flake-compat = {
       url = "github:edolstra/flake-compat";
       flake = false;
@@ -17,37 +16,39 @@
   outputs = {
     self,
     nixpkgs,
-    flake-utils,
     rust-overlay,
     ...
-  }:
-    {
-      overlays.default = final: prev: {inherit (self.packages.${prev.system}) swww;};
-    }
-    // flake-utils.lib.eachDefaultSystem (
-      system: let
-        inherit (nixpkgs) lib;
+  }: let
+    inherit (nixpkgs) lib;
+    systems = [
+      "x86_64-linux"
+      "aarch64-linux"
+      "x86_64-darwin"
+      "aarch64-darwin"
+    ];
+    pkgsFor = lib.genAttrs systems (system:
+      import nixpkgs {
+        localSystem.system = system;
+        overlays = [(import rust-overlay)];
+      });
+    cargoToml = lib.importTOML ./Cargo.toml;
+    inherit (cargoToml.workspace.package) rust-version;
+  in {
+    packages =
+      lib.mapAttrs (system: pkgs: {
+        swww = let
+          rust = pkgs.rust-bin.stable.${rust-version}.default;
 
-        pkgs = import nixpkgs {
-          inherit system;
-          overlays = [(import rust-overlay)];
-        };
-
-        cargo-toml = lib.importTOML ./Cargo.toml;
-        inherit (cargo-toml.workspace.package) rust-version;
-        rust = pkgs.rust-bin.stable.${rust-version}.default;
-
-        rustPlatform = pkgs.makeRustPlatform {
-          cargo = rust;
-          rustc = rust;
-        };
-      in {
-        packages = {
-          swww = rustPlatform.buildRustPackage {
+          rustPlatform = pkgs.makeRustPlatform {
+            cargo = rust;
+            rustc = rust;
+          };
+        in
+          rustPlatform.buildRustPackage {
             pname = "swww";
 
             src = pkgs.nix-gitignore.gitignoreSource [] ./.;
-            inherit (cargo-toml.workspace.package) version;
+            inherit (cargoToml.workspace.package) version;
 
             cargoLock.lockFile = ./Cargo.lock;
 
@@ -87,16 +88,22 @@
             };
           };
 
-          default = self.packages.${system}.swww;
-        };
+        default = self.packages.${system}.swww;
+      })
+      pkgsFor;
 
-        formatter = pkgs.alejandra;
+    formatter = lib.mapAttrs (_: pkgs: pkgs.alejandra) pkgsFor;
 
-        devShells.default = pkgs.mkShell {
+    devShells =
+      lib.mapAttrs (system: pkgs: {
+        default = pkgs.mkShell {
           inputsFrom = [self.packages.${system}.swww];
 
           packages = [pkgs.rust-bin.stable.${rust-version}.default];
         };
-      }
-    );
+      })
+      pkgsFor;
+
+    overlays.default = final: prev: {inherit (self.packages.${prev.system}) swww;};
+  };
 }
