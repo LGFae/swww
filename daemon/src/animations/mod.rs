@@ -99,13 +99,20 @@ impl TransitionAnimator {
             ..
         } = self;
 
-        animation.map(|animation| ImageAnimator {
-            now: Instant::now(),
-            wallpapers,
-            animation,
-            decompressor: Decompressor::new(),
-            i: 0,
-        })
+        if let Some(animation) = animation {
+            // it needs to have more than a single frame, otherwise there is no point in animating
+            // it
+            if animation.animation.len() > 1 {
+                return Some(ImageAnimator {
+                    now: Instant::now(),
+                    wallpapers,
+                    animation,
+                    decompressor: Decompressor::new(),
+                    i: 0,
+                });
+            }
+        }
+        None
     }
 }
 
