@@ -167,75 +167,127 @@ fn make_img_request(
         }
         CliImage::Path(img_path) => {
             let imgbuf = ImgBuf::new(img_path)?;
-            let img_raw = imgbuf.decode(pixel_format)?;
+            match imgbuf.decode_prepare() {
+                DecodeBuffer::RasterImage(imgbuf) => {
+                    let img_raw = imgbuf.decode(pixel_format)?;
 
-            for (&dim, outputs) in dims.iter().zip(outputs) {
-                let path = match img_path.canonicalize() {
-                    Ok(p) => p.to_string_lossy().to_string(),
-                    Err(e) => {
-                        if let Some("-") = img_path.to_str() {
-                            "STDIN".to_string()
-                        } else {
-                            return Err(format!("failed no canonicalize image path: {e}"));
-                        }
-                    }
-                };
-
-                let animation = if !imgbuf.is_animated() {
-                    None
-                } else if img.resize == ResizeStrategy::Crop {
-                    match cache::load_animation_frames(path.as_ref(), dim, pixel_format) {
-                        Ok(Some(animation)) => Some(animation),
-                        otherwise => {
-                            if let Err(e) = otherwise {
-                                eprintln!("Error loading cache for {:?}: {e}", img_path);
-                            }
-
-                            Some({
-                                ipc::Animation {
-                                    animation: compress_frames(
-                                        imgbuf.as_frames()?,
-                                        dim,
-                                        pixel_format,
-                                        make_filter(&img.filter),
-                                        img.resize,
-                                        &img.fill_color,
-                                    )?
-                                    .into_boxed_slice(),
+                    for (&dim, outputs) in dims.iter().zip(outputs) {
+                        let path = match img_path.canonicalize() {
+                            Ok(p) => p.to_string_lossy().to_string(),
+                            Err(e) => {
+                                if let Some("-") = img_path.to_str() {
+                                    "STDIN".to_string()
+                                } else {
+                                    return Err(format!("failed no canonicalize image path: {e}"));
                                 }
-                            })
-                        }
-                    }
-                } else {
-                    None
-                };
+                            }
+                        };
 
-                let filter = img.filter.to_string();
-                let img = match img.resize {
-                    ResizeStrategy::No => img_pad(&img_raw, dim, &img.fill_color)?,
-                    ResizeStrategy::Crop => {
-                        img_resize_crop(&img_raw, dim, make_filter(&img.filter))?
-                    }
-                    ResizeStrategy::Fit => {
-                        img_resize_fit(&img_raw, dim, make_filter(&img.filter), &img.fill_color)?
-                    }
-                    ResizeStrategy::Stretch => {
-                        img_resize_stretch(&img_raw, dim, make_filter(&img.filter))?
-                    }
-                };
+                        let animation = if !imgbuf.is_animated() {
+                            None
+                        } else if img.resize == ResizeStrategy::Crop {
+                            match cache::load_animation_frames(path.as_ref(), dim, pixel_format) {
+                                Ok(Some(animation)) => Some(animation),
+                                otherwise => {
+                                    if let Err(e) = otherwise {
+                                        eprintln!("Error loading cache for {:?}: {e}", img_path);
+                                    }
 
-                img_req_builder.push(
-                    ipc::ImgSend {
-                        img,
-                        path,
-                        dim,
-                        format: pixel_format,
-                    },
-                    namespace.to_string(),
-                    filter,
-                    outputs,
-                    animation,
-                );
+                                    Some({
+                                        ipc::Animation {
+                                            animation: compress_frames(
+                                                imgbuf.as_frames()?,
+                                                dim,
+                                                pixel_format,
+                                                make_filter(&img.filter),
+                                                img.resize,
+                                                &img.fill_color,
+                                            )?
+                                            .into_boxed_slice(),
+                                        }
+                                    })
+                                }
+                            }
+                        } else {
+                            None
+                        };
+
+                        let filter = img.filter.to_string();
+                        let img = match img.resize {
+                            ResizeStrategy::No => img_pad(&img_raw, dim, &img.fill_color)?,
+                            ResizeStrategy::Crop => {
+                                img_resize_crop(&img_raw, dim, make_filter(&img.filter))?
+                            }
+                            ResizeStrategy::Fit => img_resize_fit(
+                                &img_raw,
+                                dim,
+                                make_filter(&img.filter),
+                                &img.fill_color,
+                            )?,
+                            ResizeStrategy::Stretch => {
+                                img_resize_stretch(&img_raw, dim, make_filter(&img.filter))?
+                            }
+                        };
+
+                        img_req_builder.push(
+                            ipc::ImgSend {
+                                img,
+                                path,
+                                dim,
+                                format: pixel_format,
+                            },
+                            namespace.to_string(),
+                            filter,
+                            outputs,
+                            animation,
+                        );
+                    }
+                }
+                // Vector images are different because we can render them at any scale. So we
+                // always make sure to render them at the largest possible scale without distortion
+                DecodeBuffer::VectorImage(imgbuf) => {
+                    for (&dim, outputs) in dims.iter().zip(outputs) {
+                        let path = match img_path.canonicalize() {
+                            Ok(p) => p.to_string_lossy().to_string(),
+                            Err(e) => {
+                                if let Some("-") = img_path.to_str() {
+                                    "STDIN".to_string()
+                                } else {
+                                    return Err(format!("failed no canonicalize image path: {e}"));
+                                }
+                            }
+                        };
+                        let filter = img.filter.to_string();
+                        let img_raw = imgbuf.decode(pixel_format, dim.0, dim.1)?;
+                        let img = match img.resize {
+                            ResizeStrategy::No => img_pad(&img_raw, dim, &img.fill_color)?,
+                            ResizeStrategy::Crop => {
+                                img_resize_crop(&img_raw, dim, make_filter(&img.filter))?
+                            }
+                            ResizeStrategy::Fit => img_resize_fit(
+                                &img_raw,
+                                dim,
+                                make_filter(&img.filter),
+                                &img.fill_color,
+                            )?,
+                            ResizeStrategy::Stretch => {
+                                img_resize_stretch(&img_raw, dim, make_filter(&img.filter))?
+                            }
+                        };
+                        img_req_builder.push(
+                            ipc::ImgSend {
+                                img,
+                                path,
+                                dim,
+                                format: pixel_format,
+                            },
+                            namespace.to_string(),
+                            filter,
+                            outputs,
+                            None,
+                        );
+                    }
+                }
             }
         }
     }

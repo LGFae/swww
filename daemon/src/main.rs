@@ -466,7 +466,8 @@ impl wayland::wl_output::EvHandler for Daemon {
                     &self.namespace,
                     self.use_cache,
                 ) {
-                    self.stop_animations(&[wallpaper.clone()]);
+                    let cloned = wallpaper.clone();
+                    self.stop_animations(&[cloned]);
                 }
                 break;
             }
@@ -624,7 +625,8 @@ impl wayland::wp_fractional_scale_v1::EvHandler for Daemon {
                             &self.namespace,
                             self.use_cache,
                         ) {
-                            self.stop_animations(&[wallpaper.clone()]);
+                            let cloned = wallpaper.clone();
+                            self.stop_animations(&[cloned]);
                         }
                     }
                     None => error!("received scale factor of 0 from compositor"),

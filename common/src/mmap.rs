@@ -223,7 +223,7 @@ impl Mmap {
 
     #[inline]
     #[must_use]
-    pub fn fd(&self) -> BorrowedFd {
+    pub fn fd(&'_ self) -> BorrowedFd<'_> {
         self.fd.as_fd()
     }
 }

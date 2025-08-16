@@ -76,6 +76,7 @@ Then in `configuration.nix`:
    * webp
    * bmp
    * farbfeld
+   * svg (only static svgs are supported)
  - Clear the screen with an arbitrary rrggbb color
  - Smooth transition effect when you switch images
  - Do all of that without having to shutdown and reinitialize the daemon
