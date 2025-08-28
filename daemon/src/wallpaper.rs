@@ -287,13 +287,7 @@ impl Wallpaper {
         use wl_output::Transform;
         let inner = &mut self.inner;
         let staging = &self.inner_staging;
-
-        if (inner.name != staging.name && use_cache)
-            || (self.img.is_set()
-                && (inner.scale_factor != staging.scale_factor
-                    || inner.width != staging.width
-                    || inner.height != staging.height))
-        {
+        if inner.name != staging.name && use_cache {
             let name = staging.name.clone().unwrap_or("".to_string());
             let namespace = namespace.to_string();
             std::thread::Builder::new()
