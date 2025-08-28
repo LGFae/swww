@@ -22,6 +22,7 @@ impl Buffer {
         format: super::wl_shm::Format,
     ) -> Self {
         let object_id = objman.create(WaylandObject::Buffer);
+        log::debug!("Creating buffer with id: {object_id}");
         super::wl_shm_pool::req::create_buffer(
             backend, pool_id, object_id, offset, width, height, stride, format,
         )
@@ -45,6 +46,7 @@ impl Buffer {
     }
 
     fn destroy(self, backend: &mut Waybackend) {
+        log::debug!("Destroying buffer with id: {}", self.object_id);
         if let Err(e) = super::wl_buffer::req::destroy(backend, self.object_id) {
             log::error!("failed to destroy wl_buffer: {e:?}");
         }
@@ -62,6 +64,9 @@ pub(crate) struct BumpPool {
     pool_id: ObjectId,
     mmap: Mmap,
     buffers: Vec<Buffer>,
+    /// This for when resizes happen, where we cannot delete a buffer before it was released by the
+    /// compositor, least undefined behavior happens
+    dead_buffers: Vec<Buffer>,
     width: i32,
     height: i32,
     last_used_buffer: usize,
@@ -88,6 +93,7 @@ impl BumpPool {
             pool_id,
             mmap,
             buffers,
+            dead_buffers: Vec::with_capacity(1),
             width,
             height,
             last_used_buffer: 0,
@@ -112,6 +118,14 @@ impl BumpPool {
                 }
                 self.mmap.unmap();
             }
+            true
+        } else if let Some(i) = self
+            .dead_buffers
+            .iter()
+            .position(|b| b.object_id == buffer_id)
+        {
+            let buffer = self.dead_buffers.swap_remove(i);
+            buffer.destroy(backend);
             true
         } else {
             false
@@ -219,13 +233,22 @@ impl BumpPool {
         self.width = width;
         self.height = height;
         self.last_used_buffer = 0;
+
         for buffer in self.buffers.drain(..) {
-            buffer.destroy(backend);
+            if buffer.is_released() {
+                buffer.destroy(backend);
+            } else {
+                self.dead_buffers.push(buffer);
+            }
         }
     }
 
     pub(crate) fn destroy(&mut self, backend: &mut Waybackend) {
         for buffer in self.buffers.drain(..) {
+            buffer.destroy(backend);
+        }
+
+        for buffer in self.dead_buffers.drain(..) {
             buffer.destroy(backend);
         }
 
