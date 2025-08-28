@@ -168,11 +168,7 @@ impl Daemon {
                 crate::wallpaper::commit_wallpapers(&mut self.backend, &wallpapers);
                 Answer::Ok
             }
-            RequestRecv::Ping => Answer::Ping(self.wallpapers.iter().all(|w| {
-                w.borrow()
-                    .configured
-                    .load(std::sync::atomic::Ordering::Acquire)
-            })),
+            RequestRecv::Ping => Answer::Ping(self.wallpapers.iter().all(|w| w.borrow().inited)),
             RequestRecv::Kill => {
                 exit_daemon();
                 Answer::Ok
@@ -326,6 +322,23 @@ impl Daemon {
         }
     }
 
+    fn commit_pending_surface_changes(&mut self) {
+        let mut to_stop = Vec::new();
+        for wallpaper in self.wallpapers.iter() {
+            if wallpaper.borrow().dirty {
+                wallpaper.borrow_mut().commit_surface_changes(
+                    &mut self.backend,
+                    &mut self.objman,
+                    self.pixel_format,
+                    &self.namespace,
+                    self.use_cache,
+                );
+                to_stop.push(wallpaper.clone());
+            }
+        }
+        self.stop_animations(&to_stop);
+    }
+
     fn stop_animations(&mut self, wallpapers: &[Rc<RefCell<Wallpaper>>]) {
         for transition in self.transition_animators.iter_mut() {
             transition
@@ -349,6 +362,7 @@ impl Daemon {
 impl wayland::wl_display::EvHandler for Daemon {
     fn delete_id(&mut self, _: ObjectId, id: u32) {
         if let Ok(id) = ObjectId::try_new(id) {
+            debug!("Removing object with id: {id}");
             self.objman.remove(id);
         }
     }
@@ -439,39 +453,17 @@ impl wayland::wl_output::EvHandler for Daemon {
 
     fn mode(
         &mut self,
-        sender_id: ObjectId,
-        flags: wayland::wl_output::Mode,
-        width: i32,
-        height: i32,
+        _sender_id: ObjectId,
+        _flags: wayland::wl_output::Mode,
+        _width: i32,
+        _height: i32,
         _refresh: i32,
     ) {
-        // the protocol states we should not rely on non-current modes
-        if flags.contains(wayland::wl_output::Mode::CURRENT) {
-            for wallpaper in self.wallpapers.iter() {
-                let mut wallpaper = wallpaper.borrow_mut();
-                if wallpaper.has_output(sender_id) {
-                    wallpaper.set_dimensions(width, height);
-                    break;
-                }
-            }
-        }
+        // no-op
     }
 
-    fn done(&mut self, sender_id: ObjectId) {
-        for wallpaper in self.wallpapers.iter() {
-            if wallpaper.borrow().has_output(sender_id) {
-                if wallpaper.borrow_mut().commit_surface_changes(
-                    &mut self.backend,
-                    &mut self.objman,
-                    &self.namespace,
-                    self.use_cache,
-                ) {
-                    let cloned = wallpaper.clone();
-                    self.stop_animations(&[cloned]);
-                }
-                break;
-            }
-        }
+    fn done(&mut self, _sender_id: ObjectId) {
+        // no-op
     }
 
     fn scale(&mut self, sender_id: ObjectId, factor: i32) {
@@ -585,9 +577,12 @@ impl wayland::wl_shm_pool::EvHandler for Daemon {}
 
 impl wayland::zwlr_layer_shell_v1::EvHandler for Daemon {}
 impl wayland::zwlr_layer_surface_v1::EvHandler for Daemon {
-    fn configure(&mut self, sender_id: ObjectId, serial: u32, _width: u32, _height: u32) {
-        for wallpaper in self.wallpapers.iter() {
+    fn configure(&mut self, sender_id: ObjectId, serial: u32, width: u32, height: u32) {
+        for wallpaper in self.wallpapers.iter_mut() {
             if wallpaper.borrow().has_layer_surface(sender_id) {
+                wallpaper
+                    .borrow_mut()
+                    .set_dimensions(width as i32, height as i32);
                 wayland::zwlr_layer_surface_v1::req::ack_configure(
                     &mut self.backend,
                     sender_id,
@@ -619,15 +614,6 @@ impl wayland::wp_fractional_scale_v1::EvHandler for Daemon {
                 match NonZeroI32::new(scale as i32) {
                     Some(factor) => {
                         wallpaper.borrow_mut().set_scale(Scale::Fractional(factor));
-                        if wallpaper.borrow_mut().commit_surface_changes(
-                            &mut self.backend,
-                            &mut self.objman,
-                            &self.namespace,
-                            self.use_cache,
-                        ) {
-                            let cloned = wallpaper.clone();
-                            self.stop_animations(&[cloned]);
-                        }
                     }
                     None => error!("received scale factor of 0 from compositor"),
                 }
@@ -801,6 +787,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     );
                 }
             }
+            daemon.commit_pending_surface_changes();
         }
 
         if socket_event {

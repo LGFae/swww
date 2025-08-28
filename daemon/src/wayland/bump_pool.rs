@@ -230,16 +230,18 @@ impl BumpPool {
 
     /// We assume `width` and `height` have already been multiplied by their scale factor
     pub(crate) fn resize(&mut self, backend: &mut Waybackend, width: i32, height: i32) {
-        self.width = width;
-        self.height = height;
-        self.last_used_buffer = 0;
-
-        for buffer in self.buffers.drain(..) {
-            if buffer.is_released() {
-                buffer.destroy(backend);
-            } else {
-                self.dead_buffers.push(buffer);
+        // only eliminate the buffers if we can not reuse them
+        if width != self.width || height != self.height {
+            for buffer in self.buffers.drain(..) {
+                if buffer.is_released() {
+                    buffer.destroy(backend);
+                } else {
+                    self.dead_buffers.push(buffer);
+                }
             }
+            self.width = width;
+            self.height = height;
+            self.last_used_buffer = 0;
         }
     }
 

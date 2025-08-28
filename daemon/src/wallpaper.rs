@@ -2,7 +2,7 @@ use common::ipc::{BgImg, BgInfo, PixelFormat, Scale};
 use log::{debug, error, warn};
 use waybackend::{objman::ObjectManager, types::ObjectId, Waybackend};
 
-use std::{cell::RefCell, num::NonZeroI32, rc::Rc, sync::atomic::AtomicBool};
+use std::{cell::RefCell, num::NonZeroI32, rc::Rc};
 
 use crate::{
     wayland::{
@@ -81,7 +81,9 @@ pub(super) struct Wallpaper {
     pub inner: WallpaperInner,
     inner_staging: WallpaperInner,
 
-    pub configured: AtomicBool,
+    configured: bool,
+    pub dirty: bool,
+    pub inited: bool,
 
     frame_callback_handler: FrameCallbackHandler,
     img: BgImg,
@@ -167,6 +169,7 @@ impl Wallpaper {
             zwlr_layer_surface_v1::KeyboardInteractivity::None,
         )
         .unwrap();
+        zwlr_layer_surface_v1::req::set_size(backend, layer_surface, 0, 0).unwrap();
         wl_surface::req::set_buffer_scale(backend, wl_surface, 1).unwrap();
 
         let frame_callback_handler = FrameCallbackHandler::new(backend, objman, wl_surface);
@@ -185,7 +188,9 @@ impl Wallpaper {
             layer_surface,
             inner,
             inner_staging,
-            configured: AtomicBool::new(false),
+            configured: false,
+            dirty: false,
+            inited: false,
             frame_callback_handler,
             img: BgImg::Color([0, 0, 0]),
             pool,
@@ -208,92 +213,63 @@ impl Wallpaper {
     pub fn set_name(&mut self, name: String) {
         debug!("Output {} name: {name}", self.output_name);
         self.inner_staging.name = Some(name);
+        self.dirty = true;
     }
 
     pub fn set_desc(&mut self, desc: String) {
         debug!("Output {} description: {desc}", self.output_name);
-        self.inner_staging.desc = Some(desc)
+        self.inner_staging.desc = Some(desc);
+        self.dirty = true;
     }
 
     pub fn set_dimensions(&mut self, width: i32, height: i32) {
+        debug!(
+            "Output {} new dimensions: {width}x{height}",
+            self.output_name
+        );
         let staging = &mut self.inner_staging;
-        let (width, height) = staging.scale_factor.div_dim(width, height);
 
         match NonZeroI32::new(width) {
             Some(width) => staging.width = width,
-            None => {
-                error!(
-                    "dividing width {width} by scale_factor {} results in width 0!",
-                    staging.scale_factor
-                )
-            }
+            None => error!("Cannot set wallpaper width to 0!"),
         }
 
         match NonZeroI32::new(height) {
             Some(height) => staging.height = height,
-            None => {
-                error!(
-                    "dividing height {height} by scale_factor {} results in height 0!",
-                    staging.scale_factor
-                )
-            }
+            None => error!("Cannot set wallpaper height to 0!"),
         }
+        self.dirty = true;
     }
 
     pub fn set_transform(&mut self, transform: wl_output::Transform) {
         self.inner_staging.transform = transform;
+        self.dirty = true;
     }
 
     pub fn set_scale(&mut self, scale: Scale) {
+        debug!("Output {} new scale: {scale}", self.output_name);
         let staging = &mut self.inner_staging;
         if staging.scale_factor == scale || scale.priority() < staging.scale_factor.priority() {
             return;
         }
 
-        let (old_width, old_height) = staging
-            .scale_factor
-            .mul_dim(staging.width.get(), staging.height.get());
-
         staging.scale_factor = scale;
-        let (width, height) = staging.scale_factor.div_dim(old_width, old_height);
-        match NonZeroI32::new(width) {
-            Some(width) => staging.width = width,
-            None => {
-                error!(
-                    "dividing width {width} by scale_factor {} results in width 0!",
-                    staging.scale_factor
-                )
-            }
-        }
-
-        match NonZeroI32::new(height) {
-            Some(height) => staging.height = height,
-            None => {
-                error!(
-                    "dividing height {height} by scale_factor {} results in height 0!",
-                    staging.scale_factor
-                )
-            }
-        }
+        self.dirty = true;
     }
 
     pub fn commit_surface_changes(
         &mut self,
         backend: &mut Waybackend,
         objman: &mut ObjectManager<WaylandObject>,
+        pixel_format: PixelFormat,
         namespace: &str,
         use_cache: bool,
-    ) -> bool {
+    ) {
         use wl_output::Transform;
         let inner = &mut self.inner;
         let staging = &self.inner_staging;
 
-        if (inner.name != staging.name && use_cache)
-            || (self.img.is_set()
-                && (inner.scale_factor != staging.scale_factor
-                    || inner.width != staging.width
-                    || inner.height != staging.height))
-        {
+        if (self.configured && !self.inited && use_cache) || self.img.is_set() {
             let name = staging.name.clone().unwrap_or("".to_string());
             let namespace = namespace.to_string();
             std::thread::Builder::new()
@@ -316,60 +292,36 @@ impl Wallpaper {
             (staging.width, staging.height)
         };
 
-        if staging.scale_factor != inner.scale_factor || staging.transform != inner.transform {
-            match staging.scale_factor {
-                Scale::Output(i) => {
-                    // unset destination
-                    wp_viewport::req::set_destination(backend, self.wp_viewport, -1, -1).unwrap();
-                    wl_surface::req::set_buffer_scale(backend, self.wl_surface, i.get()).unwrap();
-                }
-                Scale::Preferred(i) => {
-                    // unset destination
-                    wp_viewport::req::set_destination(backend, self.wp_viewport, -1, -1).unwrap();
-                    wl_surface::req::set_buffer_scale(backend, self.wl_surface, i.get()).unwrap();
-                }
-                Scale::Fractional(_) => {
-                    wl_surface::req::set_buffer_scale(backend, self.wl_surface, 1).unwrap();
-                    wp_viewport::req::set_destination(
-                        backend,
-                        self.wp_viewport,
-                        width.get(),
-                        height.get(),
-                    )
-                    .unwrap();
-                }
-            }
-        }
+        wp_viewport::req::set_destination(backend, self.wp_viewport, width.get(), height.get())
+            .unwrap();
 
         inner.scale_factor = staging.scale_factor;
+        inner.width = width;
+        inner.height = height;
         inner.transform = staging.transform;
         inner.name.clone_from(&staging.name);
         inner.desc.clone_from(&staging.desc);
-        if (inner.width, inner.height) == (width, height) {
-            return false;
-        }
-        inner.width = width;
-        inner.height = height;
 
-        let scale_factor = staging.scale_factor;
+        log::debug!(
+            "Output {} new configuration: width: {width}, height: {height}, scale_factor: {}",
+            self.output_name,
+            inner.scale_factor
+        );
 
-        zwlr_layer_surface_v1::req::set_size(
-            backend,
-            self.layer_surface,
-            width.get() as u32,
-            height.get() as u32,
-        )
-        .unwrap();
-
-        let (w, h) = scale_factor.mul_dim(width.get(), height.get());
+        let (w, h) = inner.scale_factor.mul_dim(width.get(), height.get());
         self.pool.resize(backend, w, h);
 
         self.frame_callback_handler
             .request_frame_callback(backend, objman, self.wl_surface);
+        if !self.configured {
+            self.clear(backend, objman, pixel_format, [0, 0, 0]);
+            self.attach_buffer_and_damage_surface(backend, objman);
+        } else {
+            self.inited = true;
+        }
         wl_surface::req::commit(backend, self.wl_surface).unwrap();
-        self.configured
-            .store(true, std::sync::atomic::Ordering::Release);
-        true
+        self.configured = true;
+        self.dirty = false;
     }
 
     pub(super) fn has_name(&self, name: &str) -> bool {
@@ -486,6 +438,24 @@ impl Wallpaper {
             self.inner.desc.as_ref().unwrap_or(&"?".to_string())
         );
     }
+
+    fn attach_buffer_and_damage_surface(
+        &mut self,
+        backend: &mut Waybackend,
+        objman: &mut ObjectManager<WaylandObject>,
+    ) {
+        let surface = self.wl_surface;
+        let buf = self.pool.get_commitable_buffer();
+        let inner = &self.inner;
+        let (width, height) = inner
+            .scale_factor
+            .mul_dim(inner.width.get(), inner.height.get());
+
+        wl_surface::req::attach(backend, surface, Some(buf), 0, 0).unwrap();
+        wl_surface::req::damage_buffer(backend, surface, 0, 0, width, height).unwrap();
+        self.frame_callback_handler
+            .request_frame_callback(backend, objman, surface);
+    }
 }
 
 /// attaches all pending buffers and damages all surfaces with one single request
@@ -495,20 +465,9 @@ pub(crate) fn attach_buffers_and_damage_surfaces(
     wallpapers: &[Rc<RefCell<Wallpaper>>],
 ) {
     for wallpaper in wallpapers {
-        let mut wallpaper = wallpaper.borrow_mut();
-
-        let surface = wallpaper.wl_surface;
-        let buf = wallpaper.pool.get_commitable_buffer();
-        let inner = &wallpaper.inner;
-        let (width, height) = inner
-            .scale_factor
-            .mul_dim(inner.width.get(), inner.height.get());
-
-        wl_surface::req::attach(backend, surface, Some(buf), 0, 0).unwrap();
-        wl_surface::req::damage_buffer(backend, surface, 0, 0, width, height).unwrap();
         wallpaper
-            .frame_callback_handler
-            .request_frame_callback(backend, objman, surface);
+            .borrow_mut()
+            .attach_buffer_and_damage_surface(backend, objman);
     }
 }
 
