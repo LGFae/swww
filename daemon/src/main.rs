@@ -367,7 +367,7 @@ impl Daemon {
 impl wayland::wl_display::EvHandler for Daemon {
     fn delete_id(&mut self, _: ObjectId, id: u32) {
         if let Ok(id) = ObjectId::try_new(id) {
-            debug!("Removing object with id: {id}");
+            debug!("Removing object {:?}({id})", self.objman.get(id));
             self.objman.remove(id);
         }
     }
@@ -569,6 +569,7 @@ impl wayland::wl_region::EvHandler for Daemon {}
 
 impl wayland::wl_buffer::EvHandler for Daemon {
     fn release(&mut self, sender_id: ObjectId) {
+        debug!("Releasing buffer {sender_id}");
         for wallpaper in self.wallpapers.iter() {
             let strong_count = Rc::strong_count(wallpaper);
             if wallpaper.borrow_mut().try_set_buffer_release_flag(
@@ -579,7 +580,7 @@ impl wayland::wl_buffer::EvHandler for Daemon {
                 return;
             }
         }
-        error!("We failed to find wayland buffer with id: {sender_id}. This should be impossible.");
+        warn!("We failed to find wayland buffer with id: {sender_id}. This should be impossible.");
     }
 }
 
