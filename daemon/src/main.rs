@@ -34,6 +34,8 @@ use common::ipc::{
 };
 use common::mmap::MmappedStr;
 
+use crate::wallpaper::OutputInfo;
+
 // We need this because this might be set by signals, so we can't keep it in the daemon
 static EXIT: AtomicBool = AtomicBool::new(false);
 
@@ -66,17 +68,19 @@ struct Daemon {
     use_cache: bool,
     fractional_scale_manager: Option<ObjectId>,
 
+    /// Outputs whose wallpapers are yet to be created. We only create a wallpaper after receiving
+    /// the 'done' event from wl_output.
+    ///
+    /// Note that, because we bind every output after binding the shm, by the time we begin
+    /// receiving `wl_output::done` events, we will already now the correct shm format to use
+    pending_outputs: Vec<OutputInfo>,
+
     /// We use PollTime as a way of making sure we draw at the right time.
     /// when we call `Daemon::draw` before the frame callback returned, we need to *not* draw and
     /// instead wait for the next callback, which we do with a short poll time.
     poll_time: Option<Timespec>,
 
     forced_shm_format: bool,
-
-    // This are the globals we have received before we figured out which shm format to use
-    output_globals: Option<Vec<Global>>,
-    // This callback is from the sync request we make when calling `Daemon::new`
-    callback: Option<ObjectId>,
 }
 
 impl Daemon {
@@ -93,8 +97,18 @@ impl Daemon {
         let viewporter = objman.get_first(WaylandObject::Viewporter).unwrap();
         let fractional_scale_manager = objman.get_first(WaylandObject::FractionalScaler);
 
-        let callback = objman.create(WaylandObject::Callback);
-        wayland::wl_display::req::sync(&mut backend, waybackend::WL_DISPLAY, callback).unwrap();
+        let mut pending_outputs = Vec::new();
+
+        for global in output_globals {
+            let output_name = global.name();
+            pending_outputs.push(OutputInfo::new(
+                &mut backend,
+                &mut objman,
+                registry,
+                output_name,
+            ));
+        }
+        pending_outputs.shrink_to_fit();
 
         Self {
             backend,
@@ -112,10 +126,9 @@ impl Daemon {
             namespace: args.namespace,
             use_cache: !args.no_cache,
             fractional_scale_manager,
+            pending_outputs,
             poll_time: None,
             forced_shm_format: args.format.is_some(),
-            output_globals: Some(output_globals),
-            callback: Some(callback),
         }
     }
 
@@ -129,11 +142,6 @@ impl Daemon {
                 }
             }
         }
-    }
-
-    fn new_output(&mut self, output_name: u32) {
-        let wallpaper = Rc::new(RefCell::new(Wallpaper::new(self, self.layer, output_name)));
-        self.wallpapers.push(wallpaper);
     }
 
     fn recv_socket_msg(&mut self, stream: IpcSocket<Server>) {
@@ -168,7 +176,9 @@ impl Daemon {
                 crate::wallpaper::commit_wallpapers(&mut self.backend, &wallpapers);
                 Answer::Ok
             }
-            RequestRecv::Ping => Answer::Ping(self.wallpapers.iter().all(|w| w.borrow().inited)),
+            RequestRecv::Ping => {
+                Answer::Ping(self.wallpapers.iter().all(|w| w.borrow().configured))
+            }
             RequestRecv::Kill => {
                 exit_daemon();
                 Answer::Ok
@@ -325,15 +335,13 @@ impl Daemon {
     fn commit_pending_surface_changes(&mut self) {
         let mut to_stop = Vec::new();
         for wallpaper in self.wallpapers.iter() {
-            if wallpaper.borrow().dirty {
-                wallpaper.borrow_mut().commit_surface_changes(
-                    &mut self.backend,
-                    &mut self.objman,
-                    self.pixel_format,
-                    &self.namespace,
-                    self.use_cache,
-                );
-                to_stop.push(wallpaper.clone());
+            if wallpaper.borrow_mut().commit_surface_changes(
+                &mut self.backend,
+                &mut self.objman,
+                &self.namespace,
+                self.use_cache,
+            ) {
+                to_stop.push(Rc::clone(wallpaper));
             }
         }
         self.stop_animations(&to_stop);
@@ -379,7 +387,12 @@ impl wayland::wl_registry::EvHandler for Daemon {
             if version < 4 {
                 error!("your compositor must support at least version 4 of wl_output");
             } else {
-                self.new_output(name);
+                self.pending_outputs.push(OutputInfo::new(
+                    &mut self.backend,
+                    &mut self.objman,
+                    self.registry,
+                    name,
+                ));
             }
         }
     }
@@ -393,6 +406,13 @@ impl wayland::wl_registry::EvHandler for Daemon {
             let w = self.wallpapers.remove(i);
             w.borrow_mut().destroy(&mut self.backend);
             self.stop_animations(&[w]);
+        } else if let Some(i) = self
+            .pending_outputs
+            .iter()
+            .position(|w| w.output_name == name)
+        {
+            let o = self.pending_outputs.swap_remove(i);
+            wayland::wl_output::req::release(&mut self.backend, o.output).unwrap();
         }
     }
 }
@@ -428,7 +448,7 @@ impl wayland::wl_shm::EvHandler for Daemon {
 impl wayland::wl_output::EvHandler for Daemon {
     fn geometry(
         &mut self,
-        sender_id: ObjectId,
+        _sender_id: ObjectId,
         _x: i32,
         _y: i32,
         _physical_width: i32,
@@ -436,19 +456,9 @@ impl wayland::wl_output::EvHandler for Daemon {
         _subpixel: wayland::wl_output::Subpixel,
         _make: &str,
         _model: &str,
-        transform: wayland::wl_output::Transform,
+        _transform: wayland::wl_output::Transform,
     ) {
-        for wallpaper in self.wallpapers.iter() {
-            let mut wallpaper = wallpaper.borrow_mut();
-            if wallpaper.has_output(sender_id) {
-                if transform == wayland::wl_output::Transform::flipped_270 {
-                    error!("received invalid transform value from compositor: {transform:?}")
-                } else {
-                    wallpaper.set_transform(transform);
-                }
-                break;
-            }
-        }
+        // no-op
     }
 
     fn mode(
@@ -462,39 +472,72 @@ impl wayland::wl_output::EvHandler for Daemon {
         // no-op
     }
 
-    fn done(&mut self, _sender_id: ObjectId) {
-        // no-op
+    fn done(&mut self, sender_id: ObjectId) {
+        if let Some(i) = self
+            .pending_outputs
+            .iter()
+            .position(|o| o.output == sender_id)
+        {
+            let output_info = self.pending_outputs.swap_remove(i);
+            let wallpaper = Rc::new(RefCell::new(Wallpaper::new(self, output_info)));
+            self.wallpapers.push(wallpaper);
+        }
     }
 
     fn scale(&mut self, sender_id: ObjectId, factor: i32) {
+        let scale = match NonZeroI32::new(factor) {
+            Some(factor) => Scale::Output(factor),
+            None => {
+                error!("received scale factor of 0 from compositor");
+                return;
+            }
+        };
+
+        for info in self.pending_outputs.iter_mut() {
+            if info.output == sender_id {
+                info.scale_factor = scale;
+                return;
+            }
+        }
+
         for wallpaper in self.wallpapers.iter() {
             let mut wallpaper = wallpaper.borrow_mut();
             if wallpaper.has_output(sender_id) {
-                match NonZeroI32::new(factor) {
-                    Some(factor) => wallpaper.set_scale(Scale::Output(factor)),
-                    None => error!("received scale factor of 0 from compositor"),
-                }
-                break;
+                wallpaper.set_scale(scale);
+                return;
             }
         }
     }
 
     fn name(&mut self, sender_id: ObjectId, name: &str) {
+        for info in self.pending_outputs.iter_mut() {
+            if info.output == sender_id {
+                info.name = Some(name.to_string());
+                return;
+            }
+        }
+
         for wallpaper in self.wallpapers.iter() {
             let mut wallpaper = wallpaper.borrow_mut();
             if wallpaper.has_output(sender_id) {
                 wallpaper.set_name(name.to_string());
-                break;
+                return;
             }
         }
     }
 
     fn description(&mut self, sender_id: ObjectId, description: &str) {
+        for info in self.pending_outputs.iter_mut() {
+            if info.output == sender_id {
+                info.desc = Some(description.to_string());
+                return;
+            }
+        }
         for wallpaper in self.wallpapers.iter() {
             let mut wallpaper = wallpaper.borrow_mut();
             if wallpaper.has_output(sender_id) {
                 wallpaper.set_desc(description.to_string());
-                break;
+                return;
             }
         }
     }
@@ -509,17 +552,8 @@ impl wayland::wl_surface::EvHandler for Daemon {
         debug!("Output {}: Surface Leave", output.get());
     }
 
-    fn preferred_buffer_scale(&mut self, sender_id: ObjectId, factor: i32) {
-        for wallpaper in self.wallpapers.iter() {
-            let mut wallpaper = wallpaper.borrow_mut();
-            if wallpaper.has_surface(sender_id) {
-                match NonZeroI32::new(factor) {
-                    Some(factor) => wallpaper.set_scale(Scale::Preferred(factor)),
-                    None => error!("received scale factor of 0 from compositor"),
-                }
-                break;
-            }
-        }
+    fn preferred_buffer_scale(&mut self, _sender_id: ObjectId, _factor: i32) {
+        // No-op
     }
 
     fn preferred_buffer_transform(
@@ -527,7 +561,7 @@ impl wayland::wl_surface::EvHandler for Daemon {
         _sender_id: ObjectId,
         _transform: wayland::wl_output::Transform,
     ) {
-        //Ignore these for now
+        // No-op
     }
 }
 
@@ -551,18 +585,6 @@ impl wayland::wl_buffer::EvHandler for Daemon {
 
 impl wayland::wl_callback::EvHandler for Daemon {
     fn done(&mut self, sender_id: ObjectId, _callback_data: u32) {
-        if self.callback.is_some_and(|obj| obj == sender_id) {
-            info!("selected pixel format: {:?}", self.pixel_format);
-
-            let output_globals = self.output_globals.take();
-            for output in output_globals.unwrap() {
-                self.new_output(output.name());
-            }
-            self.callback = None;
-
-            return;
-        }
-
         for wallpaper in self.wallpapers.iter() {
             if wallpaper.borrow().has_callback(sender_id) {
                 wallpaper.borrow_mut().frame_callback_completed();
@@ -583,12 +605,7 @@ impl wayland::zwlr_layer_surface_v1::EvHandler for Daemon {
                 wallpaper
                     .borrow_mut()
                     .set_dimensions(width as i32, height as i32);
-                wayland::zwlr_layer_surface_v1::req::ack_configure(
-                    &mut self.backend,
-                    sender_id,
-                    serial,
-                )
-                .unwrap();
+                wallpaper.borrow_mut().set_ack_serial(serial);
                 break;
             }
         }
