@@ -60,7 +60,7 @@ impl Buffer {
 ///
 /// Current implementation will automatically unmap the underlying shared memory when we aren't
 /// animating and all created buffers have been released
-pub(crate) struct BumpPool {
+pub struct BumpPool {
     pool_id: ObjectId,
     mmap: Mmap,
     buffers: Vec<Buffer>,
@@ -74,7 +74,7 @@ pub(crate) struct BumpPool {
 
 impl BumpPool {
     /// We assume `width` and `height` have already been multiplied by their scale factor
-    pub(crate) fn new(
+    pub fn new(
         backend: &mut Waybackend,
         objman: &mut ObjectManager<WaylandObject>,
         shm: ObjectId,
@@ -104,7 +104,7 @@ impl BumpPool {
     ///
     /// This will unmap the underlying shared memory if we aren't animating and all buffers have
     /// been released
-    pub(crate) fn set_buffer_release_flag(
+    pub fn set_buffer_release_flag(
         &mut self,
         backend: &mut Waybackend,
         buffer_id: ObjectId,
@@ -188,7 +188,7 @@ impl BumpPool {
     /// Returns a drawable surface. If we can't find a free buffer, we request more memory
     ///
     /// This function automatically handles copying the previous buffer over onto the new one
-    pub(crate) fn get_drawable(
+    pub fn get_drawable(
         &mut self,
         backend: &mut Waybackend,
         objman: &mut ObjectManager<WaylandObject>,
@@ -222,28 +222,30 @@ impl BumpPool {
     }
 
     /// gets the last buffer we've drawn to
-    pub(crate) fn get_commitable_buffer(&mut self) -> ObjectId {
+    pub fn get_commitable_buffer(&mut self) -> ObjectId {
         let buf = &mut self.buffers[self.last_used_buffer];
         buf.unset_released();
         buf.object_id
     }
 
     /// We assume `width` and `height` have already been multiplied by their scale factor
-    pub(crate) fn resize(&mut self, backend: &mut Waybackend, width: i32, height: i32) {
-        self.width = width;
-        self.height = height;
-        self.last_used_buffer = 0;
-
-        for buffer in self.buffers.drain(..) {
-            if buffer.is_released() {
-                buffer.destroy(backend);
-            } else {
-                self.dead_buffers.push(buffer);
+    pub fn resize(&mut self, backend: &mut Waybackend, width: i32, height: i32) {
+        // only eliminate the buffers if we can not reuse them
+        if (width, height) != (self.width, self.height) {
+            for buffer in self.buffers.drain(..) {
+                if buffer.is_released() {
+                    buffer.destroy(backend);
+                } else {
+                    self.dead_buffers.push(buffer);
+                }
             }
+            self.width = width;
+            self.height = height;
+            self.last_used_buffer = 0;
         }
     }
 
-    pub(crate) fn destroy(&mut self, backend: &mut Waybackend) {
+    pub fn destroy(&mut self, backend: &mut Waybackend) {
         for buffer in self.buffers.drain(..) {
             buffer.destroy(backend);
         }
@@ -255,6 +257,14 @@ impl BumpPool {
         if let Err(e) = super::wl_shm_pool::req::destroy(backend, self.pool_id) {
             log::error!("failed to destroy wl_shm_pool: {e}");
         }
+    }
+
+    pub fn width(&self) -> i32 {
+        self.width
+    }
+
+    pub fn height(&self) -> i32 {
+        self.height
     }
 }
 

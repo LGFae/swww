@@ -62,10 +62,11 @@ Options:
     -f|--format <xrgb|xbgr|rgb|bgr>
         Force the use of a specific wl_shm format.
 
-        It is generally better to let swww-daemon chose for itself.
-        Only use this as a workaround when you run into problems.
-        Whatever you chose, make sure you compositor actually supports it!
-        'xrgb' is the most compatible one.
+        By default, swww-daemon will use xrgb, because it is most widely
+        supported. Generally speaking, formats with 3 channels will use 3/4 the
+        memory of formats with 4 channels. Also, bgr formats are more efficient
+        than rgb formats because we do not need to do an extra swap of the bytes
+        when decoding the image (though the difference is unnoticiable).
 
     -l|--layer <background|bottom>
         Which layer to display the background in. Defaults to `background`.

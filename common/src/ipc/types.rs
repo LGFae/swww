@@ -179,24 +179,8 @@ impl Scale {
             Scale::Output(i) => (width * i.get(), height * i.get()),
             Scale::Preferred(i) => (width * i.get(), height * i.get()),
             Scale::Fractional(f) => {
-                let scale = f.get() as f64 / 120.0;
-                let width = (width as f64 * scale).round() as i32;
-                let height = (height as f64 * scale).round() as i32;
-                (width, height)
-            }
-        }
-    }
-
-    #[inline]
-    #[must_use]
-    pub fn div_dim(&self, width: i32, height: i32) -> (i32, i32) {
-        match self {
-            Scale::Output(i) => (width / i.get(), height / i.get()),
-            Scale::Preferred(i) => (width / i.get(), height / i.get()),
-            Scale::Fractional(f) => {
-                let scale = 120.0 / f.get() as f64;
-                let width = (width as f64 * scale).round() as i32;
-                let height = (height as f64 * scale).round() as i32;
+                let width = (width * f.get() + 60) / 120;
+                let height = (height * f.get() + 60) / 120;
                 (width, height)
             }
         }
