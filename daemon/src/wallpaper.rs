@@ -303,6 +303,7 @@ impl Wallpaper {
         if !self.dirty {
             return false;
         }
+        self.dirty = false;
 
         if (!self.configured && use_cache) || self.img.is_set() {
             let name = self.name.clone().unwrap_or("".to_string());
@@ -335,7 +336,6 @@ impl Wallpaper {
 
         wl_surface::req::commit(backend, self.wl_surface).unwrap();
         self.configured = true;
-        self.dirty = false;
         true
     }
 
@@ -453,9 +453,7 @@ impl Wallpaper {
     ) {
         let surface = self.wl_surface;
         let buf = self.pool.get_commitable_buffer();
-        let (width, height) = self
-            .scale_factor
-            .mul_dim(self.width.get(), self.height.get());
+        let (width, height) = (self.pool.width(), self.pool.height());
 
         wl_surface::req::attach(backend, surface, Some(buf), 0, 0).unwrap();
         wl_surface::req::damage_buffer(backend, surface, 0, 0, width, height).unwrap();

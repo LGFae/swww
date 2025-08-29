@@ -79,8 +79,6 @@ struct Daemon {
     /// when we call `Daemon::draw` before the frame callback returned, we need to *not* draw and
     /// instead wait for the next callback, which we do with a short poll time.
     poll_time: Option<Timespec>,
-
-    forced_shm_format: bool,
 }
 
 impl Daemon {
@@ -128,7 +126,6 @@ impl Daemon {
             fractional_scale_manager,
             pending_outputs,
             poll_time: None,
-            forced_shm_format: args.format.is_some(),
         }
     }
 
@@ -420,25 +417,28 @@ impl wayland::wl_registry::EvHandler for Daemon {
 impl wayland::wl_shm::EvHandler for Daemon {
     fn format(&mut self, _: ObjectId, format: wayland::wl_shm::Format) {
         use wayland::wl_shm::Format;
+        // note: we do not set it to the most efficient format automatically because some
+        // compositors kind of fuck it up. At worse it can slant the wallpaper in such a way that
+        // it would cause a compositor crash.
         match format {
             Format::xrgb8888 => debug!("available shm format: Xrbg"),
             Format::xbgr8888 => {
                 debug!("available shm format: Xbgr");
-                if !self.forced_shm_format && self.pixel_format == PixelFormat::Xrgb {
-                    self.pixel_format = PixelFormat::Xbgr;
-                }
+                //if !self.forced_shm_format && self.pixel_format == PixelFormat::Xrgb {
+                //    self.pixel_format = PixelFormat::Xbgr;
+                //}
             }
             Format::rgb888 => {
                 debug!("available shm format: Rbg");
-                if !self.forced_shm_format && self.pixel_format != PixelFormat::Bgr {
-                    self.pixel_format = PixelFormat::Rgb
-                }
+                //if !self.forced_shm_format && self.pixel_format != PixelFormat::Bgr {
+                //    self.pixel_format = PixelFormat::Rgb
+                //}
             }
             Format::bgr888 => {
                 debug!("available shm format: Bgr");
-                if !self.forced_shm_format {
-                    self.pixel_format = PixelFormat::Bgr
-                }
+                //if !self.forced_shm_format {
+                //    self.pixel_format = PixelFormat::Bgr
+                //}
             }
             _ => (),
         }
