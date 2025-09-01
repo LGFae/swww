@@ -277,8 +277,8 @@ impl Image {
         // NOTE: when animating frames, we ALWAYS use 3 channels
 
         let format = match format {
-            PixelFormat::Bgr | PixelFormat::Xbgr => PixelFormat::Bgr,
-            PixelFormat::Rgb | PixelFormat::Xrgb => PixelFormat::Rgb,
+            PixelFormat::Bgr | PixelFormat::Abgr => PixelFormat::Bgr,
+            PixelFormat::Rgb | PixelFormat::Argb => PixelFormat::Rgb,
         };
 
         let mut bytes = dynimage.into_rgb8().into_raw().into_boxed_slice();

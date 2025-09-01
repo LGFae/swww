@@ -43,10 +43,11 @@ pub enum PixelFormat {
     Bgr,
     /// Swap R and B channels at client, can copy directly onto WlBuffer
     Rgb,
-    /// No swap, must extend pixel with an extra byte when copying
-    Xbgr,
-    /// Swap R and B channels at client, must extend pixel with an extra byte when copying
-    Xrgb,
+    /// No swap, must extend pixel with an extra byte when displaying animations
+    Abgr,
+    /// Swap R and B channels at client, must extend pixel with an extra byte when displaying
+    /// animations
+    Argb,
 }
 
 #[derive(Clone)]

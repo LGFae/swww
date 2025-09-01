@@ -311,7 +311,7 @@ fn get_format_dims_and_outputs(
     let answer = Answer::receive(bytes);
     match answer {
         Answer::Info(infos) => {
-            let mut format = ipc::PixelFormat::Xrgb;
+            let mut format = ipc::PixelFormat::Argb;
             for info in infos.iter() {
                 format = info.pixel_format;
                 let info_img = &info.img;

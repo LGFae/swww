@@ -273,7 +273,7 @@ const fn wl_shm_format(pixel_format: PixelFormat) -> super::wl_shm::Format {
     match pixel_format {
         PixelFormat::Bgr => Format::bgr888,
         PixelFormat::Rgb => Format::rgb888,
-        PixelFormat::Xbgr => Format::xbgr8888,
-        PixelFormat::Xrgb => Format::xrgb8888,
+        PixelFormat::Abgr => Format::abgr8888,
+        PixelFormat::Argb => Format::argb8888,
     }
 }

@@ -8,20 +8,20 @@ pub fn main() {
     tiny_bench::bench_labeled("compression", || {
         black_box(
             compressor
-                .compress(&prev, &cur, common::ipc::PixelFormat::Xrgb)
+                .compress(&prev, &cur, common::ipc::PixelFormat::Argb)
                 .is_some(),
         )
     });
 
     let bitpack = compressor
-        .compress(&prev, &cur, common::ipc::PixelFormat::Xrgb)
+        .compress(&prev, &cur, common::ipc::PixelFormat::Argb)
         .unwrap();
     let mut canvas = buf_from(&prev);
 
     let mut decompressor = Decompressor::new();
 
     tiny_bench::bench_labeled("decompression 4 channels", || {
-        black_box(decompressor.decompress(&bitpack, &mut canvas, common::ipc::PixelFormat::Xrgb))
+        black_box(decompressor.decompress(&bitpack, &mut canvas, common::ipc::PixelFormat::Argb))
     });
 }
 

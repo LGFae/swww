@@ -169,11 +169,6 @@ which selects a transition effect at random.
 
 ## Troubleshooting
 
-### The image looks tilted and in grayscale on my laptop
-
-See #233. Current workaround is to use `swww-daemon --format xrgb` when starting
-the daemon.
-
 ### High cpu usage during caching of a gif's frames
 
 `swww` will use a non-insignificant amount of cpu power while caching the

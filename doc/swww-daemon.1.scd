@@ -8,10 +8,10 @@ swww-daemon [OPTIONS]
 
 # OPTIONS
 
-*-f*,*--format* <xrgb|xbgr|rgb|bgr>
+*-f*,*--format* <argb|abgr|rgb|bgr>
 	Force the daemon to use a specific wl_shm format.
 
-	By default, swww-daemon will use xrgb, because it is most widely
+	By default, swww-daemon will use argb, because it is most widely
 	supported. Generally speaking, formats with 3 channels will use 3/4 the
 	memory of formats with 4 channels. Also, bgr formats are more efficient
 	than rgb formats because we do not need to do an extra swap of the bytes

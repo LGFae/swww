@@ -293,7 +293,7 @@ impl Decompressor {
 mod tests {
     use super::*;
 
-    const FORMATS: [PixelFormat; 2] = [PixelFormat::Xrgb, PixelFormat::Rgb];
+    const FORMATS: [PixelFormat; 2] = [PixelFormat::Argb, PixelFormat::Rgb];
 
     fn buf_from(slice: &[u8], original_channels: usize) -> Vec<u8> {
         if original_channels == 3 {

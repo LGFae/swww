@@ -117,7 +117,7 @@ impl Daemon {
             viewporter,
             layer_shell,
             layer: args.layer,
-            pixel_format: args.format.unwrap_or(PixelFormat::Xrgb),
+            pixel_format: args.format.unwrap_or(PixelFormat::Argb),
             wallpapers: Vec::new(),
             transition_animators: Vec::new(),
             image_animators: Vec::new(),
@@ -421,11 +421,11 @@ impl wayland::wl_shm::EvHandler for Daemon {
         // compositors kind of fuck it up. At worse it can slant the wallpaper in such a way that
         // it would cause a compositor crash.
         match format {
-            Format::xrgb8888 => debug!("available shm format: Xrbg"),
-            Format::xbgr8888 => {
+            Format::argb8888 => debug!("available shm format: Argb"),
+            Format::abgr8888 => {
                 debug!("available shm format: Xbgr");
-                //if !self.forced_shm_format && self.pixel_format == PixelFormat::Xrgb {
-                //    self.pixel_format = PixelFormat::Xbgr;
+                //if !self.forced_shm_format && self.pixel_format == PixelFormat::Argb {
+                //    self.pixel_format = PixelFormat::Abgr;
                 //}
             }
             Format::rgb888 => {

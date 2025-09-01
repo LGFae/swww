@@ -22,12 +22,12 @@ impl Cli {
         while let Some(arg) = args.next() {
             match arg.as_str() {
                 "-f" | "--format" => match args.next().as_deref() {
-                    Some("xrgb") => format = Some(PixelFormat::Xrgb),
-                    Some("xbgr") => format = Some(PixelFormat::Xbgr),
+                    Some("argb") => format = Some(PixelFormat::Argb),
+                    Some("abgr") => format = Some(PixelFormat::Abgr),
                     Some("rgb") => format = Some(PixelFormat::Rgb),
                     Some("bgr") => format = Some(PixelFormat::Bgr),
                     _ => {
-                        eprintln!("`--format` command line option must be one of: 'xrgb', 'xbgr', 'rgb' or 'bgr'");
+                        eprintln!("`--format` command line option must be one of: 'argb', 'abgr', 'rgb' or 'bgr'");
                         std::process::exit(-2);
                     }
                 },
@@ -59,10 +59,10 @@ swww-daemon
 
 Options:
 
-    -f|--format <xrgb|xbgr|rgb|bgr>
+    -f|--format <argb|abgr|rgb|bgr>
         Force the use of a specific wl_shm format.
 
-        By default, swww-daemon will use xrgb, because it is most widely
+        By default, swww-daemon will use argb, because it is most widely
         supported. Generally speaking, formats with 3 channels will use 3/4 the
         memory of formats with 4 channels. Also, bgr formats are more efficient
         than rgb formats because we do not need to do an extra swap of the bytes

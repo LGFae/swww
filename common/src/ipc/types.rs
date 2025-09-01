@@ -110,10 +110,11 @@ pub enum PixelFormat {
     Bgr = 0,
     /// Swap R and B channels at client, can copy directly onto WlBuffer
     Rgb = 1,
-    /// No swap, must extend pixel with an extra byte when copying
-    Xbgr = 2,
-    /// Swap R and B channels at client, must extend pixel with an extra byte when copying
-    Xrgb = 3,
+    /// No swap, must extend pixel with an extra byte when displaying animations
+    Abgr = 2,
+    /// Swap R and B channels at client, must extend pixel with an extra byte when displaying
+    /// animations
+    Argb = 3,
 }
 
 impl PixelFormat {
@@ -123,8 +124,8 @@ impl PixelFormat {
         match self {
             Self::Rgb => 3,
             Self::Bgr => 3,
-            Self::Xbgr => 4,
-            Self::Xrgb => 4,
+            Self::Abgr => 4,
+            Self::Argb => 4,
         }
     }
 
@@ -134,8 +135,8 @@ impl PixelFormat {
         match self {
             Self::Bgr => false,
             Self::Rgb => true,
-            Self::Xbgr => false,
-            Self::Xrgb => true,
+            Self::Abgr => false,
+            Self::Argb => true,
         }
     }
 
@@ -145,8 +146,8 @@ impl PixelFormat {
         match self {
             Self::Bgr => true,
             Self::Rgb => true,
-            Self::Xbgr => false,
-            Self::Xrgb => false,
+            Self::Abgr => false,
+            Self::Argb => false,
         }
     }
 }
@@ -342,8 +343,8 @@ impl BgInfo {
         let pixel_format = match bytes[i] {
             0 => PixelFormat::Bgr,
             1 => PixelFormat::Rgb,
-            2 => PixelFormat::Xbgr,
-            _ => PixelFormat::Xrgb,
+            2 => PixelFormat::Abgr,
+            _ => PixelFormat::Argb,
         };
         i += 1;
 
@@ -563,8 +564,8 @@ impl ImgReq {
         let format = match bytes[i] {
             0 => PixelFormat::Bgr,
             1 => PixelFormat::Rgb,
-            2 => PixelFormat::Xbgr,
-            _ => PixelFormat::Xrgb,
+            2 => PixelFormat::Abgr,
+            _ => PixelFormat::Argb,
         };
         i += 1;
 
