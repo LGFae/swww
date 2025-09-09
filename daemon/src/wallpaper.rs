@@ -224,7 +224,15 @@ impl Wallpaper {
             name: self.name.clone().unwrap_or("?".to_string()),
             dim: (self.width.get() as u32, self.height.get() as u32),
             scale_factor: self.scale_factor,
-            img: self.img.clone(),
+            img: match &self.img {
+                BgImg::Color(mut color) => {
+                    if pixel_format.must_swap_r_and_b_channels() {
+                        color.swap(0, 2);
+                    }
+                    BgImg::Color(color)
+                }
+                BgImg::Img(img) => BgImg::Img(img.clone()),
+            },
             pixel_format,
         }
     }
