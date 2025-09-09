@@ -74,7 +74,7 @@ impl Position {
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum BgImg {
-    Color([u8; 3]),
+    Color([u8; 4]),
     Img(String),
 }
 
@@ -82,7 +82,7 @@ impl BgImg {
     fn serialized_size(&self) -> usize {
         1 //discriminant
         + match self {
-            Self::Color(_) => 3,
+            Self::Color(_) => 4,
             Self::Img(s) => 4 + s.len()
         }
     }
@@ -280,8 +280,8 @@ impl BgInfo {
         match img {
             BgImg::Color(color) => {
                 buf[i] = 0;
-                buf[i + 1..i + 4].copy_from_slice(color);
-                i += 4;
+                buf[i + 1..i + 5].copy_from_slice(color);
+                i += 5;
             }
             BgImg::Img(path) => {
                 buf[i] = 1;
@@ -331,8 +331,8 @@ impl BgInfo {
         i += 5;
 
         let img = if bytes[i] == 0 {
-            i += 4;
-            BgImg::Color([bytes[i - 3], bytes[i - 2], bytes[i - 1]])
+            i += 5;
+            BgImg::Color([bytes[i - 4], bytes[i - 3], bytes[i - 2], bytes[i - 1]])
         } else {
             i += 1;
             let path = deserialize_string(&bytes[i..]);
@@ -501,16 +501,16 @@ impl Transition {
 }
 
 pub struct ClearSend {
-    pub color: [u8; 3],
+    pub color: [u8; 4],
     pub outputs: Box<[String]>,
 }
 
 impl ClearSend {
     pub fn create_request(self) -> Mmap {
         // 1 - output length
-        // 3 - color bytes
+        // 4 - color bytes
         // 4 + output.len() - output len + bytes
-        let len = 4 + self.outputs.iter().map(|o| 4 + o.len()).sum::<usize>();
+        let len = 5 + self.outputs.iter().map(|o| 4 + o.len()).sum::<usize>();
         let mut mmap = Mmap::create(len);
         let bytes = mmap.slice_mut();
         bytes[0] = self.outputs.len() as u8; // we assume someone does not have more than
@@ -522,13 +522,13 @@ impl ClearSend {
             bytes[i + 4..i + 4 + len as usize].copy_from_slice(output.as_bytes());
             i += 4 + len as usize;
         }
-        bytes[i..i + 3].copy_from_slice(&self.color);
+        bytes[i..i + 4].copy_from_slice(&self.color);
         mmap
     }
 }
 
 pub struct ClearReq {
-    pub color: [u8; 3],
+    pub color: [u8; 4],
     pub outputs: Box<[MmappedStr]>,
 }
 

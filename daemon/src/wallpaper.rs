@@ -208,7 +208,7 @@ impl Wallpaper {
             configured: false,
             dirty: false,
             frame_callback_handler,
-            img: BgImg::Color([0, 0, 0]),
+            img: BgImg::Color([0, 0, 0, 0]),
             pool,
         }
     }
@@ -408,11 +408,12 @@ impl Wallpaper {
         backend: &mut Waybackend,
         objman: &mut ObjectManager<WaylandObject>,
         pixel_format: PixelFormat,
-        color: [u8; 3],
+        color: [u8; 4],
     ) {
+        let channels = pixel_format.channels() as usize;
         self.canvas_change(backend, objman, pixel_format, |canvas| {
-            for pixel in canvas.chunks_exact_mut(pixel_format.channels().into()) {
-                pixel[0..3].copy_from_slice(&color);
+            for pixel in canvas.chunks_exact_mut(channels) {
+                pixel[0..channels].copy_from_slice(&color[0..channels]);
             }
         })
     }

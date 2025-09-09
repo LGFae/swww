@@ -303,7 +303,7 @@ pub fn compress_frames(
     format: PixelFormat,
     filter: FilterType,
     resize: ResizeStrategy,
-    color: &[u8; 3],
+    color: &[u8; 4],
 ) -> Result<Vec<(BitPack, Duration)>, String> {
     let mut compressor = Compressor::new();
     let mut compressed_frames = Vec::new();
@@ -374,11 +374,11 @@ pub fn make_filter(filter: &cli::Filter) -> fast_image_resize::FilterType {
     }
 }
 
-pub fn img_pad(img: &Image, dimensions: (u32, u32), color: &[u8; 3]) -> Result<Box<[u8]>, String> {
+pub fn img_pad(img: &Image, dimensions: (u32, u32), color: &[u8; 4]) -> Result<Box<[u8]>, String> {
     let channels = img.format.channels() as usize;
 
-    let mut color3 = color.to_owned();
-    let mut color4 = [color[0], color[1], color[2], 255];
+    let mut color4 = color.to_owned();
+    let mut color3 = [color[0], color[1], color[2]];
     let color: &mut [u8] = if channels == 3 {
         &mut color3
     } else {
@@ -441,7 +441,7 @@ pub fn img_resize_fit(
     img: &Image,
     dimensions: (u32, u32),
     filter: FilterType,
-    padding_color: &[u8; 3],
+    padding_color: &[u8; 4],
 ) -> Result<Box<[u8]>, String> {
     let (width, height) = dimensions;
     if (img.width, img.height) != (width, height) {

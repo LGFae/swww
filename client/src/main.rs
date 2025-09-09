@@ -4,7 +4,6 @@ use clap::Parser;
 use common::cache;
 use common::ipc::{self, Answer, Client, IpcSocket, RequestSend};
 use common::mmap::Mmap;
-use image::Pixel;
 
 mod imgproc;
 use imgproc::*;
@@ -147,14 +146,13 @@ fn make_img_request(
             for (&dim, outputs) in dims.iter().zip(outputs) {
                 img_req_builder.push(
                     ipc::ImgSend {
-                        img: image::RgbaImage::from_pixel(
-                            dim.0,
-                            dim.1,
-                            image::Rgb(*color).to_rgba(),
-                        )
-                        .to_vec()
-                        .into_boxed_slice(),
-                        path: format!("0x{:02x}{:02x}{:02x}", color[0], color[1], color[2]),
+                        img: image::RgbaImage::from_pixel(dim.0, dim.1, image::Rgba(*color))
+                            .to_vec()
+                            .into_boxed_slice(),
+                        path: format!(
+                            "0x{:02x}{:02x}{:02x}{:02x}",
+                            color[0], color[1], color[2], color[3]
+                        ),
                         dim,
                         format: pixel_format,
                     },
@@ -379,7 +377,7 @@ fn restore_output(output: &str, namespace: &str) -> Result<(), String> {
             #[allow(deprecated)]
             no_resize: false,
             resize: ResizeStrategy::Crop,
-            fill_color: [0, 0, 0],
+            fill_color: [0, 0, 0, 255],
             filter: Filter::from_str(&filter).unwrap_or(Filter::Lanczos3),
             transition_type: cli::TransitionType::None,
             transition_step: std::num::NonZeroU8::MAX,

@@ -4,36 +4,27 @@ use clap::{Parser, ValueEnum};
 use std::fmt::Display;
 use std::path::PathBuf;
 
-fn from_hex(hex: &str) -> Result<[u8; 3], String> {
-    let chars = hex
-        .chars()
-        .filter(|&c| c.is_ascii_alphanumeric())
-        .map(|c| c.to_ascii_uppercase() as u8);
-
-    if chars.clone().count() != 6 {
+fn from_hex(hex: &str) -> Result<[u8; 4], String> {
+    if hex.len() != 6 && hex.len() != 8 {
         return Err(format!(
-            "expected 6 characters, found {}",
-            chars.clone().count()
+            "expected 6 or 8 characters in hexadecimal, found {hex}",
         ));
     }
 
-    let mut color = [0, 0, 0];
+    let mut color = [0, 0, 0, 255];
 
-    for (i, c) in chars.enumerate() {
-        match c {
-            b'A'..=b'F' => color[i / 2] += c - b'A' + 10,
-            b'0'..=b'9' => color[i / 2] += c - b'0',
-            _ => {
+    for i in (0..hex.len()).step_by(2) {
+        color[i / 2] = match u8::from_str_radix(&hex[i..i + 2], 16) {
+            Ok(color) => color,
+            Err(_) => {
                 return Err(format!(
                     "expected [0-9], [a-f], or [A-F], found '{}'",
-                    char::from(c)
+                    &hex[i..i + 2]
                 ))
             }
         }
-        if i % 2 == 0 {
-            color[i / 2] *= 16;
-        }
     }
+
     Ok(color)
 }
 
@@ -156,7 +147,7 @@ impl CliPosition {
 pub enum CliImage {
     Path(PathBuf),
     /// Single rgb color
-    Color([u8; 3]),
+    Color([u8; 4]),
 }
 
 #[derive(Parser)]
@@ -208,8 +199,8 @@ pub struct Clear {
     /// Color to fill the screen with.
     ///
     /// Must be given in rrggbb format (note there is no prepended '#').
-    #[arg(value_parser = from_hex, default_value = "000000")]
-    pub color: [u8; 3],
+    #[arg(value_parser = from_hex, default_value = "000000ff")]
+    pub color: [u8; 4],
 
     /// The daemon's namespace.
     ///
@@ -350,8 +341,8 @@ pub struct Img {
     pub resize: ResizeStrategy,
 
     /// Which color to fill the padding with when output image does not fill screen
-    #[arg(value_parser = from_hex, long, default_value = "000000")]
-    pub fill_color: [u8; 3],
+    #[arg(value_parser = from_hex, long, default_value = "000000ff")]
+    pub fill_color: [u8; 4],
 
     ///Filter to use when scaling images (run swww img --help to see options).
     ///
@@ -621,12 +612,18 @@ mod tests {
     #[test]
     fn should_convert_colors_from_hex() {
         let color = from_hex("101010").unwrap();
-        assert_eq!(color, [16, 16, 16]);
+        assert_eq!(color, [16, 16, 16, 255]);
 
         let color = from_hex("ffffff").unwrap();
-        assert_eq!(color, [255, 255, 255]);
+        assert_eq!(color, [255, 255, 255, 255]);
 
         let color = from_hex("000000").unwrap();
-        assert_eq!(color, [0, 0, 0]);
+        assert_eq!(color, [0, 0, 0, 255]);
+
+        let color = from_hex("00000000").unwrap();
+        assert_eq!(color, [0, 0, 0, 0]);
+
+        let color = from_hex("eeeeeeee").unwrap();
+        assert_eq!(color, [0xee, 0xee, 0xee, 0xee]);
     }
 }

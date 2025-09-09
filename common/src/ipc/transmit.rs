@@ -98,7 +98,7 @@ impl From<RawMsg> for RequestRecv {
                     i += 4 + output.str().len();
                     outputs.push(output);
                 }
-                let color = [bytes[i], bytes[i + 1], bytes[i + 2]];
+                let color = [bytes[i], bytes[i + 1], bytes[i + 2], bytes[i + 3]];
                 Self::Clear(ClearReq {
                     color,
                     outputs: outputs.into(),
