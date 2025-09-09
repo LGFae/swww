@@ -106,12 +106,6 @@ pub struct Wallpaper {
     pool: BumpPool,
 }
 
-impl std::cmp::PartialEq for Wallpaper {
-    fn eq(&self, other: &Self) -> bool {
-        self.output_name == other.output_name
-    }
-}
-
 impl Wallpaper {
     pub fn new(daemon: &mut crate::Daemon, output_info: OutputInfo) -> Self {
         let crate::Daemon {

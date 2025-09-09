@@ -330,7 +330,7 @@ impl Daemon {
     }
 
     fn commit_pending_surface_changes(&mut self) {
-        let mut to_stop = Vec::new();
+        let mut to_stop = Vec::with_capacity(self.wallpapers.len());
         for wallpaper in self.wallpapers.iter() {
             if wallpaper.borrow_mut().commit_surface_changes(
                 &mut self.backend,
@@ -348,13 +348,13 @@ impl Daemon {
         for transition in self.transition_animators.iter_mut() {
             transition
                 .wallpapers
-                .retain(|w1| !wallpapers.iter().any(|w2| w1.borrow().eq(&w2.borrow())));
+                .retain(|w1| !wallpapers.iter().any(|w2| w1.as_ptr() == w2.as_ptr()));
         }
 
         for animator in self.image_animators.iter_mut() {
             animator
                 .wallpapers
-                .retain(|w1| !wallpapers.iter().any(|w2| w1.borrow().eq(&w2.borrow())));
+                .retain(|w1| !wallpapers.iter().any(|w2| w1.as_ptr() == w2.as_ptr()));
         }
 
         self.transition_animators
@@ -400,7 +400,7 @@ impl wayland::wl_registry::EvHandler for Daemon {
         {
             let w = self.wallpapers.remove(i);
             w.borrow_mut().destroy(&mut self.backend);
-            self.stop_animations(&[w]);
+            self.stop_animations(std::slice::from_ref(&w));
         } else if let Some(i) = self
             .pending_outputs
             .iter()
@@ -618,7 +618,7 @@ impl wayland::zwlr_layer_surface_v1::EvHandler for Daemon {
         {
             let w = self.wallpapers.remove(i);
             w.borrow_mut().destroy(&mut self.backend);
-            self.stop_animations(&[w]);
+            self.stop_animations(std::slice::from_ref(&w));
         }
     }
 }
