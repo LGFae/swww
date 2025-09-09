@@ -23,6 +23,13 @@ impl Cli {
             match arg.as_str() {
                 "-f" | "--format" => match args.next().as_deref() {
                     Some("argb") => format = Some(PixelFormat::Argb),
+                    Some("xrgb") => {
+                        eprintln!(
+                            "WARNING: xrgb is deprecated. Use `--format argb` instead.\n\
+                            Note this is the default, so you can also just omit it."
+                        );
+                        format = Some(PixelFormat::Argb)
+                    }
                     Some("abgr") => format = Some(PixelFormat::Abgr),
                     Some("rgb") => format = Some(PixelFormat::Rgb),
                     Some("bgr") => format = Some(PixelFormat::Bgr),
