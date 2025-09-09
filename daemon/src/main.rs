@@ -366,10 +366,8 @@ impl Daemon {
 
 impl wayland::wl_display::EvHandler for Daemon {
     fn delete_id(&mut self, _: ObjectId, id: u32) {
-        if let Ok(id) = ObjectId::try_new(id) {
-            debug!("Removing object {:?}({id})", self.objman.get(id));
-            self.objman.remove(id);
-        }
+        debug!("Removing object {id}");
+        self.objman.remove(id);
     }
 
     fn error(&mut self, _: ObjectId, object_id: ObjectId, code: u32, message: &str) {
@@ -696,7 +694,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         waybackend::roundtrip(&mut backend, &mut receiver, registry, callback)?;
 
     if delete_callback {
-        objman.remove(callback);
+        objman.remove(callback.get().get());
     }
 
     // macro to help binding the globals
