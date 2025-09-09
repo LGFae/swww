@@ -1,5 +1,8 @@
 ### Unreleased
 
+
+### 0.11.0
+
 #### BREAKING
 
   * **IMPORTANT**: `--format xrgb` is no longer supported.
