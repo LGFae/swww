@@ -2,11 +2,14 @@
 
 #### BREAKING
 
-Note: though this are technically breaking changes, they are unlikely to break
-most setups. They are only a problem if you used scripts that relied on
-`swww query` output format, or if you relied on the `swww-daemon` socket file
-name.
-
+  * **IMPORTANT**: `--format xrgb` is no longer supported.
+  Use `--format argb` instead. However, this is now the default, so, if you
+  want, you can simply not set anything instead. We still accept `--format xrgb`
+  so as to not break any configurations. Previously, the daemon automatically
+  would check to see which `wayland_shm` format was the most convenient for us
+  to use. However, many people have had weird bugs when using any format other
+  than `xrgb`. Therefore, we have made that the default, and only change it when
+  the user specifically asks for it.
   * `swww query` now returns information in the following format:
   `<namespace>: OUTPUT: SIZE, scale: SCALE, currently displaying: IMAGE_OR_COLOR`
   * we are creating the socket in a slightly different location now:
@@ -21,6 +24,17 @@ name.
   `-a|--all` flag, that lets the user send commands to all namespaces at once.
   * support `avif` decoding through `dav1d`, with the `--features=avif`
   compilation option.
+  * we finally support static `SVG`s!
+  * `swww-daemon` now correctly renders static images with transparency.
+  * `swww clear` now accepts colors with an alpha value.
+
+#### Fixes
+
+  * Fixed a division by 0 when animating with no frames
+  * Fixed destroying wayland buffers too early
+  * Better fractional-scale implementation (we shamelessly tried copying the
+  `swaybg` implementation). This will hopefully prevent newer issues with
+  `hyprland`.
 
 ### 0.10.3
 
