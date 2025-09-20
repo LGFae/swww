@@ -1,6 +1,16 @@
 ### Unreleased
 
 
+### 0.11.2
+
+### 0.11.2
+
+#### Fixes
+
+  * Fixed building on some systems where `c_char` does not correspond to `i8`.
+    This was a [waybackend](https://codeberg.org/LGFae/waybackend) bug, so it
+    can be fixed my merely bumpting our dependencies over here.
+
 ### 0.11.1
 
 #### Fixes

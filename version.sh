@@ -4,7 +4,7 @@
 # (it helps us not forget anything, as has happenned before)
 
 if [ $# -lt 1 ]; then
-	echo "Usage: $0 <new version name>"
+	echo "Usage: $0 <new version name, as 'MAJOR.MINOR.PATCH'>"
 	exit 1
 fi
 
