@@ -6,7 +6,7 @@ mod animations;
 mod cli;
 mod wallpaper;
 mod wayland;
-use log::{debug, error, info, warn, LevelFilter};
+use log::{debug, error, info, trace, warn, LevelFilter};
 use rustix::{
     event::{Nsecs, Secs},
     fd::OwnedFd,
@@ -15,7 +15,7 @@ use rustix::{
 
 use wallpaper::Wallpaper;
 
-use waybackend::{objman, types::ObjectId, wire, Global};
+use waybackend::{objman, types::ObjectId, Global};
 use wayland::zwlr_layer_shell_v1::Layer;
 
 use std::{
@@ -366,8 +366,8 @@ impl Daemon {
 
 impl wayland::wl_display::EvHandler for Daemon {
     fn delete_id(&mut self, _: ObjectId, id: u32) {
-        debug!("Removing object {id}");
-        self.objman.remove(id);
+        let removed = self.objman.remove(id);
+        trace!("Removing object {id}: {removed:?}");
     }
 
     fn error(&mut self, _: ObjectId, object_id: ObjectId, code: u32, message: &str) {
@@ -567,7 +567,7 @@ impl wayland::wl_region::EvHandler for Daemon {}
 
 impl wayland::wl_buffer::EvHandler for Daemon {
     fn release(&mut self, sender_id: ObjectId) {
-        debug!("Releasing buffer {sender_id}");
+        trace!("Releasing buffer {sender_id}");
         for wallpaper in self.wallpapers.iter() {
             let strong_count = Rc::strong_count(wallpaper);
             if wallpaper.borrow_mut().try_set_buffer_release_flag(
@@ -685,9 +685,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     make_logger(cli.quiet);
 
     // next, initialize all wayland stuff
-    let mut backend = waybackend::connect()?;
-    let mut receiver = wire::Receiver::new();
-    let mut objman = objman::ObjectManager::<WaylandObject>::new(WaylandObject::Display);
+    let (mut backend, mut objman, mut receiver) =
+        waybackend::connect::<WaylandObject>(WaylandObject::Display)?;
     let registry = objman.create(WaylandObject::Registry);
     let callback = objman.create(WaylandObject::Callback);
     let (mut globals, delete_callback) =
@@ -927,14 +926,16 @@ impl log::Log for Logger {
                     log::Level::Error => "\x1b[31m[ERROR]\x1b[0m",
                     log::Level::Warn => "\x1b[33m[WARN]\x1b[0m ",
                     log::Level::Info => "\x1b[32m[INFO]\x1b[0m ",
-                    log::Level::Debug | log::Level::Trace => "\x1b[36m[DEBUG]\x1b[0m",
+                    log::Level::Debug => "\x1b[36m[DEBUG]\x1b[0m",
+                    log::Level::Trace => "[TRACE]",
                 }
             } else {
                 match record.level() {
                     log::Level::Error => "[ERROR]",
                     log::Level::Warn => "[WARN] ",
                     log::Level::Info => "[INFO] ",
-                    log::Level::Debug | log::Level::Trace => "[DEBUG]",
+                    log::Level::Debug => "[DEBUG]",
+                    log::Level::Trace => "[TRACE]",
                 }
             };
 
