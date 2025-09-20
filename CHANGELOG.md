@@ -1,6 +1,15 @@
 ### Unreleased
 
 
+### 0.11.1
+
+#### Fixes
+
+  * Fixed a big issue when animating wallpapers that was leading to ghosting.
+    Basically, we were still assuming the fourth channel was irrelevant,
+    despite the fact we moved from xrgb to argb. And so the previous frames
+    would blend into the current ones.
+
 ### 0.11.0
 
 #### BREAKING
