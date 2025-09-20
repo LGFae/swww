@@ -52,7 +52,8 @@ pub(super) fn unpack_bytes_4channels(buf: &mut [u8], diff: &[u8]) {
         );
         for _ in 0..to_cpy {
             unsafe {
-                std::ptr::copy_nonoverlapping(diff_ptr.add(diff_idx), buf_ptr.add(pix_idx * 4), 4)
+                std::ptr::copy_nonoverlapping(diff_ptr.add(diff_idx), buf_ptr.add(pix_idx * 4), 4);
+                buf_ptr.add(pix_idx * 4 + 3).write(255);
             }
             diff_idx += 3;
             pix_idx += 1;
