@@ -696,21 +696,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         objman.remove(callback.get().get());
     }
 
-    // macro to help binding the globals
-    macro_rules! match_global {
-        ($global:ident, $(($interface:ident, $object:path)),*$(,)?) => {
-            match $global.interface() {
-                $($interface::NAME => $global.bind(&mut backend, registry, &mut objman, $object)?),*,
-                _ => (),
-            }
-        }
-    }
-
-    for global in &globals {
+    {
         use wayland::*;
         use WaylandObject::*;
-        match_global!(
-            global,
+        waybackend::bind_globals!(
+            backend,
+            objman,
+            registry,
+            globals,
             (wl_compositor, Compositor),
             (wl_shm, Shm),
             (zwlr_layer_shell_v1, LayerShell),
@@ -732,15 +725,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Ok(true) = sd_notify::booted() {
         if let Err(e) = sd_notify::notify(true, &[sd_notify::NotifyState::Ready]) {
             error!("Error sending status update to systemd: {e}");
-        }
-    }
-
-    // dispatch macro
-    macro_rules! match_enum_with_interface {
-        ($handler:ident, $object:ident, $msg:ident, $(($variant:path, $interface:ident)),*$(,)?) => {
-            match $object {
-                $($variant => $interface::event(&mut $handler, &mut $msg)?),*,
-            }
         }
     }
 
@@ -779,7 +763,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .objman
                         .get(sender_id)
                         .expect("received wayland message from unknown object");
-                    match_enum_with_interface!(
+                    waybackend::match_enum_with_interface!(
                         daemon,
                         sender,
                         msg,
