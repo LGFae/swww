@@ -29,7 +29,7 @@ fn generate_data() -> (Box<[u8]>, Box<[u8]>) {
     let v1 = vec![120; 1920 * 1080 * 3];
     let mut v2 = v1.clone();
 
-    const REGIONS: usize = 2000;
+    const REGIONS: usize = 1500;
     let diff_bytes: usize = v2.len() / (REGIONS + 1);
     // Make different regions
     for i in 0..REGIONS {

@@ -8,10 +8,6 @@ pub(super) mod ssse3;
 /// buf must have the EXACT expected size by the BitPack
 #[inline(always)]
 pub(super) fn unpack_bytes_4channels(buf: &mut [u8], diff: &[u8]) {
-    assert!(
-        diff[diff.len() - 1] | diff[diff.len() - 2] == 0,
-        "Poorly formed BitPack"
-    );
     // use the most efficient implementation available:
     #[cfg(not(debug_assertions))]
     {
@@ -21,90 +17,116 @@ pub(super) fn unpack_bytes_4channels(buf: &mut [u8], diff: &[u8]) {
         }
     }
 
-    // The final bytes are just padding to prevent us from going out of bounds
-    let len = diff.len() - 3;
-    let buf_ptr = buf.as_mut_ptr();
-    let diff_ptr = diff.as_ptr();
+    let mut dst = buf.as_mut_ptr();
+    let mut src = diff.as_ptr();
+    unsafe {
+        let last = src.add(diff.len() - 3);
+        loop {
+            let skip = index_of_first_zero_byte_u64(src);
+            src = src.add(skip);
+            dst = dst.add((u8::MAX as usize * skip + src.read() as usize) * 4);
+            src = src.add(1);
 
-    let mut diff_idx = 0;
-    let mut pix_idx = 0;
-    while diff_idx < len {
-        while unsafe { diff_ptr.add(diff_idx).read() } == u8::MAX {
-            pix_idx += u8::MAX as usize;
-            diff_idx += 1;
-        }
-        pix_idx += unsafe { diff_ptr.add(diff_idx).read() } as usize;
-        diff_idx += 1;
-
-        let mut to_cpy = 0;
-        while unsafe { diff_ptr.add(diff_idx).read() } == u8::MAX {
-            to_cpy += u8::MAX as usize;
-            diff_idx += 1;
-        }
-        to_cpy += unsafe { diff_ptr.add(diff_idx).read() } as usize;
-        diff_idx += 1;
-
-        assert!(
-            diff_idx + to_cpy * 3 + 1 < diff.len(),
-            "copying: {}, diff.len(): {}",
-            diff_idx + to_cpy * 3 + 1,
-            diff.len()
-        );
-        for _ in 0..to_cpy {
-            unsafe {
-                std::ptr::copy_nonoverlapping(diff_ptr.add(diff_idx), buf_ptr.add(pix_idx * 4), 4);
-                buf_ptr.add(pix_idx * 4 + 3).write(255);
+            let mut to_cpy = 0;
+            while src.read() == u8::MAX {
+                to_cpy += u8::MAX as usize;
+                src = src.add(1);
             }
-            diff_idx += 3;
-            pix_idx += 1;
+            to_cpy += src.read() as usize;
+            src = src.add(1);
+
+            debug_assert!(
+                src.add(to_cpy * 3 + 1) < last.add(3),
+                "copying: {:?}, last: {last:?}",
+                src.add(to_cpy * 3 + 1),
+            );
+            for _ in 0..to_cpy {
+                std::ptr::copy_nonoverlapping(src, dst, 4);
+                dst.add(3).write(0xFF);
+                src = src.add(3);
+                dst = dst.add(4);
+            }
+            dst = dst.add(4);
+            if src == last {
+                break;
+            }
         }
-        pix_idx += 1;
     }
 }
 
 #[inline(always)]
 pub(super) fn unpack_bytes_3channels(buf: &mut [u8], diff: &[u8]) {
-    assert!(
-        diff[diff.len() - 1] | diff[diff.len() - 2] == 0,
-        "Poorly formed BitPack"
-    );
-    // The final bytes are just padding to prevent us from going out of bounds
-    let len = diff.len() - 3;
-    let buf_ptr = buf.as_mut_ptr();
-    let diff_ptr = diff.as_ptr();
+    let mut dst = buf.as_mut_ptr();
+    let mut src = diff.as_ptr();
+    unsafe {
+        let last = src.add(diff.len() - 3);
+        loop {
+            let skip = index_of_first_zero_byte_u64(src);
+            src = src.add(skip);
+            dst = dst.add((u8::MAX as usize * skip + src.read() as usize) * 3);
+            src = src.add(1);
 
-    let mut diff_idx = 0;
-    let mut pix_idx = 0;
-    while diff_idx < len {
-        while unsafe { diff_ptr.add(diff_idx).read() } == u8::MAX {
-            pix_idx += u8::MAX as usize;
-            diff_idx += 1;
-        }
-        pix_idx += unsafe { diff_ptr.add(diff_idx).read() } as usize;
-        diff_idx += 1;
+            let mut to_cpy = 0;
+            while src.read() == u8::MAX {
+                to_cpy += u8::MAX as usize;
+                src = src.add(1);
+            }
+            to_cpy += src.read() as usize;
+            src = src.add(1);
 
-        let mut to_cpy = 0;
-        while unsafe { diff_ptr.add(diff_idx).read() } == u8::MAX {
-            to_cpy += u8::MAX as usize;
-            diff_idx += 1;
-        }
-        to_cpy += unsafe { diff_ptr.add(diff_idx).read() } as usize;
-        diff_idx += 1;
-
-        assert!(
-            diff_idx + to_cpy * 3 <= diff.len(),
-            "diff_idx: {diff_idx}, to_copy: {to_cpy}, diff.len(): {}",
-            diff.len()
-        );
-        unsafe {
-            std::ptr::copy_nonoverlapping(
-                diff_ptr.add(diff_idx),
-                buf_ptr.add(pix_idx * 3),
-                to_cpy * 3,
+            debug_assert!(
+                src.add(to_cpy * 3 + 1) < last.add(3),
+                "copying: {:?}, last: {last:?}",
+                src.add(to_cpy * 3 + 1),
             );
+            std::ptr::copy_nonoverlapping(src, dst, to_cpy * 3);
+            dst = dst.add((to_cpy + 1) * 3);
+            src = src.add(to_cpy * 3);
+            if src == last {
+                break;
+            }
         }
-        diff_idx += to_cpy * 3;
-        pix_idx += to_cpy + 1;
+    }
+}
+
+unsafe fn index_of_first_zero_byte_u64(ptr: *const u8) -> usize {
+    // I don't know if there is an architecture where usize > 8, but we need to prevent it anyway
+    if const { std::mem::size_of::<usize>() > 8 } {
+        let mut i = 0;
+        let mut x = ptr.add(i).cast::<u64>().read_unaligned();
+        while x == u64::MAX {
+            i += 8;
+            x = ptr.add(i).cast::<u64>().read_unaligned();
+        }
+        i += {
+            #[cfg(target_endian = "little")]
+            {
+                x.trailing_ones() as usize / 8
+            }
+            #[cfg(target_endian = "big")]
+            {
+                x.leading_ones() as usize / 8
+            }
+        };
+        i
+    } else {
+        let mut i = 0;
+        let mut x = ptr.add(i).cast::<usize>().read_unaligned();
+        while x == usize::MAX {
+            i += std::mem::size_of::<usize>();
+            x = ptr.add(i).cast::<usize>().read_unaligned();
+        }
+        i += {
+            #[cfg(target_endian = "little")]
+            {
+                x.trailing_ones() as usize / 8
+            }
+            #[cfg(target_endian = "big")]
+            {
+                x.leading_ones() as usize / 8
+            }
+        };
+        i
     }
 }
 

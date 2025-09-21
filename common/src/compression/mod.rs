@@ -322,12 +322,15 @@ mod tests {
                 .decompress(&compressed, &mut buf, format)
                 .unwrap();
             for i in 0..2 {
-                for j in 0..3 {
-                    assert_eq!(
-                        frame2[i * 3 + j],
-                        buf[i * format.channels() as usize + j],
-                        "\nframe2: {frame2:?}, buf: {buf:?}\n"
-                    );
+                let k = i * 3;
+                let l = i * format.channels() as usize;
+                assert_eq!(
+                    frame2[k..k + 3],
+                    buf[l..l + 3],
+                    "\nframe2: {frame2:?}, buf: {buf:?}\n"
+                );
+                if format.channels() == 4 {
+                    assert_eq!(buf[l + 3], 0xFF, "{buf:?}");
                 }
             }
         }

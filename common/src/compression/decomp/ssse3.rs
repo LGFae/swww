@@ -6,54 +6,50 @@ pub(super) unsafe fn unpack_bytes_4channels(buf: &mut [u8], diff: &[u8]) {
     #[cfg(target_arch = "x86_64")]
     use std::arch::x86_64 as intr;
 
-    // The final bytes are just padding to prevent us from going out of bounds
-    let len = diff.len() - 3;
-    let buf_ptr = buf.as_mut_ptr();
-    let diff_ptr = diff.as_ptr();
+    let mut dst = buf.as_mut_ptr();
+    let mut src = diff.as_ptr();
+    let last = src.add(diff.len() - 3);
     let mask = intr::_mm_set_epi8(-1, 11, 10, 9, -1, 8, 7, 6, -1, 5, 4, 3, -1, 2, 1, 0);
     let alphas = intr::_mm_set_epi8(-1, 0, 0, 0, -1, 0, 0, 0, -1, 0, 0, 0, -1, 0, 0, 0);
-
-    let mut diff_idx = 0;
-    let mut pix_idx = 0;
-    while diff_idx < len {
-        while diff_ptr.add(diff_idx).read() == u8::MAX {
-            pix_idx += u8::MAX as usize;
-            diff_idx += 1;
-        }
-        pix_idx += diff_ptr.add(diff_idx).read() as usize;
-        diff_idx += 1;
+    loop {
+        let skip = super::index_of_first_zero_byte_u64(src);
+        src = src.add(skip);
+        dst = dst.add((u8::MAX as usize * skip + src.read() as usize) * 4);
+        src = src.add(1);
 
         let mut to_cpy = 0;
-        while diff_ptr.add(diff_idx).read() == u8::MAX {
+        while src.read() == u8::MAX {
             to_cpy += u8::MAX as usize;
-            diff_idx += 1;
+            src = src.add(1);
         }
-        to_cpy += diff_ptr.add(diff_idx).read() as usize;
-        diff_idx += 1;
+        to_cpy += src.read() as usize;
+        src = src.add(1);
 
         assert!(
-            diff_idx + to_cpy * 3 + 1 < diff.len(),
-            "copying: {}, diff.len(): {}",
-            diff_idx + to_cpy * 3 + 1,
-            diff.len()
+            src.add(to_cpy * 3 + 1) < last.add(3),
+            "copying: {:?}, last: {last:?}",
+            src.add(to_cpy * 3 + 1),
         );
         while to_cpy > 4 {
-            let d = intr::_mm_loadu_si128(diff_ptr.add(diff_idx).cast());
-            let shuffle = intr::_mm_shuffle_epi8(d, mask);
-            let to_store = intr::_mm_add_epi8(shuffle, alphas);
-            intr::_mm_storeu_si128(buf_ptr.add(pix_idx * 4).cast(), to_store);
+            let d = intr::_mm_loadu_si128(src.cast());
+            let shuffled = intr::_mm_shuffle_epi8(d, mask);
+            let to_store = intr::_mm_or_si128(shuffled, alphas);
+            intr::_mm_storeu_si128(dst.cast(), to_store);
 
-            diff_idx += 12;
-            pix_idx += 4;
+            src = src.add(12);
+            dst = dst.add(16);
             to_cpy -= 4;
         }
         for _ in 0..to_cpy {
-            std::ptr::copy_nonoverlapping(diff_ptr.add(diff_idx), buf_ptr.add(pix_idx * 4), 4);
-            buf_ptr.add(pix_idx * 4 + 3).write(255);
-            diff_idx += 3;
-            pix_idx += 1;
+            std::ptr::copy_nonoverlapping(src, dst, 4);
+            dst.add(3).write(0xFF);
+            src = src.add(3);
+            dst = dst.add(4);
         }
-        pix_idx += 1;
+        dst = dst.add(4);
+        if src == last {
+            break;
+        }
     }
 }
 
