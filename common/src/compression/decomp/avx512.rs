@@ -1,11 +1,12 @@
 use super::super::DecompressionError;
 
-#[inline]
-#[target_feature(enable = "ssse3")]
+#[target_feature(enable = "avx512f,avx512bw,avx512vbmi2")]
 pub(crate) unsafe fn unpack_bytes_4channels(
     buf: &mut [u8],
     diff: &[u8],
 ) -> Result<(), DecompressionError> {
+    const MASK: u64 = 0b0111011101110111011101110111011101110111011101110111011101110111;
+
     #[cfg(target_arch = "x86")]
     use std::arch::x86 as intr;
     #[cfg(target_arch = "x86_64")]
@@ -15,8 +16,7 @@ pub(crate) unsafe fn unpack_bytes_4channels(
     let mut src = diff.as_ptr();
     let last_src = src.add(diff.len() - 2);
     let last_dst = dst.add(buf.len());
-    let mask = intr::_mm_set_epi8(-1, 11, 10, 9, -1, 8, 7, 6, -1, 5, 4, 3, -1, 2, 1, 0);
-    let alphas = intr::_mm_set_epi8(-1, 0, 0, 0, -1, 0, 0, 0, -1, 0, 0, 0, -1, 0, 0, 0);
+    let ones = intr::_mm512_set1_epi8(-1);
     while src < last_src {
         while src.read() == u8::MAX {
             dst = dst.add(u8::MAX as usize * 4);
@@ -35,31 +35,31 @@ pub(crate) unsafe fn unpack_bytes_4channels(
 
         super::verify_copy::<4>(src, last_src, dst, last_dst, to_cpy)?;
 
-        while to_cpy > 4 {
-            let d = intr::_mm_loadu_si128(src.cast());
-            let shuffled = intr::_mm_shuffle_epi8(d, mask);
-            let to_store = intr::_mm_or_si128(shuffled, alphas);
-            intr::_mm_storeu_si128(dst.cast(), to_store);
+        while to_cpy > 0 {
+            let amount = to_cpy.min(16);
 
-            src = src.add(12);
-            dst = dst.add(16);
-            to_cpy -= 4;
+            let a = intr::_mm512_maskz_loadu_epi8((1u64 << (amount as u64 * 3)) - 1, src.cast());
+            let expanded = intr::_mm512_mask_expand_epi8(ones, MASK, a);
+            intr::_mm512_mask_storeu_epi8(
+                dst.cast(),
+                1u64.unbounded_shl(amount as u32 * 4).wrapping_sub(1),
+                expanded,
+            );
+            src = src.add(amount * 3);
+            dst = dst.add(amount * 4);
+            to_cpy -= amount;
         }
-        for _ in 0..to_cpy {
-            std::ptr::copy_nonoverlapping(src, dst, 4);
-            dst.add(3).write(0xFF);
-            src = src.add(3);
-            dst = dst.add(4);
-        }
+
         dst = dst.add(4);
     }
 
     Ok(())
 }
 
-#[inline]
-#[target_feature(enable = "ssse3")]
+#[target_feature(enable = "avx512f,avx512bw,avx512vbmi2")]
 pub(crate) unsafe fn unpack_unsafe_bytes_4channels(buf: &mut [u8], diff: &[u8]) {
+    const MASK: u64 = 0b0111011101110111011101110111011101110111011101110111011101110111;
+
     #[cfg(target_arch = "x86")]
     use std::arch::x86 as intr;
     #[cfg(target_arch = "x86_64")]
@@ -68,8 +68,7 @@ pub(crate) unsafe fn unpack_unsafe_bytes_4channels(buf: &mut [u8], diff: &[u8]) 
     let mut dst = buf.as_mut_ptr();
     let mut src = diff.as_ptr();
     let last_src = src.add(diff.len() - 2);
-    let mask = intr::_mm_set_epi8(-1, 11, 10, 9, -1, 8, 7, 6, -1, 5, 4, 3, -1, 2, 1, 0);
-    let alphas = intr::_mm_set_epi8(-1, 0, 0, 0, -1, 0, 0, 0, -1, 0, 0, 0, -1, 0, 0, 0);
+    let ones = intr::_mm512_set1_epi8(-1);
     while src < last_src {
         while src.read() == u8::MAX {
             dst = dst.add(u8::MAX as usize * 4);
@@ -86,22 +85,21 @@ pub(crate) unsafe fn unpack_unsafe_bytes_4channels(buf: &mut [u8], diff: &[u8]) 
         to_cpy += src.read() as usize;
         src = src.add(1);
 
-        while to_cpy > 4 {
-            let d = intr::_mm_loadu_si128(src.cast());
-            let shuffled = intr::_mm_shuffle_epi8(d, mask);
-            let to_store = intr::_mm_or_si128(shuffled, alphas);
-            intr::_mm_storeu_si128(dst.cast(), to_store);
+        while to_cpy > 0 {
+            let amount = to_cpy.min(16);
 
-            src = src.add(12);
-            dst = dst.add(16);
-            to_cpy -= 4;
+            let a = intr::_mm512_maskz_loadu_epi8((1u64 << (amount as u64 * 3)) - 1, src.cast());
+            let expanded = intr::_mm512_mask_expand_epi8(ones, MASK, a);
+            intr::_mm512_mask_storeu_epi8(
+                dst.cast(),
+                1u64.unbounded_shl(amount as u32 * 4).wrapping_sub(1),
+                expanded,
+            );
+            src = src.add(amount * 3);
+            dst = dst.add(amount * 4);
+            to_cpy -= amount;
         }
-        for _ in 0..to_cpy {
-            std::ptr::copy_nonoverlapping(src, dst, 4);
-            dst.add(3).write(0xFF);
-            src = src.add(3);
-            dst = dst.add(4);
-        }
+
         dst = dst.add(4);
     }
 }
@@ -122,7 +120,7 @@ mod tests {
 
     #[test]
     fn small() {
-        if !is_x86_feature_detected!("ssse3") {
+        if !is_x86_feature_detected!("avx512vbmi2") {
             return;
         }
         let frame1 = [1, 2, 3, 4, 5, 6];
@@ -146,7 +144,7 @@ mod tests {
 
     #[test]
     fn total_random() {
-        if !is_x86_feature_detected!("ssse3") {
+        if !is_x86_feature_detected!("avx512vbmi2") {
             return;
         }
         for _ in 0..10 {
@@ -194,7 +192,7 @@ mod tests {
 
     #[test]
     fn full() {
-        if !is_x86_feature_detected!("ssse3") {
+        if !is_x86_feature_detected!("avx512vbmi2") {
             return;
         }
         for _ in 0..10 {
