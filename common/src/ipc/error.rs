@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use rustix::io::Errno;
 
-/// Failiures if IPC with added context
+/// Failures if IPC with added context
 #[derive(Debug)]
 pub struct IpcError {
     err: Errno,

@@ -152,7 +152,7 @@ pub fn get_previous_image_filter_and_path(
     namespace: &str,
 ) -> io::Result<(String, String)> {
     let mut filepath = cache_dir()?;
-    clean_previous_verions(&filepath);
+    clean_previous_versions(&filepath);
 
     filepath.push(output_name);
 
@@ -200,7 +200,7 @@ pub fn clean() -> io::Result<()> {
     std::fs::remove_dir_all(cache_dir()?)
 }
 
-fn clean_previous_verions(cache_dir: &Path) {
+fn clean_previous_versions(cache_dir: &Path) {
     let mut read_dir = match std::fs::read_dir(cache_dir) {
         Ok(read_dir) => read_dir,
         Err(_) => {

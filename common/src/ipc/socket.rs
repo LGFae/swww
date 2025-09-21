@@ -91,7 +91,7 @@ impl<T> IpcSocket<T> {
         let filename = match p.file_name() {
             Some(filename) => {
                 let mut f = filename.to_os_string();
-                // add a final '.' character, because the namespace is always preceed by a dot
+                // add a final '.' character, because the namespace is always preceded by a dot
                 // character
                 f.push(std::ffi::OsStr::from_bytes(b"."));
                 f
@@ -145,7 +145,7 @@ impl IpcSocket<Client> {
         let path = Self::path(namespace);
         let addr = net::SocketAddrUnix::new(&path).expect("addr is correct");
 
-        // this will be overwriten, Rust just doesn't know it
+        // this will be overwritten, Rust just doesn't know it
         let mut error = Errno::INVAL;
         for _ in 0..tries {
             match net::connect(&socket, &addr) {

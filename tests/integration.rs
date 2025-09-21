@@ -86,7 +86,7 @@ fn init_daemon() {
     });
     // sleep for a bit to allow the daemon to init correctly
     // note that even though this is a race-condition, in the actual program we
-    // have implemented some proper syncronization. And, in here, it is *very*
+    // have implemented some proper synchronization. And, in here, it is *very*
     // unlikely that this will ever be a problem, (and, if it is, it is not a
     // very big deal, it will merely cause init_daemon_twice to false-fail)
     std::thread::sleep(std::time::Duration::from_millis(1));

@@ -22,7 +22,7 @@ pub struct Mmap {
     fd: OwnedFd,
     ptr: NonNull<std::ffi::c_void>,
     len: usize,
-    mmaped: bool,
+    mmapped: bool,
 }
 
 impl Mmap {
@@ -45,7 +45,7 @@ impl Mmap {
             fd,
             ptr,
             len,
-            mmaped: true,
+            mmapped: true,
         }
     }
 
@@ -111,7 +111,7 @@ impl Mmap {
         if let Err(e) = unsafe { munmap(self.ptr.as_ptr(), self.len) } {
             eprintln!("ERROR WHEN UNMAPPING MEMORY: {e}");
         } else {
-            self.mmaped = false;
+            self.mmapped = false;
         }
     }
 
@@ -120,8 +120,8 @@ impl Mmap {
     ///
     /// Because `unmap`, above, is only used in the daemon, this is also only used there
     pub fn ensure_mapped(&mut self) {
-        if !self.mmaped {
-            self.mmaped = true;
+        if !self.mmapped {
+            self.mmapped = true;
             self.ptr = unsafe {
                 let ptr = mmap(
                     std::ptr::null_mut(),
@@ -198,7 +198,7 @@ impl Mmap {
             fd,
             ptr,
             len,
-            mmaped: true,
+            mmapped: true,
         }
     }
 
@@ -231,7 +231,7 @@ impl Mmap {
 impl Drop for Mmap {
     #[inline]
     fn drop(&mut self) {
-        if self.mmaped {
+        if self.mmapped {
             self.unmap();
         }
     }

@@ -9,7 +9,7 @@
 
   * Fixed building on some systems where `c_char` does not correspond to `i8`.
     This was a [waybackend](https://codeberg.org/LGFae/waybackend) bug, so it
-    can be fixed my merely bumpting our dependencies over here.
+    can be fixed my merely bumping our dependencies over here.
 
 ### 0.11.1
 
@@ -104,7 +104,7 @@ Okay, this one's a doozy.
   * new `--layer` option for `swww-daemon`
   * new `--resize stretch` option, by @rexept
   * cache now stores the image filter, by @kerty0
-  * we can now read images from stanard input, by @iynaix
+  * we can now read images from standard input, by @iynaix
   * new `swww_randomize_multi.sh` example script, by @cplir-c
 
 #### Fixes
@@ -132,7 +132,7 @@ has changed so much that testing them in isolation would be challenging.
   animation stuttering in some systems. Furthermore, and more importantly,
   the animations are now fast enough that we no longer need `rayon` as a
   dependency.
-  * more generaly, we have completed nuked the multi-threaded code.
+  * more generally, we have completed nuked the multi-threaded code.
   `swww-daemon` now only spawns a single thread, letting us get rid of every
   `Arc` wrapper, and other annoying, fragile, synchronization code.
   * we are using `rustix` instead of the `std` as much as possible, for lower
@@ -332,7 +332,7 @@ apologize for the inconvenience.
   * implement `clear-cache` command
   * we also automatically clear the cache from old `swww` versions now!
 
-Also, we have udpdated all crates versions so that they all match. This should
+Also, we have updated all crates versions so that they all match. This should
 help some package maintainers that were having difficulty setting `swww` up for
 e.g. Debian, I believe.
 
@@ -352,7 +352,7 @@ Pretty a much a near-exclusive bug fix release:
 
 #### Additions:
 
-  * `--transition-type none`, which is an alias to `--trasition-type simple`
+  * `--transition-type none`, which is an alias to `--transition-type simple`
   `--transition-step 255`
 
 

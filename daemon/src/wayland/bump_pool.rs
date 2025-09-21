@@ -155,7 +155,7 @@ impl BumpPool {
         let new_len = self.occupied_bytes(pixel_format) + len;
 
         // we unmap the shared memory file descriptor when animations are done, so here we must
-        // ensure the bytes are actually mmaped
+        // ensure the bytes are actually mmapped
         self.mmap.ensure_mapped();
 
         if new_len > self.mmap.len() {
@@ -222,7 +222,7 @@ impl BumpPool {
     }
 
     /// gets the last buffer we've drawn to
-    pub fn get_commitable_buffer(&mut self) -> ObjectId {
+    pub fn get_committable_buffer(&mut self) -> ObjectId {
         let buf = &mut self.buffers[self.last_used_buffer];
         buf.unset_released();
         buf.object_id

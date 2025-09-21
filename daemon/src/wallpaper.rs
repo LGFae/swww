@@ -424,7 +424,7 @@ impl Wallpaper {
     }
 
     pub fn destroy(&mut self, backend: &mut Waybackend) {
-        // carefull not to panic here, since we call this on drop
+        // Careful not to panic here, since we call this on drop
 
         if let Err(e) = wp_viewport::req::destroy(backend, self.wp_viewport) {
             error!("error destroying wp_viewport: {e:?}");
@@ -455,7 +455,7 @@ impl Wallpaper {
         objman: &mut ObjectManager<WaylandObject>,
     ) {
         let surface = self.wl_surface;
-        let buf = self.pool.get_commitable_buffer();
+        let buf = self.pool.get_committable_buffer();
         let (width, height) = (self.pool.width(), self.pool.height());
 
         wl_surface::req::attach(backend, surface, Some(buf), 0, 0).unwrap();
