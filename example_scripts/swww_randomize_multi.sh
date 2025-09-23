@@ -22,7 +22,7 @@ while true; do
 	done \
 	| sort -n | cut -d':' -f2- \
 	| while read -r img; do
-		for d in $(swww query | grep -Po "^[^:]+"); do # see swww-query(1)
+		for d in $(swww query | awk '{print $2}' | sed s/://); do # see swww-query(1)
 			# Get next random image for this display, or re-shuffle images
 			# and pick again if no more unused images are remaining
 			[ -z "$img" ] && if read -r img; then true; else break 2; fi
