@@ -66,6 +66,7 @@ struct Daemon {
     image_animators: Vec<ImageAnimator>,
     namespace: String,
     use_cache: bool,
+    paused: bool,
     fractional_scale_manager: Option<ObjectId>,
 
     /// Outputs whose wallpapers are yet to be created. We only create a wallpaper after receiving
@@ -123,6 +124,7 @@ impl Daemon {
             image_animators: Vec::new(),
             namespace: args.namespace,
             use_cache: !args.no_cache,
+            paused: false,
             fractional_scale_manager,
             pending_outputs,
             poll_time: None,
@@ -175,6 +177,10 @@ impl Daemon {
             }
             RequestRecv::Ping => {
                 Answer::Ping(self.wallpapers.iter().all(|w| w.borrow().configured))
+            }
+            RequestRecv::Pause => {
+                self.paused = !self.paused;
+                Answer::Ok
             }
             RequestRecv::Kill => {
                 exit_daemon();
@@ -733,7 +739,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         use rustix::event::{PollFd, PollFlags};
         use wayland::*;
         use WaylandObject::*;
-
+        
         daemon.backend.flush()?;
 
         let mut fds = [
@@ -752,6 +758,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let wayland_event = !fds[0].revents().is_empty();
         let socket_event = !fds[1].revents().is_empty();
 
+        if socket_event {
+            // See above note about rustix::retry_on_intr
+            match rustix::net::accept(&listener.fd) {
+                Ok(stream) => daemon.recv_socket_msg(IpcSocket::new(stream)),
+                Err(rustix::io::Errno::INTR | rustix::io::Errno::WOULDBLOCK) => continue,
+                Err(e) => return Err(Box::new(e)),
+            }
+        }
+
+        if daemon.paused {
+            continue
+        }
+        
         if wayland_event {
             let mut msg = receiver.recv(&daemon.backend.wayland_fd)?;
             while msg.has_next()? {
@@ -787,15 +806,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             daemon.commit_pending_surface_changes();
-        }
-
-        if socket_event {
-            // See above note about rustix::retry_on_intr
-            match rustix::net::accept(&listener.fd) {
-                Ok(stream) => daemon.recv_socket_msg(IpcSocket::new(stream)),
-                Err(rustix::io::Errno::INTR | rustix::io::Errno::WOULDBLOCK) => continue,
-                Err(e) => return Err(Box::new(e)),
-            }
         }
 
         if daemon.poll_time.is_some() {

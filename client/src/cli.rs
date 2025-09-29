@@ -179,6 +179,9 @@ pub enum Swww {
     ///
     /// Use `-` to read from stdin
     Img(Img),
+    
+    ///Pauses the daemon
+    Pause(Pause),
 
     ///Kills the daemon
     Kill(Kill),
@@ -218,6 +221,24 @@ pub struct Clear {
     /// If it isn't set, the image is displayed on all outputs.
     #[clap(short, long, default_value = "")]
     pub outputs: String,
+}
+
+#[derive(Parser)]
+pub struct Pause {
+    /// Pause all swww-daemon instances (all namespaces)
+    #[arg(short, long, default_value = "false")]
+    pub all: bool,
+
+    /// The daemon's namespace.
+    ///
+    /// The resulting namespace will be 'swww-daemon' appended to what you pass in this argument.
+    /// For this to work, you must call `swww-daemon --namespace <custom_namespace>` with the same
+    /// value you use here.
+    ///
+    /// You can specify multiple namespaces at once with multiple `--namespaces` arguments. The
+    /// commands will be sent to every namespace you have specified.
+    #[arg(short, long, default_value = "")]
+    pub namespace: Vec<String>,
 }
 
 #[derive(Parser)]
