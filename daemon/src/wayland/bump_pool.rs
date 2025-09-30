@@ -212,9 +212,13 @@ impl BumpPool {
 
         if self.last_used_buffer != i {
             let last_offset = self.buffer_offset(self.last_used_buffer, pixel_format);
-            self.mmap
-                .slice_mut()
-                .copy_within(last_offset..last_offset + len, offset);
+            unsafe {
+                let ptr = self.mmap.slice_mut().as_mut_ptr();
+                // SAFETY: buffer_offset always calculates the offset as a multiple of buffer_len.
+                // Therefore, as long the offsets are different (which we checked), the two regions
+                // can never overlap
+                core::ptr::copy_nonoverlapping(ptr.add(last_offset), ptr.add(offset), len);
+            }
             self.last_used_buffer = i;
         }
 
