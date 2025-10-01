@@ -739,7 +739,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         use rustix::event::{PollFd, PollFlags};
         use wayland::*;
         use WaylandObject::*;
-        
+
         daemon.backend.flush()?;
 
         let mut fds = [
@@ -758,19 +758,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let wayland_event = !fds[0].revents().is_empty();
         let socket_event = !fds[1].revents().is_empty();
 
-        if socket_event {
-            // See above note about rustix::retry_on_intr
-            match rustix::net::accept(&listener.fd) {
-                Ok(stream) => daemon.recv_socket_msg(IpcSocket::new(stream)),
-                Err(rustix::io::Errno::INTR | rustix::io::Errno::WOULDBLOCK) => continue,
-                Err(e) => return Err(Box::new(e)),
-            }
-        }
-
-        if daemon.paused {
-            continue
-        }
-        
         if wayland_event {
             let mut msg = receiver.recv(&daemon.backend.wayland_fd)?;
             while msg.has_next()? {
@@ -808,7 +795,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             daemon.commit_pending_surface_changes();
         }
 
-        if daemon.poll_time.is_some() {
+        if socket_event {
+            // See above note about rustix::retry_on_intr
+            match rustix::net::accept(&listener.fd) {
+                Ok(stream) => daemon.recv_socket_msg(IpcSocket::new(stream)),
+                Err(rustix::io::Errno::INTR | rustix::io::Errno::WOULDBLOCK) => continue,
+                Err(e) => return Err(Box::new(e)),
+            }
+        }
+
+        if daemon.poll_time.is_some() && !daemon.paused {
             daemon.draw();
         }
     }

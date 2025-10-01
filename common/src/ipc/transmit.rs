@@ -220,7 +220,7 @@ code! {
     ResConfigured 6,
     ResAwait      7,
     ResInfo       8,
-    
+
     ReqPause      9,
 }
 
