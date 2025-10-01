@@ -66,6 +66,7 @@ struct Daemon {
     image_animators: Vec<ImageAnimator>,
     namespace: String,
     use_cache: bool,
+    paused: bool,
     fractional_scale_manager: Option<ObjectId>,
 
     /// Outputs whose wallpapers are yet to be created. We only create a wallpaper after receiving
@@ -123,6 +124,7 @@ impl Daemon {
             image_animators: Vec::new(),
             namespace: args.namespace,
             use_cache: !args.no_cache,
+            paused: false,
             fractional_scale_manager,
             pending_outputs,
             poll_time: None,
@@ -175,6 +177,10 @@ impl Daemon {
             }
             RequestRecv::Ping => {
                 Answer::Ping(self.wallpapers.iter().all(|w| w.borrow().configured))
+            }
+            RequestRecv::Pause => {
+                self.paused = !self.paused;
+                Answer::Ok
             }
             RequestRecv::Kill => {
                 exit_daemon();
@@ -798,7 +804,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
-        if daemon.poll_time.is_some() {
+        if daemon.poll_time.is_some() && !daemon.paused {
             daemon.draw();
         }
     }

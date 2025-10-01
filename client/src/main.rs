@@ -21,6 +21,7 @@ fn main() -> Result<(), String> {
             return cache::clean().map_err(|e| format!("failed to clean the cache: {e}"))
         }
         Swww::Img(img) => img.all,
+        Swww::Pause(pause) => pause.all,
         Swww::Kill(kill) => kill.all,
         Swww::Query(query) => query.all,
     };
@@ -35,6 +36,7 @@ fn main() -> Result<(), String> {
                 return cache::clean().map_err(|e| format!("failed to clean the cache: {e}"))
             }
             Swww::Img(img) => img.namespace.clone(),
+            Swww::Pause(pause) => pause.namespace.clone(),
             Swww::Kill(kill) => kill.namespace.clone(),
             Swww::Query(query) => query.namespace.clone(),
         }
@@ -126,6 +128,7 @@ fn make_request(args: &Swww, namespace: &str) -> Result<Option<RequestSend>, Str
 
             Ok(Some(RequestSend::Img(img_request)))
         }
+        Swww::Pause(_) => Ok(Some(RequestSend::Pause)),
         Swww::Kill(_) => Ok(Some(RequestSend::Kill)),
         Swww::Query(_) => Ok(Some(RequestSend::Query)),
     }
