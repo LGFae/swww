@@ -179,7 +179,7 @@ pub enum Swww {
     ///
     /// Use `-` to read from stdin
     Img(Img),
-    
+
     ///Pauses the daemon
     Pause(Pause),
 
