@@ -24,8 +24,3 @@ pkg-config = "0.3"
 
 [dev-dependencies]
 fastrand = { version = "2.3", default-features = false, features = ["std"] }
-tiny-bench = { version = "0.4" }
-
-[[bench]]
-name = "compression"
-harness = false
