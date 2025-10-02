@@ -126,9 +126,10 @@ pub(crate) fn store_animation_frames(
     animation: &[u8],
     path: &Path,
     dimensions: (u32, u32),
+    resize: &str,
     pixel_format: PixelFormat,
 ) -> io::Result<()> {
-    let filename = animation_filename(path, dimensions, pixel_format);
+    let filename = animation_filename(path, dimensions, resize, pixel_format);
     let mut filepath = cache_dir()?;
     filepath.push(&filename);
 
@@ -142,9 +143,10 @@ pub(crate) fn store_animation_frames(
 pub fn load_animation_frames(
     path: &Path,
     dimensions: (u32, u32),
+    resize: &str,
     pixel_format: PixelFormat,
 ) -> io::Result<Option<Animation>> {
-    let filename = animation_filename(path, dimensions, pixel_format);
+    let filename = animation_filename(path, dimensions, resize, pixel_format);
     let cache_dir = cache_dir()?;
     let mut filepath = cache_dir.clone();
     filepath.push(filename);
@@ -295,12 +297,18 @@ fn cache_dir() -> io::Result<PathBuf> {
 }
 
 #[must_use]
-fn animation_filename(path: &Path, dimensions: (u32, u32), pixel_format: PixelFormat) -> PathBuf {
+fn animation_filename(
+    path: &Path,
+    dimensions: (u32, u32),
+    resize: &str,
+    pixel_format: PixelFormat,
+) -> PathBuf {
     format!(
-        "{}__{}x{}_{:?}",
+        "{}__{}x{}_{}_{:?}",
         path.to_string_lossy().replace('/', "_"),
         dimensions.0,
         dimensions.1,
+        resize,
         pixel_format,
     )
     .into()

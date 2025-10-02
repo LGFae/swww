@@ -110,6 +110,7 @@ impl ImageRequestBuilder {
                 &self.memory.slice()[animation_start..],
                 &p,
                 *dims,
+                resize,
                 *format,
             ) {
                 eprintln!("Error storing cache for {}: {e}", path);
