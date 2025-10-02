@@ -14,6 +14,8 @@ use crate::ipc::Animation;
 use crate::ipc::PixelFormat;
 use crate::mmap::Mmap;
 
+const CACHE_DIRNAME: &str = env!("CARGO_PKG_VERSION");
+
 pub struct CacheEntry<'a> {
     pub namespace: &'a str,
     pub resize: &'a str,
@@ -165,8 +167,9 @@ pub fn load_animation_frames(
 }
 
 pub fn read_cache_file(output_name: &str) -> io::Result<Vec<u8>> {
+    clean_previous_versions();
+
     let mut filepath = cache_dir()?;
-    clean_previous_versions(&filepath);
 
     filepath.push(output_name);
     std::fs::read(filepath)
@@ -222,39 +225,39 @@ pub fn load(output_name: &str, namespace: &str) -> io::Result<()> {
 }
 
 pub fn clean() -> io::Result<()> {
+    clean_previous_versions();
     std::fs::remove_dir_all(cache_dir()?)
 }
 
-fn clean_previous_versions(cache_dir: &Path) {
-    let mut read_dir = match std::fs::read_dir(cache_dir) {
-        Ok(read_dir) => read_dir,
-        Err(_) => {
-            eprintln!("WARNING: failed to read cache dir {:?} entries", cache_dir);
+fn clean_previous_versions() {
+    let user_cache = match user_cache_dir() {
+        Ok(path) => path,
+        Err(e) => {
+            eprintln!("WARNING: failed to get user cache dir {e}");
             return;
         }
     };
 
-    let current_version = env!("CARGO_PKG_VERSION");
+    let mut read_dir = match std::fs::read_dir(&user_cache) {
+        Ok(read_dir) => read_dir,
+        Err(_) => {
+            eprintln!("WARNING: failed to read cache dir {user_cache:?} entries");
+            return;
+        }
+    };
 
     while let Some(Ok(entry)) = read_dir.next() {
-        let filename = entry.file_name();
-        let filename = match filename.to_str() {
-            Some(filename) => filename,
-            None => {
-                eprintln!("WARNING: failed to read filename of {:?}", filename);
-                continue;
-            }
-        };
+        let entryname = entry.file_name();
+        if entryname == CACHE_DIRNAME {
+            continue;
+        }
 
-        // only the images we've cached will have a _v token, indicating their version
-        if let Some(i) = filename.rfind("_v")
-            && &filename[i + 2..] != current_version
-            && let Err(e) = std::fs::remove_file(entry.path())
-        {
-            eprintln!(
-                "WARNING: failed to remove cache file {} of old swww version {:?}",
-                filename, e
-            );
+        if entry.path().is_dir() {
+            if let Err(e) = std::fs::remove_dir_all(entry.path()) {
+                eprintln!("failed to remove old cache directory {entryname:?}: {e}");
+            }
+        } else if let Err(e) = std::fs::remove_file(entry.path()) {
+            eprintln!("failed to remove old cache directory {entryname:?}: {e}");
         }
     }
 }
@@ -267,17 +270,15 @@ fn create_dir(p: &Path) -> io::Result<()> {
     }
 }
 
-fn cache_dir() -> io::Result<PathBuf> {
+fn user_cache_dir() -> io::Result<PathBuf> {
     if let Ok(path) = std::env::var("XDG_CACHE_HOME") {
         let mut path: PathBuf = path.into();
         path.push("swww");
-        create_dir(&path)?;
         Ok(path)
     } else if let Ok(path) = std::env::var("HOME") {
         let mut path: PathBuf = path.into();
         path.push(".cache");
         path.push("swww");
-        create_dir(&path)?;
         Ok(path)
     } else {
         Err(std::io::Error::other(
@@ -286,15 +287,21 @@ fn cache_dir() -> io::Result<PathBuf> {
     }
 }
 
+fn cache_dir() -> io::Result<PathBuf> {
+    let mut path = user_cache_dir()?;
+    path.push(CACHE_DIRNAME);
+    create_dir(&path)?;
+    Ok(path)
+}
+
 #[must_use]
 fn animation_filename(path: &Path, dimensions: (u32, u32), pixel_format: PixelFormat) -> PathBuf {
     format!(
-        "{}__{}x{}_{:?}_v{}",
+        "{}__{}x{}_{:?}",
         path.to_string_lossy().replace('/', "_"),
         dimensions.0,
         dimensions.1,
         pixel_format,
-        env!("CARGO_PKG_VERSION"),
     )
     .into()
 }
