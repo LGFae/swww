@@ -18,7 +18,7 @@ fn main() -> Result<(), String> {
         Swww::Clear(clear) => clear.all,
         Swww::Restore(restore) => restore.all,
         Swww::ClearCache => {
-            return cache::clean().map_err(|e| format!("failed to clean the cache: {e}"))
+            return cache::clean().map_err(|e| format!("failed to clean the cache: {e}"));
         }
         Swww::Img(img) => img.all,
         Swww::Pause(pause) => pause.all,
@@ -33,7 +33,7 @@ fn main() -> Result<(), String> {
             Swww::Clear(clear) => clear.namespace.clone(),
             Swww::Restore(restore) => restore.namespace.clone(),
             Swww::ClearCache => {
-                return cache::clean().map_err(|e| format!("failed to clean the cache: {e}"))
+                return cache::clean().map_err(|e| format!("failed to clean the cache: {e}"));
             }
             Swww::Img(img) => img.namespace.clone(),
             Swww::Pause(pause) => pause.namespace.clone(),

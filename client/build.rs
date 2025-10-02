@@ -1,7 +1,7 @@
 use std::io::Error;
 
-use clap::{value_parser, CommandFactory};
-use clap_complete::{generate_to, Shell};
+use clap::{CommandFactory, value_parser};
+use clap_complete::{Shell, generate_to};
 
 include!("src/cli.rs");
 

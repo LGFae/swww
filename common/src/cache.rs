@@ -172,14 +172,13 @@ pub fn load(output_name: &str, namespace: &str) -> io::Result<()> {
         return Ok(());
     }
 
-    if let Ok(mut child) = std::process::Command::new("pidof").arg("swww").spawn() {
-        if let Ok(status) = child.wait() {
-            if status.success() {
-                return Err(std::io::Error::other(
-                    "there is already another swww process running",
-                ));
-            }
-        }
+    if let Ok(mut child) = std::process::Command::new("pidof").arg("swww").spawn()
+        && let Ok(status) = child.wait()
+        && status.success()
+    {
+        return Err(std::io::Error::other(
+            "there is already another swww process running",
+        ));
     }
 
     std::process::Command::new("swww")
@@ -222,15 +221,14 @@ fn clean_previous_versions(cache_dir: &Path) {
         };
 
         // only the images we've cached will have a _v token, indicating their version
-        if let Some(i) = filename.rfind("_v") {
-            if &filename[i + 2..] != current_version {
-                if let Err(e) = std::fs::remove_file(entry.path()) {
-                    eprintln!(
-                        "WARNING: failed to remove cache file {} of old swww version {:?}",
-                        filename, e
-                    );
-                }
-            }
+        if let Some(i) = filename.rfind("_v")
+            && &filename[i + 2..] != current_version
+            && let Err(e) = std::fs::remove_file(entry.path())
+        {
+            eprintln!(
+                "WARNING: failed to remove cache file {} of old swww version {:?}",
+                filename, e
+            );
         }
     }
 }

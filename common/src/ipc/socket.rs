@@ -99,7 +99,7 @@ impl<T> IpcSocket<T> {
             None => {
                 return Err(std::io::Error::other(
                     "socket path has invalid final component",
-                ))
+                ));
             }
         };
 

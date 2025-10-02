@@ -1,13 +1,12 @@
 [workspace]
-# cargo complains that this defaults to one in virtual package manifests (for some reason)
-resolver = "2"
+resolver = "3"
 members = ["client", "daemon", "common", "tests"]
 default-members = ["client", "daemon"]
 
 [workspace.package]
 version = "0.11.2-master"
 authors = ["Leonardo Gibrowski Faé <leonardo.fae44@gmail.com>"]
-edition = "2021"
+edition = "2024"
 license-file = "LICENSE"
 rust-version = "1.89.0"
 

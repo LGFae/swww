@@ -1,5 +1,5 @@
 use common::{ipc::PixelFormat, mmap::Mmap};
-use waybackend::{objman::ObjectManager, types::ObjectId, Waybackend};
+use waybackend::{Waybackend, objman::ObjectManager, types::ObjectId};
 
 use crate::WaylandObject;
 

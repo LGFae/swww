@@ -34,20 +34,22 @@ impl Cli {
                     Some("rgb") => format = Some(PixelFormat::Rgb),
                     Some("bgr") => format = Some(PixelFormat::Bgr),
                     _ => {
-                        eprintln!("`--format` command line option must be one of: 'argb', 'abgr', 'rgb' or 'bgr'");
+                        eprintln!(
+                            "`--format` command line option must be one of: 'argb', 'abgr', 'rgb' or 'bgr'"
+                        );
                         std::process::exit(-2);
                     }
                 },
-                "-l" | "--layer" => {
-                    match args.next().as_deref() {
-                        Some("background") => layer = Layer::background,
-                        Some("bottom") => layer = Layer::bottom,
-                        _ => {
-                            eprintln!("`--layer` command line option must be one of: 'background', 'bottom'");
-                            std::process::exit(-3);
-                        }
+                "-l" | "--layer" => match args.next().as_deref() {
+                    Some("background") => layer = Layer::background,
+                    Some("bottom") => layer = Layer::bottom,
+                    _ => {
+                        eprintln!(
+                            "`--layer` command line option must be one of: 'background', 'bottom'"
+                        );
+                        std::process::exit(-3);
                     }
-                }
+                },
                 "-n" | "--namespace" => {
                     namespace = match args.next() {
                         Some(s) => s,

@@ -20,7 +20,7 @@ fn from_hex(hex: &str) -> Result<[u8; 4], String> {
                 return Err(format!(
                     "expected [0-9], [a-f], or [A-F], found '{}'",
                     &hex[i..i + 2]
-                ))
+                ));
             }
         }
     }
@@ -517,10 +517,10 @@ pub fn parse_image(raw: &str) -> Result<CliImage, String> {
     if raw == "-" || path.exists() {
         return Ok(CliImage::Path(path));
     }
-    if let Some(color) = raw.strip_prefix("0x") {
-        if let Ok(color) = from_hex(color) {
-            return Ok(CliImage::Color(color));
-        }
+    if let Some(color) = raw.strip_prefix("0x")
+        && let Ok(color) = from_hex(color)
+    {
+        return Ok(CliImage::Color(color));
     }
     Err(format!("Path '{}' does not exist", raw))
 }

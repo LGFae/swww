@@ -513,8 +513,9 @@ impl ClearSend {
         let len = 5 + self.outputs.iter().map(|o| 4 + o.len()).sum::<usize>();
         let mut mmap = Mmap::create(len);
         let bytes = mmap.slice_mut();
-        bytes[0] = self.outputs.len() as u8; // we assume someone does not have more than
-                                             // 255 monitors. Seems reasonable
+        // we assume someone does not have more than
+        // 255 monitors. Seems reasonable
+        bytes[0] = self.outputs.len() as u8;
         let mut i = 1;
         for output in self.outputs.iter() {
             let len = output.len() as u32;

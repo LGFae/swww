@@ -15,7 +15,7 @@ mod decomp;
 /// extracted from lz4.h
 const LZ4_MAX_INPUT_SIZE: usize = 0x7E000000;
 
-extern "C" {
+unsafe extern "C" {
     /// # Safety
     ///
     /// This is guaranteed to succeed if `dst_cap >= LZ4_compressBound`.

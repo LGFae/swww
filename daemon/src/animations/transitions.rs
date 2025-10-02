@@ -1,12 +1,12 @@
 use std::{cell::RefCell, rc::Rc, time::Instant};
 
-use crate::{wallpaper::Wallpaper, WaylandObject};
+use crate::{WaylandObject, wallpaper::Wallpaper};
 use common::ipc::{PixelFormat, Transition, TransitionType};
 
 use keyframe::{
-    functions::BezierCurve, keyframes, mint::Vector2, num_traits::Pow, AnimationSequence,
+    AnimationSequence, functions::BezierCurve, keyframes, mint::Vector2, num_traits::Pow,
 };
-use waybackend::{objman::ObjectManager, Waybackend};
+use waybackend::{Waybackend, objman::ObjectManager};
 
 fn bezier_seq(transition: &Transition, start: f32, end: f32) -> (AnimationSequence<f32>, Instant) {
     let bezier = BezierCurve::from(

@@ -1,5 +1,5 @@
 use log::error;
-use waybackend::{objman::ObjectManager, Waybackend};
+use waybackend::{Waybackend, objman::ObjectManager};
 
 use std::{
     cell::RefCell,
@@ -13,7 +13,7 @@ use common::{
     mmap::MmappedBytes,
 };
 
-use crate::{wallpaper::Wallpaper, WaylandObject};
+use crate::{WaylandObject, wallpaper::Wallpaper};
 
 mod transitions;
 use transitions::Effect;

@@ -6,7 +6,7 @@ mod animations;
 mod cli;
 mod wallpaper;
 mod wayland;
-use log::{debug, error, info, trace, warn, LevelFilter};
+use log::{LevelFilter, debug, error, info, trace, warn};
 use rustix::{
     event::{Nsecs, Secs},
     fd::OwnedFd,
@@ -15,7 +15,7 @@ use rustix::{
 
 use wallpaper::Wallpaper;
 
-use waybackend::{objman, types::ObjectId, Global};
+use waybackend::{Global, objman, types::ObjectId};
 use wayland::zwlr_layer_shell_v1::Layer;
 
 use std::{
@@ -703,8 +703,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     {
-        use wayland::*;
         use WaylandObject::*;
+        use wayland::*;
         waybackend::bind_globals!(
             backend,
             objman,
@@ -728,17 +728,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // use the initializer to create the Daemon, then drop it to free up the memory
     let mut daemon = Daemon::new(backend, objman, cli, globals);
 
-    if let Ok(true) = sd_notify::booted() {
-        if let Err(e) = sd_notify::notify(true, &[sd_notify::NotifyState::Ready]) {
-            error!("Error sending status update to systemd: {e}");
-        }
+    if let Ok(true) = sd_notify::booted()
+        && let Err(e) = sd_notify::notify(true, &[sd_notify::NotifyState::Ready])
+    {
+        error!("Error sending status update to systemd: {e}");
     }
 
     // main loop
     while !should_daemon_exit() {
+        use WaylandObject::*;
         use rustix::event::{PollFd, PollFlags};
         use wayland::*;
-        use WaylandObject::*;
 
         daemon.backend.flush()?;
 

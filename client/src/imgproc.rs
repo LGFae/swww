@@ -1,12 +1,12 @@
 use fast_image_resize::{FilterType, PixelType, ResizeAlg, ResizeOptions, Resizer};
 use image::{
-    codecs::{gif::GifDecoder, png::PngDecoder, webp::WebPDecoder},
     AnimationDecoder, DynamicImage, Frames, GenericImageView, ImageFormat,
+    codecs::{gif::GifDecoder, png::PngDecoder, webp::WebPDecoder},
 };
 use resvg::usvg::{Options, Tree};
 
 use std::{
-    io::{stdin, Cursor, Read},
+    io::{Cursor, Read, stdin},
     path::Path,
     time::Duration,
 };
@@ -73,12 +73,12 @@ impl ImgBuf {
                         format: Format::Svg(Box::new(tree)),
                         bytes: bytes.into_boxed_slice(),
                         is_animated: false,
-                    })
+                    });
                 }
                 Err(e) => {
                     return Err(format!(
                         "Unrecognized format by `image` crate. Also failed to decode as `svg`: {e}."
-                    ))
+                    ));
                 }
             },
             _ => false,
@@ -166,11 +166,11 @@ impl<'a> RasterImage<'a> {
     }
 
     pub fn is_animated(&self) -> bool {
-        self.0 .0.is_animated()
+        self.0.0.is_animated()
     }
 
     pub fn as_frames(&self) -> Result<Frames<'_>, String> {
-        self.0 .0.as_frames()
+        self.0.0.as_frames()
     }
 }
 

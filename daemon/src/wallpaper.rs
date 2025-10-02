@@ -1,16 +1,16 @@
 use common::ipc::{BgImg, BgInfo, PixelFormat, Scale};
 use log::{debug, error, warn};
-use waybackend::{objman::ObjectManager, types::ObjectId, Waybackend};
+use waybackend::{Waybackend, objman::ObjectManager, types::ObjectId};
 
 use std::{cell::RefCell, num::NonZeroI32, rc::Rc};
 
 use crate::{
+    WaylandObject,
     wayland::{
         bump_pool::BumpPool, wl_compositor, wl_region, wl_surface, wp_fractional_scale_manager_v1,
         wp_fractional_scale_v1, wp_viewport, wp_viewporter, zwlr_layer_shell_v1,
         zwlr_layer_surface_v1,
     },
-    WaylandObject,
 };
 
 struct FrameCallbackHandler {
@@ -219,7 +219,8 @@ impl Wallpaper {
             dim: (self.width.get() as u32, self.height.get() as u32),
             scale_factor: self.scale_factor,
             img: match &self.img {
-                BgImg::Color(mut color) => {
+                BgImg::Color(color) => {
+                    let mut color = *color;
                     if pixel_format.must_swap_r_and_b_channels() {
                         color.swap(0, 2);
                     }
@@ -430,10 +431,10 @@ impl Wallpaper {
             error!("error destroying wp_viewport: {e:?}");
         }
 
-        if let Some(fractional) = self.wp_fractional {
-            if let Err(e) = wp_fractional_scale_v1::req::destroy(backend, fractional) {
-                error!("error destroying wp_fractional_scale_v1: {e:?}");
-            }
+        if let Some(fractional) = self.wp_fractional
+            && let Err(e) = wp_fractional_scale_v1::req::destroy(backend, fractional)
+        {
+            error!("error destroying wp_fractional_scale_v1: {e:?}");
         }
 
         if let Err(e) = zwlr_layer_surface_v1::req::destroy(backend, self.layer_surface) {
