@@ -649,7 +649,7 @@ pub fn make_transition(img: &cli::Img) -> ipc::Transition {
                 Coord::Percent(fastrand::f32()),
                 Coord::Percent(fastrand::f32()),
             );
-            angle = fastrand::f64();
+            angle = fastrand::f64() * 360.0;
             match fastrand::u8(0..4) {
                 0 => ipc::TransitionType::Simple,
                 1 => ipc::TransitionType::Wipe,
