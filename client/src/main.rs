@@ -144,6 +144,9 @@ fn make_img_request(
     let transition = make_transition(img);
     let mut img_req_builder = ipc::ImageRequestBuilder::new(transition);
 
+    let filter = img.filter.as_str();
+    let resize = img.resize.as_str();
+
     match &img.image {
         CliImage::Color(color) => {
             for (&dim, outputs) in dims.iter().zip(outputs) {
@@ -159,8 +162,9 @@ fn make_img_request(
                         dim,
                         format: pixel_format,
                     },
-                    namespace.to_string(),
-                    Filter::Lanczos3.to_string(),
+                    namespace,
+                    resize,
+                    filter,
                     outputs,
                     None,
                 );
@@ -186,14 +190,13 @@ fn make_img_request(
 
                         let animation = if !imgbuf.is_animated() {
                             None
-                        } else if img.resize == ResizeStrategy::Crop {
+                        } else {
                             match cache::load_animation_frames(path.as_ref(), dim, pixel_format) {
                                 Ok(Some(animation)) => Some(animation),
                                 otherwise => {
                                     if let Err(e) = otherwise {
                                         eprintln!("Error loading cache for {:?}: {e}", img_path);
                                     }
-
                                     Some({
                                         ipc::Animation {
                                             animation: compress_frames(
@@ -209,11 +212,8 @@ fn make_img_request(
                                     })
                                 }
                             }
-                        } else {
-                            None
                         };
 
-                        let filter = img.filter.to_string();
                         let img = match img.resize {
                             ResizeStrategy::No => img_pad(&img_raw, dim, &img.fill_color)?,
                             ResizeStrategy::Crop => {
@@ -237,7 +237,8 @@ fn make_img_request(
                                 dim,
                                 format: pixel_format,
                             },
-                            namespace.to_string(),
+                            namespace,
+                            resize,
                             filter,
                             outputs,
                             animation,
@@ -258,7 +259,7 @@ fn make_img_request(
                                 }
                             }
                         };
-                        let filter = img.filter.to_string();
+                        let filter = img.filter.as_str();
                         let img_raw = imgbuf.decode(pixel_format, dim.0, dim.1)?;
                         let img = match img.resize {
                             ResizeStrategy::No => img_pad(&img_raw, dim, &img.fill_color)?,
@@ -282,7 +283,8 @@ fn make_img_request(
                                 dim,
                                 format: pixel_format,
                             },
-                            namespace.to_string(),
+                            namespace,
+                            resize,
                             filter,
                             outputs,
                             None,
@@ -365,23 +367,25 @@ fn restore_from_cache(requested_outputs: &[String], namespace: &str) -> Result<(
 }
 
 fn restore_output(output: &str, namespace: &str) -> Result<(), String> {
-    let (filter, img_path) = common::cache::get_previous_image_filter_and_path(output, namespace)
-        .map_err(|e| format!("failed to get previous image path: {e}"))?;
-    if img_path.is_empty() {
-        return Err("cache file does not exist".to_string());
-    }
+    let cache_data = common::cache::read_cache_file(output)
+        .map_err(|e| format!("failed to read cache file: {e}"))?;
+    let cache = match common::cache::get_previous_image_cache(output, namespace, &cache_data) {
+        Ok(Some(cache)) => cache,
+        Ok(None) => return Err("cache entry does not exist".to_string()),
+        Err(e) => return Err(e.to_string()),
+    };
 
     process_swww_args(
         &Swww::Img(cli::Img {
             all: false,
-            image: cli::parse_image(&img_path)?,
+            image: cli::parse_image(cache.img_path)?,
             outputs: output.to_string(),
             namespace: vec![namespace.to_string()],
             #[allow(deprecated)]
             no_resize: false,
-            resize: ResizeStrategy::Crop,
+            resize: ResizeStrategy::from_str(cache.resize).unwrap_or(ResizeStrategy::Crop),
             fill_color: [0, 0, 0, 255],
-            filter: Filter::from_str(&filter).unwrap_or(Filter::Lanczos3),
+            filter: Filter::from_str(cache.filter).unwrap_or(Filter::Lanczos3),
             transition_type: cli::TransitionType::None,
             transition_step: std::num::NonZeroU8::MAX,
             transition_duration: 0.0,
