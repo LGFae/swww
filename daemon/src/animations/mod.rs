@@ -86,7 +86,7 @@ impl TransitionAnimator {
         } = self;
         if !*over {
             *over = effect.execute(backend, objman, pixel_format, wallpapers, img.bytes());
-            *over
+            false
         } else {
             true
         }
