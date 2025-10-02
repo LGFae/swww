@@ -271,7 +271,7 @@ checksum = "b05b61dc5112cbb17e4b6cd61790d9845d13888356391624cbe7e41efeac1e75"
 
 [[package]]
 name = "common"
-version = "0.11.2"
+version = "0.11.2-master"
 dependencies = [
  "fastrand",
  "pkg-config",
@@ -1093,7 +1093,7 @@ dependencies = [
 
 [[package]]
 name = "swww"
-version = "0.11.2"
+version = "0.11.2-master"
 dependencies = [
  "clap",
  "clap_complete",
@@ -1106,7 +1106,7 @@ dependencies = [
 
 [[package]]
 name = "swww-daemon"
-version = "0.11.2"
+version = "0.11.2-master"
 dependencies = [
  "common",
  "keyframe",
@@ -1166,7 +1166,7 @@ checksum = "8f50febec83f5ee1df3015341d8bd429f2d1cc62bcba7ea2076759d315084683"
 
 [[package]]
 name = "tests"
-version = "0.11.2"
+version = "0.11.2-master"
 dependencies = [
  "assert_cmd",
  "image",

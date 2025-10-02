@@ -10,7 +10,7 @@ pub(super) mod ssse3;
 
 /// # SAFETY:
 ///
-/// diff must end with 8 zero bytes
+/// diff must end with 2 zero bytes
 #[inline(always)]
 pub(crate) unsafe fn unpack_bytes_4channels(
     buf: &mut [u8],
@@ -85,7 +85,7 @@ pub(super) unsafe fn unpack_unsafe_bytes_4channels(buf: &mut [u8], diff: &[u8]) 
 
 /// # SAFETY:
 ///
-/// diff must end with 3 zero bytes
+/// diff must end with 2 zero bytes
 #[inline(always)]
 pub(super) unsafe fn unpack_bytes_3channels(
     buf: &mut [u8],
@@ -171,7 +171,6 @@ unsafe fn verify_copy<const CHANNELS: usize>(
     if src.add(to_cpy * 3) <= last_src && dst.add(to_cpy * CHANNELS) <= last_dst {
         return Ok(());
     }
-    println!("src: {src:?}, last_src: {last_src:?}, dst: {dst:?}, last_dst: {last_dst:?}, to_cpy: {to_cpy}");
 
     Err(err())
 }
