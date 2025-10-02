@@ -2,8 +2,6 @@
 //!
 //! Our compression strategy is documented in `comp/mod.rs`
 
-use comp::pack_bytes;
-use decomp::{unpack_bytes_3channels, unpack_bytes_4channels};
 use std::ffi::{c_char, c_int};
 
 use crate::ipc::ImageRequestBuilder;
@@ -12,7 +10,6 @@ use crate::mmap::Mmap;
 use crate::mmap::MmappedBytes;
 
 mod comp;
-mod cpu;
 mod decomp;
 
 /// extracted from lz4.h
@@ -103,16 +100,36 @@ impl BitPack {
 
 /// Struct responsible for compressing our data. We use it to cache vector extensions that might
 /// speed up compression
-#[derive(Default)]
 pub struct Compressor {
     buf: Vec<u8>,
+    pack_bytes: unsafe fn(&[u8], &[u8], &mut Vec<u8>),
 }
 
 impl Compressor {
     #[inline]
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
-        cpu::init();
-        Self { buf: Vec::new() }
+        #[allow(unused_labels)]
+        let pack_bytes: unsafe fn(&[u8], &[u8], &mut Vec<u8>) = 'brk: {
+            // use the most efficient implementation available:
+            #[cfg(not(test))] // when testing, we want to use the specific implementation
+            {
+                #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+                {
+                    if is_x86_feature_detected!("avx2") {
+                        break 'brk comp::avx2::pack_bytes;
+                    } else if is_x86_feature_detected!("sse2") {
+                        break 'brk comp::sse2::pack_bytes;
+                    }
+                }
+            }
+            comp::pack_bytes
+        };
+
+        Self {
+            buf: Vec::with_capacity(1 << 20),
+            pack_bytes,
+        }
     }
 
     /// Compresses a frame of animation by getting the difference between the previous and the
@@ -141,11 +158,14 @@ impl Compressor {
 
         self.buf.clear();
         // SAFETY: the above assertion ensures prev.len() and cur.len() are equal, as needed
-        unsafe { pack_bytes(prev, cur, &mut self.buf) }
+        unsafe { (self.pack_bytes)(prev, cur, &mut self.buf) }
 
         if self.buf.is_empty() {
             return None;
         }
+
+        // these extra bytes prevent reading out-of-bounds in the decompressor later
+        self.buf.extend([0, 0]);
 
         // This should only be a problem with 64k monitors and beyond, (hopefully) far into the
         // future
@@ -188,6 +208,8 @@ pub struct Decompressor {
     /// note we explicitly do not care about its length
     ptr: std::ptr::NonNull<u8>,
     cap: usize,
+    decomp_4channels: unsafe fn(&mut [u8], &[u8]) -> Result<(), DecompressionError>,
+    decomp_4channels_unsafe: unsafe fn(&mut [u8], &[u8]),
 }
 
 impl Drop for Decompressor {
@@ -204,10 +226,45 @@ impl Decompressor {
     #[allow(clippy::new_without_default)]
     #[inline]
     pub fn new() -> Self {
-        cpu::init();
+        #[allow(unused_labels)]
+        #[allow(clippy::type_complexity)]
+        let (decomp_4channels, decomp_4channels_unsafe): (
+            unsafe fn(&mut [u8], &[u8]) -> Result<(), DecompressionError>,
+            unsafe fn(&mut [u8], &[u8]),
+        ) = 'brk: {
+            // use the most efficient implementation available:
+            #[cfg(not(test))] // when testing, we want to use the specific implementation
+            {
+                #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+                {
+                    if is_x86_feature_detected!("avx512vbmi2")
+                        && is_x86_feature_detected!("avx512bw")
+                    {
+                        break 'brk (
+                            decomp::avx512::unpack_bytes_4channels,
+                            decomp::avx512::unpack_unsafe_bytes_4channels,
+                        );
+                    } else if is_x86_feature_detected!("ssse3") {
+                        break 'brk (
+                            decomp::ssse3::unpack_bytes_4channels,
+                            decomp::ssse3::unpack_unsafe_bytes_4channels,
+                        );
+                    }
+                }
+            }
+
+            // fallback implementation
+            (
+                decomp::unpack_bytes_4channels,
+                decomp::unpack_unsafe_bytes_4channels,
+            )
+        };
+
         Self {
             ptr: std::ptr::NonNull::dangling(),
             cap: 0,
+            decomp_4channels,
+            decomp_4channels_unsafe,
         }
     }
 
@@ -238,20 +295,18 @@ impl Decompressor {
         self.cap = goal;
     }
 
-    ///returns whether unpacking was successful. Note it can only fail if `buf.len() !=
-    ///expected_buf_size`
+    /// Returns whether unpacking was successful.
     #[inline]
     pub fn decompress(
         &mut self,
         bitpack: &BitPack,
         buf: &mut [u8],
         pixel_format: PixelFormat,
-    ) -> Result<(), String> {
+    ) -> Result<(), DecompressionError> {
         if buf.len() != bitpack.expected_buf_size as usize {
-            return Err(format!(
-                "buf has len {}, but expected len is {}",
-                buf.len(),
-                bitpack.expected_buf_size
+            return Err(DecompressionError::WrongBufferLength(
+                buf.len() as u32,
+                bitpack.expected_buf_size,
             ));
         }
 
@@ -270,7 +325,7 @@ impl Decompressor {
         };
 
         if size != bitpack.compressed_size {
-            return Err("BitPack is malformed!".to_string());
+            return Err(DecompressionError::LZ4DecompressedSizeIsWrong);
         }
 
         // SAFETY: the call to self.ensure_capacity guarantees the pointer has the necessary size
@@ -279,15 +334,81 @@ impl Decompressor {
             std::slice::from_raw_parts_mut(self.ptr.as_ptr(), bitpack.compressed_size as usize)
         };
 
-        if pixel_format.can_copy_directly_onto_wl_buffer() {
-            unpack_bytes_3channels(buf, v);
-        } else {
-            unpack_bytes_4channels(buf, v);
+        if v[v.len() - 2..v.len()] != [0, 0] {
+            return Err(DecompressionError::LacksTrailingBytes);
         }
 
-        Ok(())
+        if pixel_format.can_copy_directly_onto_wl_buffer() {
+            unsafe { decomp::unpack_bytes_3channels(buf, v) }
+        } else {
+            unsafe { (self.decomp_4channels)(buf, v) }
+        }
+    }
+
+    /// # SAFETY
+    ///
+    /// Only call this after having called the [decompress](Decompressor::decompress) function and
+    /// ensuring it didn't panic. This function does essentially the same thing, but will bypass
+    /// all safety checks.
+    #[inline]
+    pub unsafe fn decompress_unchecked(
+        &mut self,
+        bitpack: &BitPack,
+        buf: &mut [u8],
+        pixel_format: PixelFormat,
+    ) {
+        // retain this check, just in case, for now
+        if buf.len() != bitpack.expected_buf_size as usize {
+            return;
+        }
+
+        let bytes = bitpack.bytes();
+        LZ4_decompress_safe(
+            bytes.as_ptr() as _,
+            self.ptr.as_ptr() as _,
+            bytes.len() as c_int,
+            bitpack.compressed_size as c_int,
+        );
+
+        let v = std::slice::from_raw_parts_mut(self.ptr.as_ptr(), bitpack.compressed_size as usize);
+
+        if pixel_format.can_copy_directly_onto_wl_buffer() {
+            decomp::unpack_unsafe_bytes_3channels(buf, v)
+        } else {
+            (self.decomp_4channels_unsafe)(buf, v)
+        }
     }
 }
+
+#[derive(Debug)]
+pub enum DecompressionError {
+    WrongBufferLength(u32, u32),
+    LZ4DecompressedSizeIsWrong,
+    LacksTrailingBytes,
+    CopyInstructionIsTooLarge,
+}
+
+impl core::fmt::Display for DecompressionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DecompressionError::WrongBufferLength(actual, expected) => write!(
+                f,
+                "Buffer has length {actual}, but expected length is {expected}",
+            ),
+            DecompressionError::LZ4DecompressedSizeIsWrong => {
+                f.write_str("BitPack is malformed: wrong LZ4 decompressed buffer size")
+            }
+            DecompressionError::LacksTrailingBytes => {
+                f.write_str("BitPack is malformed: does not end with 3 zero bytes")
+            }
+            DecompressionError::CopyInstructionIsTooLarge => {
+                f.write_str("BitPack is malformed: trying to copy too many bytes")
+            }
+        }
+    }
+}
+
+impl core::error::Error for DecompressionError {}
 
 #[cfg(test)]
 mod tests {
@@ -322,12 +443,15 @@ mod tests {
                 .decompress(&compressed, &mut buf, format)
                 .unwrap();
             for i in 0..2 {
-                for j in 0..3 {
-                    assert_eq!(
-                        frame2[i * 3 + j],
-                        buf[i * format.channels() as usize + j],
-                        "\nframe2: {frame2:?}, buf: {buf:?}\n"
-                    );
+                let k = i * 3;
+                let l = i * format.channels() as usize;
+                assert_eq!(
+                    frame2[k..k + 3],
+                    buf[l..l + 3],
+                    "\nframe2: {frame2:?}, buf: {buf:?}\n"
+                );
+                if format.channels() == 4 {
+                    assert_eq!(buf[l + 3], 0xFF, "{buf:?}");
                 }
             }
         }

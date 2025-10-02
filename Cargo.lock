@@ -271,12 +271,11 @@ checksum = "b05b61dc5112cbb17e4b6cd61790d9845d13888356391624cbe7e41efeac1e75"
 
 [[package]]
 name = "common"
-version = "0.11.2"
+version = "0.11.2-master"
 dependencies = [
  "fastrand",
  "pkg-config",
  "rustix",
- "tiny-bench",
 ]
 
 [[package]]
@@ -1094,7 +1093,7 @@ dependencies = [
 
 [[package]]
 name = "swww"
-version = "0.11.2"
+version = "0.11.2-master"
 dependencies = [
  "clap",
  "clap_complete",
@@ -1107,7 +1106,7 @@ dependencies = [
 
 [[package]]
 name = "swww-daemon"
-version = "0.11.2"
+version = "0.11.2-master"
 dependencies = [
  "common",
  "keyframe",
@@ -1167,7 +1166,7 @@ checksum = "8f50febec83f5ee1df3015341d8bd429f2d1cc62bcba7ea2076759d315084683"
 
 [[package]]
 name = "tests"
-version = "0.11.2"
+version = "0.11.2-master"
 dependencies = [
  "assert_cmd",
  "image",
@@ -1206,12 +1205,6 @@ dependencies = [
  "weezl",
  "zune-jpeg",
 ]
-
-[[package]]
-name = "tiny-bench"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72b0a1b520125a81e27ea0dab5c8b070fdc24d93c62f1ae12da12aa60a6f1d3c"
 
 [[package]]
 name = "tiny-skia"

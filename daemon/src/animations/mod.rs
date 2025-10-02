@@ -151,21 +151,32 @@ impl ImageAnimator {
 
         let frame = &animation.animation[*i % animation.animation.len()].0;
 
-        let mut j = 0;
-        while j < wallpapers.len() {
-            let result =
-                wallpapers[j]
-                    .borrow_mut()
-                    .canvas_change(backend, objman, pixel_format, |canvas| {
-                        decompressor.decompress(frame, canvas, pixel_format)
-                    });
-
-            if let Err(e) = result {
-                error!("failed to unpack frame: {e}");
-                wallpapers.swap_remove(j);
-                continue;
+        if *i < animation.animation.len() {
+            wallpapers.retain(|w| {
+                let mut borrow = w.borrow_mut();
+                let result = borrow.canvas_change(backend, objman, pixel_format, |canvas| {
+                    decompressor.decompress(frame, canvas, pixel_format)
+                });
+                match result {
+                    Ok(()) => true,
+                    Err(e) => {
+                        error!("failed to unpack frame: {e}");
+                        false
+                    }
+                }
+            });
+        } else {
+            // if we already went through one loop, we can use the unsafe version, because
+            // everything was already validated
+            for w in wallpapers {
+                let mut borrow = w.borrow_mut();
+                // SAFETY: we have already validated every frame and removed the ones that have
+                // errors in the previous loops. The only ones left should be those that can be
+                // decompressed correctly
+                borrow.canvas_change(backend, objman, pixel_format, |canvas| unsafe {
+                    decompressor.decompress_unchecked(frame, canvas, pixel_format)
+                });
             }
-            j += 1;
         }
 
         *i += 1;

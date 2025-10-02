@@ -19,6 +19,9 @@
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 pub(super) mod sse2;
 
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+pub(super) mod avx2;
+
 /// # Safety
 ///
 /// s1.len() must be equal to s2.len()
@@ -77,15 +80,6 @@ unsafe fn count_different(s1: &[u8], s2: &[u8], mut i: usize) -> usize {
 /// cur.len() must be equal to goal.len()
 #[inline(always)]
 pub(super) unsafe fn pack_bytes(cur: &[u8], goal: &[u8], v: &mut Vec<u8>) {
-    // use the most efficient implementation available:
-    #[cfg(not(debug_assertions))]
-    {
-        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-        if super::cpu::features::sse2() {
-            return unsafe { sse2::pack_bytes(cur, goal, v) };
-        }
-    }
-
     let mut i = 0;
     while i < cur.len() {
         // SAFETY: count_equals demands the same invariants as the current function
@@ -108,12 +102,6 @@ pub(super) unsafe fn pack_bytes(cur: &[u8], goal: &[u8], v: &mut Vec<u8>) {
 
         v.extend_from_slice(unsafe { goal.get_unchecked(start..i) });
         i += 3;
-    }
-
-    if !v.is_empty() {
-        // add two extra bytes to prevent access out of bounds later during decompression
-        v.push(0);
-        v.push(0);
     }
 }
 
