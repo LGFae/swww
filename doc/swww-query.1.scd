@@ -41,7 +41,7 @@ something like *wlr-randr*.
 Currently, *swww query* prints information in the following format:
 
 ```
-OUTPUT: SIZE, scale: SCALE, currently displaying: IMAGE_OR_COLOR
+NAMESPACE: OUTPUT: SIZE, scale: SCALE, currently displaying: IMAGE_OR_COLOR
 ```
 
 where *SIZE* is in the format *WxH* (eg.: *1920x1080*), *SCALE* in "scale:
