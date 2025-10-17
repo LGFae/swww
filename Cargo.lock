@@ -1388,11 +1388,12 @@ dependencies = [
 
 [[package]]
 name = "waybackend"
-version = "0.6.2"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b6d8f2fd99ebe132232e5eb1c01babb1138b324db93d4da2f95bae9324a1e36"
+checksum = "9b141425a792e661cea1248a970ed82ba0a25c436ba52290da73d6911c0f5da6"
 dependencies = [
  "bitflags 2.9.4",
+ "libc",
  "log",
  "rustix",
 ]

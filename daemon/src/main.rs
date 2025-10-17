@@ -759,38 +759,45 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let socket_event = !fds[1].revents().is_empty();
 
         if wayland_event {
-            let mut msg = receiver.recv(&daemon.backend.wayland_fd)?;
-            while msg.has_next()? {
-                let sender_id = msg.sender_id();
-                if sender_id == waybackend::WL_DISPLAY {
-                    wl_display::event(&mut daemon, &mut msg)?;
-                } else {
-                    let sender = daemon
-                        .objman
-                        .get(sender_id)
-                        .expect("received wayland message from unknown object");
-                    waybackend::match_enum_with_interface!(
-                        daemon,
-                        sender,
-                        msg,
-                        (Display, wl_display),
-                        (Registry, wl_registry),
-                        (Callback, wl_callback),
-                        (Compositor, wl_compositor),
-                        (Shm, wl_shm),
-                        (ShmPool, wl_shm_pool),
-                        (Buffer, wl_buffer),
-                        (Surface, wl_surface),
-                        (Region, wl_region),
-                        (Output, wl_output),
-                        (LayerShell, zwlr_layer_shell_v1),
-                        (LayerSurface, zwlr_layer_surface_v1),
-                        (Viewporter, wp_viewporter),
-                        (Viewport, wp_viewport),
-                        (FractionalScaler, wp_fractional_scale_manager_v1),
-                        (FractionalScale, wp_fractional_scale_v1),
-                    );
-                }
+            let mut msgs = receiver.recv(&daemon.backend.wayland_fd)?;
+            while let Some(sender_id) = msgs.next() {
+                let sender_id = match sender_id {
+                    Ok(sender_id) => sender_id,
+                    Err(_) => {
+                        warn!(
+                            "received an event for a null object from the server. This should be impossible."
+                        );
+                        continue;
+                    }
+                };
+                let sender = match daemon.objman.get(sender_id) {
+                    Some(obj) => obj,
+                    None => {
+                        warn!("received an event for an unknown object");
+                        continue;
+                    }
+                };
+                waybackend::match_enum_with_interface!(
+                    daemon,
+                    sender,
+                    msgs,
+                    (Display, wl_display),
+                    (Registry, wl_registry),
+                    (Callback, wl_callback),
+                    (Compositor, wl_compositor),
+                    (Shm, wl_shm),
+                    (ShmPool, wl_shm_pool),
+                    (Buffer, wl_buffer),
+                    (Surface, wl_surface),
+                    (Region, wl_region),
+                    (Output, wl_output),
+                    (LayerShell, zwlr_layer_shell_v1),
+                    (LayerSurface, zwlr_layer_surface_v1),
+                    (Viewporter, wp_viewporter),
+                    (Viewport, wp_viewport),
+                    (FractionalScaler, wp_fractional_scale_manager_v1),
+                    (FractionalScale, wp_fractional_scale_v1),
+                );
             }
             daemon.commit_pending_surface_changes();
         }
