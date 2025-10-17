@@ -905,7 +905,6 @@ impl Drop for SocketWrapper {
 
 struct Logger {
     level_filter: LevelFilter,
-    start: std::time::Instant,
     is_term: bool,
 }
 
@@ -916,8 +915,6 @@ impl log::Log for Logger {
 
     fn log(&self, record: &log::Record) {
         if self.enabled(record.metadata()) {
-            let time = self.start.elapsed().as_millis();
-
             let level = if self.is_term {
                 match record.level() {
                     log::Level::Error => "\x1b[31m[ERROR]\x1b[0m",
@@ -937,7 +934,7 @@ impl log::Log for Logger {
             };
 
             let msg = record.args();
-            let _ = std::io::stderr().write_fmt(format_args!("{time:>10}ms {level} {msg}\n"));
+            let _ = std::io::stderr().write_fmt(format_args!("{level} {msg}\n"));
         }
     }
 
@@ -955,7 +952,6 @@ fn make_logger(quiet: bool) {
 
     log::set_boxed_logger(Box::new(Logger {
         level_filter,
-        start: std::time::Instant::now(),
         is_term: std::io::stderr().is_terminal(),
     }))
     .map(|()| log::set_max_level(level_filter))
