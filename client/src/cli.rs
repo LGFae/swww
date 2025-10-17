@@ -1,7 +1,6 @@
 /// Note: this file only has basic declarations and some definitions in order to be possible to
 /// import it in the build script, to automate shell completion
 use clap::{Parser, ValueEnum};
-use std::fmt::Display;
 use std::path::PathBuf;
 
 fn from_hex(hex: &str) -> Result<[u8; 4], String> {
@@ -41,13 +40,25 @@ pub enum PixelFormat {
     Argb,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub enum Filter {
     Nearest,
     Bilinear,
     CatmullRom,
     Mitchell,
     Lanczos3,
+}
+
+impl Filter {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Nearest => "Nearest",
+            Self::Bilinear => "Bilinear",
+            Self::CatmullRom => "CatmullRom",
+            Self::Mitchell => "Mitchell",
+            Self::Lanczos3 => "Lanczos3",
+        }
+    }
 }
 
 impl std::str::FromStr for Filter {
@@ -60,23 +71,10 @@ impl std::str::FromStr for Filter {
             "CatmullRom" => Ok(Self::CatmullRom),
             "Mitchell" => Ok(Self::Mitchell),
             "Lanczos3" => Ok(Self::Lanczos3),
-            _ => Err("unrecognized filter. Valid filters are:\
-                     Nearest | Bilinear | CatmullRom | Mitchell | Lanczos3\
+            _ => Err("unrecognized filter. Valid filters are:\n\
+                     \tNearest | Bilinear | CatmullRom | Mitchell | Lanczos3\n\
                      see swww img --help for more details"),
         }
-    }
-}
-
-impl Display for Filter {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let str = match self {
-            Self::Nearest => "Nearest",
-            Self::Bilinear => "Bilinear",
-            Self::CatmullRom => "CatmullRom",
-            Self::Mitchell => "Mitchell",
-            Self::Lanczos3 => "Lanczos3",
-        };
-        write!(f, "{}", str)
     }
 }
 
@@ -292,6 +290,35 @@ pub enum ResizeStrategy {
     Fit,
     /// Resize the image to fit inside the screen, without preserving the original aspect ratio
     Stretch,
+}
+
+impl ResizeStrategy {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ResizeStrategy::No => "no",
+            ResizeStrategy::Crop => "crop",
+            ResizeStrategy::Fit => "fit",
+            ResizeStrategy::Stretch => "stretch",
+        }
+    }
+}
+
+impl std::str::FromStr for ResizeStrategy {
+    type Err = &'static str;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "no" => Ok(Self::No),
+            "crop" => Ok(Self::Crop),
+            "fit" => Ok(Self::Fit),
+            "stretch" => Ok(Self::Stretch),
+            _ => Err(
+                "unrecognized resize strategy. Valid resize strategies are:\n\
+                     no | crop | fit | stretch\n\
+                     see swww img --help for more details",
+            ),
+        }
+    }
 }
 
 #[derive(Parser)]

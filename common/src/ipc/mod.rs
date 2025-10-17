@@ -62,8 +62,9 @@ impl ImageRequestBuilder {
     pub fn push(
         &mut self,
         img: ImgSend,
-        namespace: String,
-        filter: String,
+        namespace: &str,
+        resize: &str,
+        filter: &str,
         outputs: &[String],
         animation: Option<Animation>,
     ) {
@@ -96,7 +97,9 @@ impl ImageRequestBuilder {
 
         // cache the request
         for output in outputs.iter() {
-            if let Err(e) = super::cache::CacheEntry::new(&namespace, &filter, path).store(output) {
+            if let Err(e) =
+                super::cache::CacheEntry::new(namespace, resize, filter, path).store(output)
+            {
                 eprintln!("ERROR: failed to store cache: {e}");
             }
         }
@@ -107,6 +110,7 @@ impl ImageRequestBuilder {
                 &self.memory.slice()[animation_start..],
                 &p,
                 *dims,
+                resize,
                 *format,
             ) {
                 eprintln!("Error storing cache for {}: {e}", path);
