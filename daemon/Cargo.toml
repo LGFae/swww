@@ -24,4 +24,4 @@ keyframe = "1.1"
 sd-notify = { version = "0.4" }
 
 [build-dependencies]
-waybackend-scanner = { version = "0.6", features = ["build-script"] }
+waybackend-scanner = { version = "0.7", features = ["build-script"] }
