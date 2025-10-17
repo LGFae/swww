@@ -14,16 +14,25 @@ use crate::ipc::Animation;
 use crate::ipc::PixelFormat;
 use crate::mmap::Mmap;
 
+const CACHE_DIRNAME: &str = env!("CARGO_PKG_VERSION");
+
 pub struct CacheEntry<'a> {
-    namespace: &'a str,
-    filter: &'a str,
-    img_path: &'a str,
+    pub namespace: &'a str,
+    pub resize: &'a str,
+    pub filter: &'a str,
+    pub img_path: &'a str,
 }
 
 impl<'a> CacheEntry<'a> {
-    pub(crate) fn new(namespace: &'a str, filter: &'a str, img_path: &'a str) -> Self {
+    pub(crate) fn new(
+        namespace: &'a str,
+        resize: &'a str,
+        filter: &'a str,
+        img_path: &'a str,
+    ) -> Self {
         Self {
             namespace,
+            resize,
             filter,
             img_path,
         }
@@ -35,10 +44,16 @@ impl<'a> CacheEntry<'a> {
         let mut v = Vec::new();
         let mut strings = data.split(|ch| *ch == 0);
         while let Some(namespace) = strings.next() {
-            let filter = match strings.next() {
-                Some(s) => s,
-                None => break,
-            };
+            let resize = strings.next().ok_or_else(|| {
+                Error::other(format!(
+                    "cache file for output {output_name} is in the wrong format (no resize)"
+                ))
+            })?;
+            let filter = strings.next().ok_or_else(|| {
+                Error::other(format!(
+                    "cache file for output {output_name} is in the wrong format (no filter)"
+                ))
+            })?;
             let img_path = strings.next().ok_or_else(|| {
                 Error::other(format!(
                     "cache file for output {output_name} is in the wrong format (no image path)"
@@ -47,11 +62,13 @@ impl<'a> CacheEntry<'a> {
 
             let err = format!("cache file for output {output_name} is not valid utf8");
             let namespace = str::from_utf8(namespace).map_err(|_| Error::other(err.clone()))?;
+            let resize = str::from_utf8(resize).map_err(|_| Error::other(err.clone()))?;
             let filter = str::from_utf8(filter).map_err(|_| Error::other(err.clone()))?;
             let img_path = str::from_utf8(img_path).map_err(|_| Error::other(err))?;
 
             v.push(CacheEntry {
                 namespace,
+                resize,
                 filter,
                 img_path,
             })
@@ -75,12 +92,13 @@ impl<'a> CacheEntry<'a> {
 
         let mut data = Vec::new();
         file.read_to_end(&mut data)?;
-        let mut entries = Self::parse_file(output_name, &data)?;
+        let mut entries = Self::parse_file(output_name, &data).unwrap_or_else(|_| Vec::new());
 
         if let Some(entry) = entries
             .iter_mut()
             .find(|elem| elem.namespace == self.namespace)
         {
+            entry.resize = self.resize;
             entry.filter = self.filter;
             entry.img_path = self.img_path;
         } else {
@@ -91,10 +109,11 @@ impl<'a> CacheEntry<'a> {
         for entry in entries {
             let CacheEntry {
                 namespace,
+                resize,
                 filter,
                 img_path,
             } = entry;
-            file.write_all(format!("{namespace}\0{filter}\0{img_path}\0").as_bytes())?;
+            file.write_all(format!("{namespace}\0{resize}\0{filter}\0{img_path}").as_bytes())?;
         }
 
         let len = file.stream_position().unwrap_or(0);
@@ -107,9 +126,10 @@ pub(crate) fn store_animation_frames(
     animation: &[u8],
     path: &Path,
     dimensions: (u32, u32),
+    resize: &str,
     pixel_format: PixelFormat,
 ) -> io::Result<()> {
-    let filename = animation_filename(path, dimensions, pixel_format);
+    let filename = animation_filename(path, dimensions, resize, pixel_format);
     let mut filepath = cache_dir()?;
     filepath.push(&filename);
 
@@ -123,9 +143,10 @@ pub(crate) fn store_animation_frames(
 pub fn load_animation_frames(
     path: &Path,
     dimensions: (u32, u32),
+    resize: &str,
     pixel_format: PixelFormat,
 ) -> io::Result<Option<Animation>> {
-    let filename = animation_filename(path, dimensions, pixel_format);
+    let filename = animation_filename(path, dimensions, resize, pixel_format);
     let cache_dir = cache_dir()?;
     let mut filepath = cache_dir.clone();
     filepath.push(filename);
@@ -147,30 +168,34 @@ pub fn load_animation_frames(
     Ok(None)
 }
 
-pub fn get_previous_image_filter_and_path(
-    output_name: &str,
-    namespace: &str,
-) -> io::Result<(String, String)> {
+pub fn read_cache_file(output_name: &str) -> io::Result<Vec<u8>> {
+    clean_previous_versions();
+
     let mut filepath = cache_dir()?;
-    clean_previous_versions(&filepath);
 
     filepath.push(output_name);
+    std::fs::read(filepath)
+}
 
-    let data = std::fs::read(filepath)?;
-    let entries = CacheEntry::parse_file(output_name, &data)?;
+pub fn get_previous_image_cache<'a>(
+    output_name: &str,
+    namespace: &str,
+    cache_data: &'a [u8],
+) -> io::Result<Option<CacheEntry<'a>>> {
+    let entries = CacheEntry::parse_file(output_name, cache_data)?;
 
-    match entries.iter().find(|entry| entry.namespace == namespace) {
-        Some(entry) => Ok((entry.filter.to_string(), entry.img_path.to_string())),
-        None => Ok(("".to_string(), "".to_string())),
-    }
+    Ok(entries
+        .into_iter()
+        .find(|entry| entry.namespace == namespace))
 }
 
 pub fn load(output_name: &str, namespace: &str) -> io::Result<()> {
-    let (filter, img_path) = get_previous_image_filter_and_path(output_name, namespace)?;
+    let cache_data = read_cache_file(output_name)?;
 
-    if img_path.is_empty() {
-        return Ok(());
-    }
+    let cache = match get_previous_image_cache(output_name, namespace, &cache_data)? {
+        Some(cache) => cache,
+        None => return Ok(()),
+    };
 
     if let Ok(mut child) = std::process::Command::new("pidof").arg("swww").spawn()
         && let Ok(status) = child.wait()
@@ -184,11 +209,17 @@ pub fn load(output_name: &str, namespace: &str) -> io::Result<()> {
     std::process::Command::new("swww")
         .arg("img")
         .args([
-            &format!("--outputs={output_name}"),
-            &format!("--filter={filter}"),
+            "--outputs",
+            output_name,
+            "--resize",
+            cache.resize,
+            "--filter",
+            cache.filter,
+            // namespace needs a format because the empty namespace is valid, so we need to use the
+            // `=` format
             &format!("--namespace={namespace}"),
             "--transition-type=none",
-            &img_path,
+            cache.img_path,
         ])
         .spawn()?
         .wait()?;
@@ -196,39 +227,39 @@ pub fn load(output_name: &str, namespace: &str) -> io::Result<()> {
 }
 
 pub fn clean() -> io::Result<()> {
+    clean_previous_versions();
     std::fs::remove_dir_all(cache_dir()?)
 }
 
-fn clean_previous_versions(cache_dir: &Path) {
-    let mut read_dir = match std::fs::read_dir(cache_dir) {
-        Ok(read_dir) => read_dir,
-        Err(_) => {
-            eprintln!("WARNING: failed to read cache dir {:?} entries", cache_dir);
+fn clean_previous_versions() {
+    let user_cache = match user_cache_dir() {
+        Ok(path) => path,
+        Err(e) => {
+            eprintln!("WARNING: failed to get user cache dir {e}");
             return;
         }
     };
 
-    let current_version = env!("CARGO_PKG_VERSION");
+    let mut read_dir = match std::fs::read_dir(&user_cache) {
+        Ok(read_dir) => read_dir,
+        Err(_) => {
+            eprintln!("WARNING: failed to read cache dir {user_cache:?} entries");
+            return;
+        }
+    };
 
     while let Some(Ok(entry)) = read_dir.next() {
-        let filename = entry.file_name();
-        let filename = match filename.to_str() {
-            Some(filename) => filename,
-            None => {
-                eprintln!("WARNING: failed to read filename of {:?}", filename);
-                continue;
-            }
-        };
+        let entryname = entry.file_name();
+        if entryname == CACHE_DIRNAME {
+            continue;
+        }
 
-        // only the images we've cached will have a _v token, indicating their version
-        if let Some(i) = filename.rfind("_v")
-            && &filename[i + 2..] != current_version
-            && let Err(e) = std::fs::remove_file(entry.path())
-        {
-            eprintln!(
-                "WARNING: failed to remove cache file {} of old swww version {:?}",
-                filename, e
-            );
+        if entry.path().is_dir() {
+            if let Err(e) = std::fs::remove_dir_all(entry.path()) {
+                eprintln!("failed to remove old cache directory {entryname:?}: {e}");
+            }
+        } else if let Err(e) = std::fs::remove_file(entry.path()) {
+            eprintln!("failed to remove old cache directory {entryname:?}: {e}");
         }
     }
 }
@@ -241,17 +272,15 @@ fn create_dir(p: &Path) -> io::Result<()> {
     }
 }
 
-fn cache_dir() -> io::Result<PathBuf> {
+fn user_cache_dir() -> io::Result<PathBuf> {
     if let Ok(path) = std::env::var("XDG_CACHE_HOME") {
         let mut path: PathBuf = path.into();
         path.push("swww");
-        create_dir(&path)?;
         Ok(path)
     } else if let Ok(path) = std::env::var("HOME") {
         let mut path: PathBuf = path.into();
         path.push(".cache");
         path.push("swww");
-        create_dir(&path)?;
         Ok(path)
     } else {
         Err(std::io::Error::other(
@@ -260,15 +289,27 @@ fn cache_dir() -> io::Result<PathBuf> {
     }
 }
 
+fn cache_dir() -> io::Result<PathBuf> {
+    let mut path = user_cache_dir()?;
+    path.push(CACHE_DIRNAME);
+    create_dir(&path)?;
+    Ok(path)
+}
+
 #[must_use]
-fn animation_filename(path: &Path, dimensions: (u32, u32), pixel_format: PixelFormat) -> PathBuf {
+fn animation_filename(
+    path: &Path,
+    dimensions: (u32, u32),
+    resize: &str,
+    pixel_format: PixelFormat,
+) -> PathBuf {
     format!(
-        "{}__{}x{}_{:?}_v{}",
+        "{}__{}x{}_{}_{:?}",
         path.to_string_lossy().replace('/', "_"),
         dimensions.0,
         dimensions.1,
+        resize,
         pixel_format,
-        env!("CARGO_PKG_VERSION"),
     )
     .into()
 }

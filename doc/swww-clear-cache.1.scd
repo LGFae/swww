@@ -16,15 +16,15 @@ swww-clear-cache
 Deletes the `swww` cache directory.
 
 The cache resides at _$XDG_CACHE_HOME/swww_ or _$HOME/.cache/swww_
-if $XDG_CACHE_HOME does not exist. For each monitor, there will be a file in
-those locations corresponding to the current image/animation being displayed.
+if $XDG_CACHE_HOME does not exist. In this directory, we create another
+directory corresponding to `swww`s current version number. In there, we have
+files that cache the last displayed image and animation frames for animated
+wallpapers. There is one file per output.
 
-Furthermore,  the cache will keep preprocessed versions of `gif`s. So, if you
-load a large `gif`, you would have to pay the price for its processing the first
-time.
-
-Note that `swww` will automatically delete any preprocessed animation created
-with a previous version of `swww` from the cache.
+**Note that `swww` will automatically delete any files and directories in 
+_$XDG_CACHE_HOME/swww_ that do not correspond to the exact current `swww`
+version number.** This is to ensure we only keep cache files for the latest
+`swww` version.
 
 # SEE ALSO
 *swww-img*(1)
