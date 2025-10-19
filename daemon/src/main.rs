@@ -291,7 +291,12 @@ impl Daemon {
                     &mut self.wallpapers,
                     self.pixel_format,
                 ) {
-                    self.animators.swap_remove(i);
+                    let a = self.animators.swap_remove(i);
+                    for w in &mut self.wallpapers {
+                        if a.group.contains(&w.output_name) {
+                            w.set_animating(false);
+                        }
+                    }
                     continue;
                 }
             }
