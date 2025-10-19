@@ -27,7 +27,7 @@ use std::{
     time::Duration,
 };
 
-use animations::{ImageAnimator, TransitionAnimator};
+use animations::Animator;
 use common::ipc::{
     Answer, BgInfo, ImageReq, IpcSocket, PixelFormat, RequestRecv, RequestSend, Scale, Server,
 };
@@ -61,8 +61,7 @@ struct Daemon {
     layer: Layer,
     pixel_format: PixelFormat,
     wallpapers: Vec<Rc<RefCell<Wallpaper>>>,
-    transition_animators: Vec<TransitionAnimator>,
-    image_animators: Vec<ImageAnimator>,
+    animators: Vec<Animator>,
     namespace: String,
     use_cache: bool,
     paused: bool,
@@ -118,9 +117,8 @@ impl Daemon {
             layer_shell,
             layer: args.layer,
             pixel_format: args.format.unwrap_or(PixelFormat::Argb),
-            wallpapers: Vec::new(),
-            transition_animators: Vec::new(),
-            image_animators: Vec::new(),
+            wallpapers: Vec::with_capacity(1),
+            animators: Vec::with_capacity(1),
             namespace: args.namespace,
             use_cache: !args.no_cache,
             paused: false,
@@ -202,15 +200,11 @@ impl Daemon {
                     };
                     let wallpapers = self.find_wallpapers_by_names(&names);
                     self.stop_animations(&wallpapers);
-                    if let Some(mut transition) = TransitionAnimator::new(
-                        wallpapers,
-                        &transition,
-                        self.pixel_format,
-                        img,
-                        animation,
-                    ) {
-                        transition.frame(&mut self.backend, &mut self.objman, self.pixel_format);
-                        self.transition_animators.push(transition);
+                    if let Some(mut animator) =
+                        Animator::new(wallpapers, &transition, self.pixel_format, img, animation)
+                    {
+                        animator.frame(&mut self.backend, &mut self.objman, self.pixel_format);
+                        self.animators.push(animator);
                     }
                 }
                 self.set_poll_time(Timespec {
@@ -248,8 +242,8 @@ impl Daemon {
         self.poll_time = None;
 
         let mut i = 0;
-        while i < self.transition_animators.len() {
-            let animator = &mut self.transition_animators[i];
+        while i < self.animators.len() {
+            let animator = &mut self.animators[i];
             if animator
                 .wallpapers
                 .iter()
@@ -278,52 +272,9 @@ impl Daemon {
                 wallpaper::commit_wallpapers(&mut self.backend, &animator.wallpapers);
                 animator.updt_time();
                 if animator.frame(&mut self.backend, &mut self.objman, self.pixel_format) {
-                    let animator = self.transition_animators.swap_remove(i);
-                    if let Some(anim) = animator.into_image_animator() {
-                        self.image_animators.push(anim);
-                    }
+                    self.animators.swap_remove(i);
                     continue;
                 }
-            }
-            let time = animator.time_to_draw();
-            self.set_poll_time(Timespec {
-                tv_sec: time.as_secs() as Secs,
-                tv_nsec: time.subsec_nanos().saturating_sub(500_000) as Nsecs,
-            });
-            i += 1;
-        }
-
-        self.image_animators.retain(|a| !a.wallpapers.is_empty());
-        let mut i = 0;
-        while i < self.image_animators.len() {
-            let animator = &mut self.image_animators[i];
-            if animator
-                .wallpapers
-                .iter()
-                .all(|w| w.borrow().is_draw_ready())
-            {
-                let time = animator.time_to_draw();
-                if time > Duration::from_micros(1000) {
-                    self.set_poll_time(Timespec {
-                        tv_sec: time.as_secs() as Secs,
-                        tv_nsec: time.subsec_nanos().saturating_sub(500_000) as Nsecs,
-                    });
-                    i += 1;
-                    continue;
-                }
-
-                if !time.is_zero() {
-                    spin_sleep(time);
-                }
-
-                wallpaper::attach_buffers_and_damage_surfaces(
-                    &mut self.backend,
-                    &mut self.objman,
-                    &animator.wallpapers,
-                );
-                wallpaper::commit_wallpapers(&mut self.backend, &animator.wallpapers);
-                animator.updt_time();
-                animator.frame(&mut self.backend, &mut self.objman, self.pixel_format);
             }
             let time = animator.time_to_draw();
             self.set_poll_time(Timespec {
@@ -350,22 +301,12 @@ impl Daemon {
     }
 
     fn stop_animations(&mut self, wallpapers: &[Rc<RefCell<Wallpaper>>]) {
-        for transition in self.transition_animators.iter_mut() {
-            transition
-                .wallpapers
-                .retain(|w1| !wallpapers.iter().any(|w2| w1.as_ptr() == w2.as_ptr()));
-        }
-
-        for animator in self.image_animators.iter_mut() {
+        for animator in self.animators.iter_mut() {
             animator
                 .wallpapers
                 .retain(|w1| !wallpapers.iter().any(|w2| w1.as_ptr() == w2.as_ptr()));
         }
-
-        self.transition_animators
-            .retain(|t| !t.wallpapers.is_empty());
-
-        self.image_animators.retain(|a| !a.wallpapers.is_empty());
+        self.animators.retain(|a| !a.wallpapers.is_empty());
     }
 }
 

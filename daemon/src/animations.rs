@@ -9,7 +9,7 @@ use std::{
 
 use common::{
     compression::Decompressor,
-    ipc::{self, Animation, BgImg, ImgReq, PixelFormat},
+    ipc::{self, BgImg, ImgReq, PixelFormat},
     mmap::MmappedBytes,
 };
 
@@ -18,23 +18,24 @@ use crate::{WaylandObject, wallpaper::Wallpaper};
 mod transitions;
 use transitions::Effect;
 
-pub struct TransitionAnimator {
+pub struct Animator {
     pub wallpapers: Vec<Rc<RefCell<Wallpaper>>>,
-    fps: Duration,
-    effect: Effect,
-    img: MmappedBytes,
-    animation: Option<Animation>,
     now: Instant,
-    over: bool,
+    animator: AnimatorKind,
 }
 
-impl TransitionAnimator {
+enum AnimatorKind {
+    Transition(Transition),
+    Animation(Animation),
+}
+
+impl Animator {
     pub fn new(
         mut wallpapers: Vec<Rc<RefCell<Wallpaper>>>,
         transition: &ipc::Transition,
         pixel_format: PixelFormat,
         img_req: ImgReq,
-        animation: Option<Animation>,
+        animation: Option<ipc::Animation>,
     ) -> Option<Self> {
         let ImgReq { img, path, dim, .. } = img_req;
         if wallpapers.is_empty() {
@@ -53,17 +54,22 @@ impl TransitionAnimator {
         let effect = Effect::new(transition, pixel_format, dim);
         Some(Self {
             wallpapers,
-            effect,
-            fps,
-            img,
-            animation,
             now: Instant::now(),
-            over: false,
+            animator: AnimatorKind::Transition(Transition {
+                effect,
+                fps,
+                img,
+                animation,
+                over: false,
+            }),
         })
     }
 
     pub fn time_to_draw(&self) -> std::time::Duration {
-        self.fps.saturating_sub(self.now.elapsed())
+        match &self.animator {
+            AnimatorKind::Transition(transition) => transition.time_to_draw(&self.now),
+            AnimatorKind::Animation(animation) => animation.time_to_draw(&self.now),
+        }
     }
 
     pub fn updt_time(&mut self) {
@@ -78,10 +84,58 @@ impl TransitionAnimator {
     ) -> bool {
         let Self {
             wallpapers,
-            effect,
-            img,
-            over,
+            animator,
             ..
+        } = self;
+        match animator {
+            AnimatorKind::Transition(transition) => {
+                if !transition.frame(backend, objman, wallpapers.as_mut_slice(), pixel_format) {
+                    return false;
+                }
+                // Note: it needs to have more than a single frame, otherwise there is no point in
+                // animating it
+                if let Some(animation) = transition.animation.take()
+                    && animation.animation.len() > 1
+                {
+                    *animator = AnimatorKind::Animation(Animation {
+                        animation,
+                        decompressor: Decompressor::new(),
+                        i: 0,
+                    });
+                    return false;
+                }
+                true
+            }
+            AnimatorKind::Animation(animation) => {
+                animation.frame(backend, objman, wallpapers, pixel_format);
+                false
+            }
+        }
+    }
+}
+
+struct Transition {
+    fps: Duration,
+    effect: Effect,
+    img: MmappedBytes,
+    animation: Option<ipc::Animation>,
+    over: bool,
+}
+
+impl Transition {
+    fn time_to_draw(&self, now: &Instant) -> std::time::Duration {
+        self.fps.saturating_sub(now.elapsed())
+    }
+
+    fn frame(
+        &mut self,
+        backend: &mut Waybackend,
+        objman: &mut ObjectManager<WaylandObject>,
+        wallpapers: &mut [Rc<RefCell<Wallpaper>>],
+        pixel_format: PixelFormat,
+    ) -> bool {
+        let Self {
+            effect, img, over, ..
         } = self;
         if !*over {
             *over = effect.execute(backend, objman, pixel_format, wallpapers, img.bytes());
@@ -90,58 +144,29 @@ impl TransitionAnimator {
             true
         }
     }
-
-    pub fn into_image_animator(self) -> Option<ImageAnimator> {
-        let Self {
-            wallpapers,
-            animation,
-            ..
-        } = self;
-
-        if let Some(animation) = animation {
-            // it needs to have more than a single frame, otherwise there is no point in animating
-            // it
-            if animation.animation.len() > 1 {
-                return Some(ImageAnimator {
-                    now: Instant::now(),
-                    wallpapers,
-                    animation,
-                    decompressor: Decompressor::new(),
-                    i: 0,
-                });
-            }
-        }
-        None
-    }
 }
 
-pub struct ImageAnimator {
-    now: Instant,
-    pub wallpapers: Vec<Rc<RefCell<Wallpaper>>>,
-    animation: Animation,
+struct Animation {
+    animation: ipc::Animation,
     decompressor: Decompressor,
     i: usize,
 }
 
-impl ImageAnimator {
-    pub fn time_to_draw(&self) -> std::time::Duration {
+impl Animation {
+    fn time_to_draw(&self, now: &Instant) -> std::time::Duration {
         self.animation.animation[self.i % self.animation.animation.len()]
             .1
-            .saturating_sub(self.now.elapsed())
+            .saturating_sub(now.elapsed())
     }
 
-    pub fn updt_time(&mut self) {
-        self.now = Instant::now();
-    }
-
-    pub fn frame(
+    fn frame(
         &mut self,
         backend: &mut Waybackend,
         objman: &mut ObjectManager<WaylandObject>,
+        wallpapers: &mut Vec<Rc<RefCell<Wallpaper>>>,
         pixel_format: PixelFormat,
     ) {
         let Self {
-            wallpapers,
             animation,
             decompressor,
             i,
