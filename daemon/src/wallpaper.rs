@@ -2,14 +2,14 @@ use common::ipc::{BgImg, BgInfo, PixelFormat, Scale};
 use log::{debug, error, warn};
 use waybackend::{Waybackend, objman::ObjectManager, types::ObjectId};
 
-use std::{cell::RefCell, num::NonZeroI32, rc::Rc};
+use std::num::NonZeroI32;
 
 use crate::{
     WaylandObject,
     wayland::{
-        bump_pool::BumpPool, wl_compositor, wl_region, wl_surface, wp_fractional_scale_manager_v1,
-        wp_fractional_scale_v1, wp_viewport, wp_viewporter, zwlr_layer_shell_v1,
-        zwlr_layer_surface_v1,
+        bump_pool::BumpPool, wl_compositor, wl_output, wl_region, wl_surface,
+        wp_fractional_scale_manager_v1, wp_fractional_scale_v1, wp_viewport, wp_viewporter,
+        zwlr_layer_shell_v1, zwlr_layer_surface_v1,
     },
 };
 
@@ -85,7 +85,7 @@ pub struct Wallpaper {
     desc: Option<String>,
 
     output: ObjectId,
-    output_name: u32,
+    pub output_name: u32,
     wl_surface: ObjectId,
     wp_viewport: ObjectId,
     wp_fractional: Option<ObjectId>,
@@ -98,6 +98,7 @@ pub struct Wallpaper {
     ack_serial: u32,
     needs_ack: bool,
 
+    pub animating: bool,
     pub configured: bool,
     dirty: bool,
 
@@ -207,6 +208,7 @@ impl Wallpaper {
             needs_ack: false,
             configured: false,
             dirty: false,
+            animating: false,
             frame_callback_handler,
             img: BgImg::Color([0, 0, 0, 0]),
             pool,
@@ -358,14 +360,9 @@ impl Wallpaper {
         self.layer_surface == layer_surface
     }
 
-    pub fn try_set_buffer_release_flag(
-        &mut self,
-        backend: &mut Waybackend,
-        buffer: ObjectId,
-        rc_strong_count: usize,
-    ) -> bool {
+    pub fn set_buffer_release_flag(&mut self, backend: &mut Waybackend, buffer: ObjectId) -> bool {
         self.pool
-            .set_buffer_release_flag(backend, buffer, rc_strong_count != 1)
+            .set_buffer_release_flag(backend, buffer, self.animating)
     }
 
     pub fn is_draw_ready(&self) -> bool {
@@ -424,7 +421,7 @@ impl Wallpaper {
         self.img = img_info;
     }
 
-    pub fn destroy(&mut self, backend: &mut Waybackend) {
+    pub fn destroy(mut self, backend: &mut Waybackend) {
         // Careful not to panic here, since we call this on drop
 
         if let Err(e) = wp_viewport::req::destroy(backend, self.wp_viewport) {
@@ -442,6 +439,14 @@ impl Wallpaper {
         }
 
         self.pool.destroy(backend);
+
+        if let Err(e) = wl_surface::req::destroy(backend, self.wl_surface) {
+            error!("error destroying wl_surface: {e:?}");
+        }
+
+        if let Err(e) = wl_output::req::release(backend, self.output) {
+            error!("error releasing wl_output: {e:?}");
+        }
 
         debug!(
             "Destroyed output {} - {}",
@@ -464,25 +469,19 @@ impl Wallpaper {
         self.frame_callback_handler
             .request_frame_callback(backend, objman, surface);
     }
-}
 
-/// attaches all pending buffers and damages all surfaces with one single request
-pub fn attach_buffers_and_damage_surfaces(
-    backend: &mut Waybackend,
-    objman: &mut ObjectManager<WaylandObject>,
-    wallpapers: &[Rc<RefCell<Wallpaper>>],
-) {
-    for wallpaper in wallpapers {
-        wallpaper
-            .borrow_mut()
-            .attach_buffer_and_damage_surface(backend, objman);
+    pub fn set_animating(&mut self, animating: bool) {
+        self.animating = animating;
     }
 }
 
-/// commits multiple wallpapers at once with a single message through the socket
-pub fn commit_wallpapers(backend: &mut Waybackend, wallpapers: &[Rc<RefCell<Wallpaper>>]) {
+pub fn attach_damage_commit<'a, W: Iterator<Item = &'a mut Wallpaper>>(
+    backend: &mut Waybackend,
+    objman: &mut ObjectManager<WaylandObject>,
+    wallpapers: W,
+) {
     for wallpaper in wallpapers {
-        let wallpaper = wallpaper.borrow();
+        wallpaper.attach_buffer_and_damage_surface(backend, objman);
         wl_surface::req::commit(backend, wallpaper.wl_surface).unwrap();
     }
 }

@@ -1,11 +1,7 @@
 use log::error;
 use waybackend::{Waybackend, objman::ObjectManager};
 
-use std::{
-    cell::RefCell,
-    rc::Rc,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 use common::{
     compression::Decompressor,
@@ -19,7 +15,8 @@ mod transitions;
 use transitions::Effect;
 
 pub struct Animator {
-    pub wallpapers: Vec<Rc<RefCell<Wallpaper>>>,
+    /// Output names this Animator is responsible for
+    pub group: Vec<u32>,
     now: Instant,
     animator: AnimatorKind,
 }
@@ -31,30 +28,40 @@ enum AnimatorKind {
 
 impl Animator {
     pub fn new(
-        mut wallpapers: Vec<Rc<RefCell<Wallpaper>>>,
+        wallpapers: &mut [Wallpaper],
+        group: Vec<u32>,
         transition: &ipc::Transition,
         pixel_format: PixelFormat,
         img_req: ImgReq,
         animation: Option<ipc::Animation>,
     ) -> Option<Self> {
         let ImgReq { img, path, dim, .. } = img_req;
-        if wallpapers.is_empty() {
-            return None;
-        }
-        for w in wallpapers.iter_mut() {
-            w.borrow_mut()
-                .set_img_info(BgImg::Img(path.str().to_string()));
-        }
 
-        let expect = wallpapers[0].borrow().get_dimensions();
+        let expect = group.first().map(|i| {
+            wallpapers
+                .iter()
+                .find(|w| w.has_output_name(*i))
+                .unwrap()
+                .get_dimensions()
+        })?;
+
         if dim != expect {
             error!("image has wrong dimensions! Expect {expect:?}, actual {dim:?}");
             return None;
         }
+
+        for w in wallpapers
+            .iter_mut()
+            .filter(|w| group.contains(&w.output_name))
+        {
+            w.set_animating(true);
+            w.set_img_info(BgImg::Img(path.str().to_string()));
+        }
+
         let fps = Duration::from_nanos(1_000_000_000 / transition.fps as u64);
         let effect = Effect::new(transition, pixel_format, dim);
         Some(Self {
-            wallpapers,
+            group,
             now: Instant::now(),
             animator: AnimatorKind::Transition(Transition {
                 effect,
@@ -81,16 +88,18 @@ impl Animator {
         &mut self,
         backend: &mut Waybackend,
         objman: &mut ObjectManager<WaylandObject>,
+        wallpapers: &mut [Wallpaper],
         pixel_format: PixelFormat,
     ) -> bool {
         let Self {
-            wallpapers,
-            animator,
-            ..
+            group, animator, ..
         } = self;
         match animator {
             AnimatorKind::Transition(transition) => {
-                if !transition.frame(backend, objman, wallpapers.as_mut_slice(), pixel_format) {
+                let wallpapers = wallpapers
+                    .iter_mut()
+                    .filter(|w| group.contains(&w.output_name));
+                if !transition.frame(backend, objman, wallpapers, pixel_format) {
                     return false;
                 }
                 // Note: it needs to have more than a single frame, otherwise there is no point in
@@ -108,7 +117,7 @@ impl Animator {
                 true
             }
             AnimatorKind::Animation(animation) => {
-                animation.frame(backend, objman, wallpapers, pixel_format);
+                animation.frame(backend, objman, group, wallpapers, pixel_format);
                 false
             }
         }
@@ -128,11 +137,11 @@ impl Transition {
         self.fps.saturating_sub(now.elapsed())
     }
 
-    fn frame(
+    fn frame<'a, W: Iterator<Item = &'a mut Wallpaper>>(
         &mut self,
         backend: &mut Waybackend,
         objman: &mut ObjectManager<WaylandObject>,
-        wallpapers: &mut [Rc<RefCell<Wallpaper>>],
+        wallpapers: W,
         pixel_format: PixelFormat,
     ) -> bool {
         let Self {
@@ -164,7 +173,8 @@ impl Animation {
         &mut self,
         backend: &mut Waybackend,
         objman: &mut ObjectManager<WaylandObject>,
-        wallpapers: &mut Vec<Rc<RefCell<Wallpaper>>>,
+        group: &mut Vec<u32>,
+        wallpapers: &mut [Wallpaper],
         pixel_format: PixelFormat,
     ) {
         let Self {
@@ -177,30 +187,29 @@ impl Animation {
         let frame = &animation.animation[*i % animation.animation.len()].0;
 
         if *i < animation.animation.len() {
-            wallpapers.retain(|w| {
-                let mut borrow = w.borrow_mut();
-                let result = borrow.canvas_change(backend, objman, pixel_format, |canvas| {
-                    decompressor.decompress(frame, canvas, pixel_format)
-                });
-                match result {
-                    Ok(()) => true,
-                    Err(e) => {
+            for w in wallpapers {
+                if let Some(j) = group.iter().position(|g| w.has_output_name(*g)) {
+                    let result = w.canvas_change(backend, objman, pixel_format, |canvas| {
+                        decompressor.decompress(frame, canvas, pixel_format)
+                    });
+                    if let Err(e) = result {
                         error!("failed to unpack frame: {e}");
-                        false
+                        group.remove(j);
                     }
                 }
-            });
+            }
         } else {
             // if we already went through one loop, we can use the unsafe version, because
             // everything was already validated
             for w in wallpapers {
-                let mut borrow = w.borrow_mut();
-                // SAFETY: we have already validated every frame and removed the ones that have
-                // errors in the previous loops. The only ones left should be those that can be
-                // decompressed correctly
-                borrow.canvas_change(backend, objman, pixel_format, |canvas| unsafe {
-                    decompressor.decompress_unchecked(frame, canvas, pixel_format)
-                });
+                if group.contains(&w.output_name) {
+                    // SAFETY: we have already validated every frame and removed the ones that have
+                    // errors in the previous loops. The only ones left should be those that can be
+                    // decompressed correctly
+                    w.canvas_change(backend, objman, pixel_format, |canvas| unsafe {
+                        decompressor.decompress_unchecked(frame, canvas, pixel_format)
+                    });
+                }
             }
         }
 
