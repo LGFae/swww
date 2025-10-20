@@ -87,14 +87,14 @@ Options:
     -n|--namespace <namespace>
         Which wayland namespace to append to `swww-daemon`.
 
-	    The result namespace will the `swww-daemon<specified namespace>`. This also
-	    affects the name of the `swww-daemon` socket we will use to communicate
-	    with the `client`. Specifically, our socket name is
-	    ${{WAYLAND_DISPLAY}}-swww-daemon.<specified namespace>.socket.
+        The resulting namespace will the `swww-daemon<specified namespace>`.
+        This also affects the name of the `swww-daemon` socket we will use to
+        communicate with the `client`. Specifically, our socket name is
+        ${{WAYLAND_DISPLAY}}-swww-daemon.<specified namespace>.socket.
 
-	    Some compositors can have several different wallpapers per output. This
-	    allows you to differentiate between them. Most users will probably not have
-	    to set anything in this option.
+        Some compositors can have several different wallpapers per output. This
+        allows you to differentiate between them. Most users will probably not have
+        to set anything in this option.
 
     --no-cache
         Don't search the cache for the last wallpaper for each output.
