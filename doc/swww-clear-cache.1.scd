@@ -21,9 +21,9 @@ directory corresponding to *swww*s current version number. In there, we have
 files that cache the last displayed image and animation frames for animated
 wallpapers. There is one file per output.
 
-**Note that *swww* will automatically delete any files and directories in 
+Note that *swww* will automatically delete any files and directories in 
 _$XDG_CACHE_HOME/swww_ that do not correspond to the exact current *swww*
-version number.** This is to ensure we only keep cache files for the latest
+version number. This is to ensure we only keep cache files for the latest
 *swww* version.
 
 # SEE ALSO

@@ -159,7 +159,7 @@ swww-img
 	Note there is no point in setting this to a value smaller than what your
 	monitor supports.
 
-	Also note this is **different** from the transition-step. That one controls
+	Also note this is different from the transition-step. That one controls
 	by how much we approach the new image every frame.
 
 	Default is 30.
