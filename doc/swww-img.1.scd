@@ -9,7 +9,7 @@ swww-img
 # OPTIONS
 
 *-a*,*--all*
-	Send this command to all active `swww-daemon` namespaces.
+	Send this command to all active *swww-daemon* namespaces.
 
 *-f*, *--filter* <FILTER>
 	Filter to use when scaling images
@@ -36,9 +36,9 @@ swww-img
 	Which wayland namespace to send this command to.
 
 	You can specify this option multiple times to send commands to multiple
-	namespaces at once: `swww img -n <namespace1> -n <namespace 2>`.
+	namespaces at once: *swww img -n <namespace1> -n <namespace 2>*.
 
-	This affects the name of the `swww-daemon` socket we will use to
+	This affects the name of the *swww-daemon* socket we will use to
 	communicate with. Specifically, our socket name is
 	_${WAYLAND_DISPLAY}-swww-daemon.<specified namespace>.socket_.
 
@@ -107,13 +107,13 @@ swww-img
 	from that position to its opposite in the screen.
 
 	_wipe_ is similar to _left_ but allows you to specify the angle for
-	transition with the `--transition-angle` flag.
+	transition with the *--transition-angle* flag.
 
 	_wave_ is similar to _wipe_ but the sweeping line is wavy. You can control
-	the "waviness" with `--transition-wave`.
+	the "waviness" with *--transition-wave*.
 
 	_grow_ causes a growing circle to transition across the screen and allows
-	changing the circle's center position with the `--transition-pos` flag.
+	changing the circle's center position with the *--transition-pos* flag.
 
 	_center_ is an alias to _grow_ with position set to center of screen.
 
@@ -203,7 +203,7 @@ swww-img
 *--invert-y* <bool>
 	\[Environment Variable: SWWW_INVERT_Y]
 
-	inverts the y position sent in `transition_pos` flag
+	inverts the y position sent in *transition_pos* flag
 
 *--transition-bezier* <f1,f2,f3,f4 (all floats)>
 	\[Environment Variable: SWWW_TRANSITION_BEZIER]
@@ -227,21 +227,21 @@ swww-img
 	Print help (see a summary with '-h')
 
 # DESCRIPTION
-Sends an image (or animated gif) for the daemon to display. You can also use `-`
+Sends an image (or animated gif) for the daemon to display. You can also use *-*
 to read from stdin instead.
 
 # ABOUT THE CACHE
 
 The images sent will be cached at _$XDG_CACHE_HOME/swww_ or _$HOME/.cache/swww_
 if $XDG_CACHE_HOME does not exist. In this directory, we create another
-directory corresponding to `swww`s current version number. In there, we have
+directory corresponding to *swww*s current version number. In there, we have
 files that cache the last displayed image and animation frames for animated
 wallpapers. There is one file per output.
 
 As mentioned, the cache will keep preprocessed versions of animations. So, if
-you load a large `gif`, you would only have to pay the price for its processing
-the first time. If you constantly load large `gif`s, this could cause the cache
-to get very big. You can simply run `swww clean-cache` if this happens.
+you load a large *gif*, you would only have to pay the price for its processing
+the first time. If you constantly load large *gif*s, this could cause the cache
+to get very big. You can simply run *swww clean-cache* if this happens.
 
 # SEE ALSO
 *swww-clear-cache*(1) *swww-daemon*(1) *swww-query*(1)

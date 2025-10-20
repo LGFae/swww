@@ -18,18 +18,18 @@ swww-daemon [OPTIONS]
 	when decoding the image (though the difference is unnoticiable).
 
 *-l*,*--layer* <background|bottom>
-	Which layer to display the background in. Defaults to `background`.
+	Which layer to display the background in. Defaults to *background*.
 
-	We do not accept layers `top` and `overlay` because those would make your
+	We do not accept layers *top* and *overlay* because those would make your
 	desktoop unusable by simply putting an image on top of everything else. If
 	there is ever a use case for these, we can reconsider it.
 
 *-n*,*--namespace* <namespace>
-	Which wayland namespace to append to `swww-daemon`.
+	Which wayland namespace to append to *swww-daemon*.
 
-	The result namespace will the `swww-daemon<specified namespace>`. This also
-	affects the name of the `swww-daemon` socket we will use to communicate
-	with the `client`. Specifically, our socket name is
+	The result namespace will the *swww-daemon<specified namespace>*. This also
+	affects the name of the *swww-daemon* socket we will use to communicate
+	with the *client*. Specifically, our socket name is
 	_${WAYLAND_DISPLAY}-swww-daemon.<specified namespace>.socket_.
 
 	Some compositors can have several different wallpapers per output. This
