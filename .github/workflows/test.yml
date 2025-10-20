@@ -1,7 +1,17 @@
 name: Test
 
 on:
-  workflow_call:
+  pull_request:
+    paths:
+      - '**.rs'
+      - '**Cargo.toml'
+  merge_group:
+  push:
+    branches:
+      - main
+    paths:
+      - '**.rs'
+      - '**Cargo.toml'
 
 env:
   CARGO_TERM_COLOR: always
@@ -9,23 +19,17 @@ env:
   RUSTC_WRAPPER: "sccache"
 
 jobs:
-  nightly:
+  test:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        toolchain: [stable, nightly]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: mozilla-actions/sccache-action@v0.0.9
-      - uses: dtolnay/rust-toolchain@nightly
-      - uses: taiki-e/install-action@cargo-nextest
-      - run: sudo apt install -y libwayland-dev wayland-protocols
-      - run: cargo build --workspace --locked --verbose
-      - run: cargo nextest run --workspace --locked
-
-  stable:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: mozilla-actions/sccache-action@v0.0.9
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.toolchain }}
       - uses: taiki-e/install-action@cargo-nextest
       - run: sudo apt install -y libwayland-dev wayland-protocols
       - run: cargo build --workspace --locked --verbose
@@ -34,7 +38,7 @@ jobs:
   msrv:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: mozilla-actions/sccache-action@v0.0.9
       - uses: SebRollen/toml-action@v1.0.2
         id: msrv
