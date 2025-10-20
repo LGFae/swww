@@ -1,7 +1,17 @@
-name: Check
+name: Clippy
 
 on:
-  workflow_call:
+  pull_request:
+    paths:
+      - '**.rs'
+      - '**Cargo.toml'
+  merge_group:
+  push:
+    branches:
+      - main
+    paths:
+      - '**.rs'
+      - '**Cargo.toml'
 
 env:
   CARGO_TERM_COLOR: always
@@ -12,7 +22,7 @@ jobs:
   clippy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: mozilla-actions/sccache-action@v0.0.9
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -24,7 +34,7 @@ jobs:
   fmt:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: mozilla-actions/sccache-action@v0.0.9
       - uses: dtolnay/rust-toolchain@stable
         with:

@@ -1,0 +1,20 @@
+name: Doc
+
+on:
+  pull_request:
+    paths:
+      - '**.scd'
+  merge_group:
+  push:
+    branches:
+      - main
+    paths:
+      - '**.scd'
+
+jobs:
+  doc-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: sudo apt install -y scdoc
+      - run: ./doc/gen.sh
