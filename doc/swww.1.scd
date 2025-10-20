@@ -15,7 +15,7 @@ swww - A Solution to your Wayland Wallpaper Woes
 	Restores the last displayed image on the specified outputs
 
 *clear-cache*
-	Deletes the `swww` cache directory
+	Deletes the *swww* cache directory
 
 *img*
 	Sends an image (or animated gif) for the daemon to display
