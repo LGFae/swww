@@ -9,15 +9,15 @@ swww-restore
 # OPTIONS
 
 *-a*,*--all*
-	Send this command to all active `swww-daemon` namespaces.
+	Send this command to all active *swww-daemon* namespaces.
 
 *-n*,*--namespace* <namespace>
 	Which wayland namespace to send this command to.
 
 	You can specify this option multiple times to send commands to multiple
-	namespaces at once: `swww restore -n <namespace1> -n <namespace 2>`.
+	namespaces at once: *swww restore -n <namespace1> -n <namespace 2>*.
 
-	This affects the name of the `swww-daemon` socket we will use to
+	This affects the name of the *swww-daemon* socket we will use to
 	communicate with. Specifically, our socket name is
 	_${WAYLAND_DISPLAY}-swww-daemon.<specified namespace>.socket_.
 
@@ -39,7 +39,7 @@ swww-restore
 
 Restores the last displayed image on the specified outputs.
 
-This can be used to split initialization (with `swww init --no-daemon`) and
+This can be used to split initialization (with *swww init --no-daemon*) and
 cache loading into different steps, in order to avoid race condition traps.
 
 You can also use this command to restore the last displayed image when

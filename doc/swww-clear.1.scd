@@ -9,15 +9,15 @@ swww-clear
 # OPTIONS
 
 *-a*,*--all*
-	Send this command to all active `swww-daemon` namespaces.
+	Send this command to all active *swww-daemon* namespaces.
 
 *-n*,*--namespace* <namespace>
 	Which wayland namespace to send this command to.
 
 	You can specify this option multiple times to send commands to multiple
-	namespaces at once: `swww clear -n <namespace1> -n <namespace 2>`.
+	namespaces at once: *swww clear -n <namespace1> -n <namespace 2>*.
 
-	This affects the name of the `swww-daemon` socket we will use to
+	This affects the name of the *swww-daemon* socket we will use to
 	communicate with. Specifically, our socket name is
 	_${WAYLAND_DISPLAY}-swww-daemon.<specified namespace>.socket_.
 
