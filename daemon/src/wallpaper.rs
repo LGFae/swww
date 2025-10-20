@@ -2,7 +2,7 @@ use common::ipc::{BgImg, BgInfo, PixelFormat, Scale};
 use log::{debug, error, warn};
 use waybackend::{Waybackend, objman::ObjectManager, types::ObjectId};
 
-use std::num::NonZeroI32;
+use std::num::{NonZeroI32, NonZeroU8};
 
 use crate::{
     WaylandObject,
@@ -98,7 +98,7 @@ pub struct Wallpaper {
     ack_serial: u32,
     needs_ack: bool,
 
-    pub animating: bool,
+    pub animation_group: Option<NonZeroU8>,
     pub configured: bool,
     dirty: bool,
 
@@ -208,7 +208,7 @@ impl Wallpaper {
             needs_ack: false,
             configured: false,
             dirty: false,
-            animating: false,
+            animation_group: None,
             frame_callback_handler,
             img: BgImg::Color([0, 0, 0, 0]),
             pool,
@@ -362,7 +362,7 @@ impl Wallpaper {
 
     pub fn set_buffer_release_flag(&mut self, backend: &mut Waybackend, buffer: ObjectId) -> bool {
         self.pool
-            .set_buffer_release_flag(backend, buffer, self.animating)
+            .set_buffer_release_flag(backend, buffer, self.animation_group.is_some())
     }
 
     pub fn is_draw_ready(&self) -> bool {
@@ -468,10 +468,6 @@ impl Wallpaper {
         wl_surface::req::damage_buffer(backend, surface, 0, 0, width, height).unwrap();
         self.frame_callback_handler
             .request_frame_callback(backend, objman, surface);
-    }
-
-    pub fn set_animating(&mut self, animating: bool) {
-        self.animating = animating;
     }
 }
 

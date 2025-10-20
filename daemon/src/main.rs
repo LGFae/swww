@@ -21,7 +21,7 @@ use wayland::zwlr_layer_shell_v1::Layer;
 use std::{
     fs,
     io::{IsTerminal, Write},
-    num::NonZeroI32,
+    num::{NonZeroI32, NonZeroU8},
     sync::atomic::{AtomicBool, Ordering},
     time::Duration,
 };
@@ -201,6 +201,7 @@ impl Daemon {
                     };
                     let group = self.find_group_by_names(&names);
                     self.stop_animations(&group);
+                    let group = self.next_animation_group(&group);
                     if let Some(mut animator) = Animator::new(
                         &mut self.wallpapers,
                         group,
@@ -212,7 +213,9 @@ impl Daemon {
                         animator.frame(
                             &mut self.backend,
                             &mut self.objman,
-                            &mut self.wallpapers,
+                            self.wallpapers
+                                .iter_mut()
+                                .filter(|w| w.animation_group == Some(group)),
                             self.pixel_format,
                         );
                         self.animators.push(animator);
@@ -256,13 +259,13 @@ impl Daemon {
         let mut i = 0;
         while i < self.animators.len() {
             let animator = &mut self.animators[i];
-            if animator.group.iter().all(|j| {
-                self.wallpapers
-                    .iter()
-                    .find(|w| w.has_output_name(*j))
-                    .unwrap()
-                    .is_draw_ready()
-            }) {
+            let group = NonZeroU8::new(i as u8 + 1).unwrap();
+            if self
+                .wallpapers
+                .iter()
+                .filter(|w| w.animation_group == Some(group))
+                .all(|w| w.is_draw_ready())
+            {
                 let time = animator.time_to_draw();
                 if time > Duration::from_micros(1000) {
                     self.set_poll_time(Timespec {
@@ -282,19 +285,25 @@ impl Daemon {
                     &mut self.objman,
                     self.wallpapers
                         .iter_mut()
-                        .filter(|w| animator.group.contains(&w.output_name)),
+                        .filter(|w| w.animation_group == Some(group)),
                 );
                 animator.updt_time();
                 if animator.frame(
                     &mut self.backend,
                     &mut self.objman,
-                    &mut self.wallpapers,
+                    self.wallpapers
+                        .iter_mut()
+                        .filter(|w| w.animation_group == Some(group)),
                     self.pixel_format,
                 ) {
-                    let a = self.animators.swap_remove(i);
+                    self.animators.remove(i);
                     for w in &mut self.wallpapers {
-                        if a.group.contains(&w.output_name) {
-                            w.set_animating(false);
+                        if let Some(g) = w.animation_group {
+                            if g == group {
+                                w.animation_group = None;
+                            } else if g > group {
+                                w.animation_group = Some(NonZeroU8::new(g.get() - 1).unwrap());
+                            }
                         }
                     }
                     continue;
@@ -327,14 +336,39 @@ impl Daemon {
     fn stop_animations(&mut self, wallpapers: &[u32]) {
         for w in &mut self.wallpapers {
             if wallpapers.contains(&w.output_name) {
-                w.set_animating(false);
+                w.animation_group = None;
             }
         }
 
-        for animator in self.animators.iter_mut() {
-            animator.group.retain(|x| !wallpapers.contains(x));
+        let mut i = 0;
+        while i < self.animators.len() {
+            let group = NonZeroU8::new(i as u8 + 1).unwrap();
+            let mut delete = true;
+            for w in &mut self.wallpapers {
+                if w.animation_group.is_some() {
+                    delete = false;
+                    w.animation_group = Some(group);
+                }
+            }
+
+            if delete {
+                self.animators.remove(i);
+            } else {
+                i += 1;
+            }
         }
-        self.animators.retain(|a| !a.group.is_empty());
+    }
+
+    fn next_animation_group(&mut self, wallpapers: &[u32]) -> NonZeroU8 {
+        let group = NonZeroU8::new(self.animators.len() as u8 + 1).unwrap();
+
+        for w in &mut self.wallpapers {
+            if wallpapers.contains(&w.output_name) {
+                w.animation_group = Some(group);
+            }
+        }
+
+        group
     }
 }
 
