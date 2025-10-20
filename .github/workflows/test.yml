@@ -32,7 +32,6 @@ jobs:
           toolchain: ${{ matrix.toolchain }}
       - uses: taiki-e/install-action@cargo-nextest
       - run: sudo apt install -y libwayland-dev wayland-protocols
-      - run: cargo build --workspace --locked --verbose
       - run: cargo nextest run --workspace --locked
 
   msrv:
@@ -50,5 +49,4 @@ jobs:
           toolchain: ${{ steps.msrv.outputs.value }}
       - uses: taiki-e/install-action@cargo-nextest
       - run: sudo apt install -y libwayland-dev wayland-protocols
-      - run: cargo build --workspace --locked --verbose
       - run: cargo nextest run --workspace --locked
