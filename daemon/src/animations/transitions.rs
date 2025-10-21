@@ -1,4 +1,4 @@
-use std::{cell::RefCell, rc::Rc, time::Instant};
+use std::{cell::RefCell, num::NonZeroU8, rc::Rc, time::Instant};
 
 use crate::{WaylandObject, wallpaper::Wallpaper};
 use common::ipc::{PixelFormat, Transition, TransitionType};
@@ -26,14 +26,30 @@ fn bezier_seq(transition: &Transition, start: f32, end: f32) -> (AnimationSequen
 }
 
 #[inline(always)]
-fn change_byte(step: u8, old: &mut u8, new: &u8) {
-    if old.abs_diff(*new) < step {
-        *old = *new;
-    } else if *old > *new {
-        *old -= step;
-    } else {
-        *old += step;
+/// This is calculating the following:
+/// ```
+/// if old.abs_diff(*new) < step.get() {
+///     *old = *new;
+/// } else if *old > *new {
+///     *old -= step.get();
+/// } else {
+///     *old += step.get();
+/// }
+/// ```
+/// However, it does so with less branches, making it more amenable to being autovectorized.
+/// From my tests, this is almost twice as fast as the above code in x86_64, when compiling without
+/// any target features. It only loses slightly (5%) in speed when we compile with avx512. However,
+/// avx512 is by itself already pretty fast anyway, and thus benefits less from this.
+fn change_byte(step: NonZeroU8, old: &mut u8, new: &u8) {
+    let min = (*old).min(*new);
+    let max = (*old).max(*new);
+    let diff = max - min;
+    let mut to_add = step.get().min(diff);
+
+    if *old > *new {
+        to_add = to_add.wrapping_neg();
     }
+    *old = old.wrapping_add(to_add);
 }
 
 struct None;
@@ -75,7 +91,7 @@ pub enum Effect {
 impl Effect {
     pub fn new(transition: &Transition, pixel_format: PixelFormat, dimensions: (u32, u32)) -> Self {
         match transition.transition_type {
-            TransitionType::Simple => Self::Simple(Simple::new(transition.step.get())),
+            TransitionType::Simple => Self::Simple(Simple::new(transition.step)),
             TransitionType::Fade => Self::Fade(Fade::new(transition)),
             TransitionType::Outer => Self::Outer(Outer::new(transition, pixel_format, dimensions)),
             TransitionType::Wipe => Self::Wipe(Wipe::new(transition, pixel_format, dimensions)),
@@ -104,26 +120,30 @@ impl Effect {
         };
         // we only finish for real if we are doing a None or a Simple transition
         if done {
+            #[inline(always)]
+            const fn new_nonzero(step: u8) -> NonZeroU8 {
+                NonZeroU8::new(step / 4 + 4).unwrap()
+            }
             *self = match self {
                 Effect::None(_) | Effect::Simple(_) => return true,
-                Effect::Fade(t) => Effect::Simple(Simple::new((t.step / 4 + 4) as u8)),
-                Effect::Wave(t) => Effect::Simple(Simple::new(t.step / 4 + 4)),
-                Effect::Wipe(t) => Effect::Simple(Simple::new(t.step / 4 + 4)),
-                Effect::Grow(t) => Effect::Simple(Simple::new(t.step / 4 + 4)),
-                Effect::Outer(t) => Effect::Simple(Simple::new(t.step / 4 + 4)),
+                Effect::Fade(t) => Effect::Simple(Simple::new(new_nonzero(t.step as u8))),
+                Effect::Wave(t) => Effect::Simple(Simple::new(new_nonzero(t.step.get()))),
+                Effect::Wipe(t) => Effect::Simple(Simple::new(new_nonzero(t.step.get()))),
+                Effect::Grow(t) => Effect::Simple(Simple::new(new_nonzero(t.step.get()))),
+                Effect::Outer(t) => Effect::Simple(Simple::new(new_nonzero(t.step.get()))),
             };
             return false;
-        }
+        };
         done
     }
 }
 
 struct Simple {
-    step: u8,
+    step: NonZeroU8,
 }
 
 impl Simple {
-    fn new(step: u8) -> Self {
+    fn new(step: NonZeroU8) -> Self {
         Self { step }
     }
     fn run(
@@ -201,7 +221,7 @@ struct Wave {
     circle_radius: f64,
     a: f64,
     b: f64,
-    step: u8,
+    step: NonZeroU8,
 }
 
 impl Wave {
@@ -225,7 +245,7 @@ impl Wave {
 
         let (seq, start) = bezier_seq(transition, offset as f32, max_offset as f32);
 
-        let step = transition.step.get();
+        let step = transition.step;
         let channels = pixel_format.channels() as usize;
         let stride = width * channels;
         Self {
@@ -349,7 +369,7 @@ struct Wipe {
     circle_radius: f64,
     a: f64,
     b: f64,
-    step: u8,
+    step: NonZeroU8,
 }
 
 impl Wipe {
@@ -375,7 +395,7 @@ impl Wipe {
         let (width, height) = (width as usize, height as usize);
         let (seq, start) = bezier_seq(transition, offset as f32, max_offset as f32);
 
-        let step = transition.step.get();
+        let step = transition.step;
         let channels = pixel_format.channels() as usize;
         let stride = width * channels;
         Self {
@@ -449,7 +469,7 @@ struct Grow {
     center_y: usize,
     stride: usize,
     dist_center: f32,
-    step: u8,
+    step: NonZeroU8,
 }
 
 impl Grow {
@@ -472,7 +492,7 @@ impl Grow {
         let (width, height) = (width as usize, height as usize);
         let (center_x, center_y) = (center_x as usize, center_y as usize);
 
-        let step = transition.step.get();
+        let step = transition.step;
         let channels = pixel_format.channels() as usize;
         let stride = width * channels;
         let (seq, start) = bezier_seq(transition, 0.0, dist_end);
@@ -545,7 +565,7 @@ struct Outer {
     center_y: usize,
     stride: usize,
     dist_center: f32,
-    step: u8,
+    step: NonZeroU8,
 }
 
 impl Outer {
@@ -566,7 +586,7 @@ impl Outer {
         let (width, height) = (width as usize, height as usize);
         let (center_x, center_y) = (center_x as usize, center_y as usize);
 
-        let step = transition.step.get();
+        let step = transition.step;
         let channels = pixel_format.channels() as usize;
         let stride = width * channels;
         let (seq, start) = bezier_seq(transition, dist_center, 0.0);
@@ -627,5 +647,36 @@ impl Outer {
         self.dist_center = self.seq.now();
         self.seq.advance_to(self.start.elapsed().as_secs_f64());
         self.start.elapsed().as_secs_f64() > self.seq.duration()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::num::NonZeroU8;
+
+    #[test]
+    fn change_byte() {
+        fn expected(step: NonZeroU8, old: &mut u8, new: &u8) {
+            if old.abs_diff(*new) < step.get() {
+                *old = *new;
+            } else if *old > *new {
+                *old -= step.get();
+            } else {
+                *old += step.get();
+            }
+        }
+
+        for old in 0..=255 {
+            for new in 0..=255 {
+                for step in 1..=255 {
+                    let step = NonZeroU8::new(step).unwrap();
+                    let mut a = old;
+                    let mut b = old;
+                    expected(step, &mut a, &new);
+                    super::change_byte(step, &mut b, &new);
+                    assert_eq!(a, b, "old: {old}, new: {new}, step: {step}");
+                }
+            }
+        }
     }
 }
