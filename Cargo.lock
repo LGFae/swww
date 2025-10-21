@@ -274,6 +274,7 @@ name = "common"
 version = "0.11.2-master2"
 dependencies = [
  "fastrand",
+ "log",
  "pkg-config",
  "rustix",
 ]

@@ -131,7 +131,8 @@ impl From<RawMsg> for RequestRecv {
                     outputs.push(out.into());
 
                     if bytes[i] == 1 {
-                        let (animation, offset) = Animation::deserialize(&mmap, &bytes[i + 1..]);
+                        let (animation, offset) =
+                            Animation::deserialize(&mmap, &bytes[i + 1..]).unwrap();
                         i += offset;
                         animations.push(animation);
                     }

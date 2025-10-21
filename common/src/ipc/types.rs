@@ -595,26 +595,27 @@ impl Animation {
         }
     }
 
-    pub(crate) fn deserialize(mmap: &Mmap, bytes: &[u8]) -> (Self, usize) {
+    pub(crate) fn deserialize(mmap: &Mmap, bytes: &[u8]) -> Option<(Self, usize)> {
         let mut i = 0;
-        let animation_len = u32::from_ne_bytes(bytes[i..i + 4].try_into().unwrap()) as usize;
+        let animation_len = u32::from_ne_bytes(bytes.get(i..i + 4)?.try_into().unwrap()) as usize;
         i += 4;
         let mut animation = Vec::with_capacity(animation_len);
         for _ in 0..animation_len {
-            let (anim, offset) = BitPack::deserialize(mmap, &bytes[i..]);
+            let (anim, offset) = BitPack::deserialize(mmap, bytes.get(i..)?)?;
             i += offset;
-            let duration =
-                Duration::from_secs_f64(f64::from_ne_bytes(bytes[i..i + 8].try_into().unwrap()));
+            let duration = Duration::from_secs_f64(f64::from_ne_bytes(
+                bytes.get(i..i + 8)?.try_into().unwrap(),
+            ));
             i += 8;
             animation.push((anim, duration));
         }
 
-        (
+        Some((
             Self {
                 animation: animation.into(),
             },
             i,
-        )
+        ))
     }
 }
 

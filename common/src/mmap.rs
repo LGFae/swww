@@ -1,5 +1,5 @@
-use std::iter::repeat_with;
 use core::ptr::NonNull;
+use std::iter::repeat_with;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
@@ -109,7 +109,7 @@ impl Mmap {
     /// This is only ever used in the daemon, when animations finish, in order to free up memory
     pub fn unmap(&mut self) {
         if let Err(e) = unsafe { munmap(self.ptr.as_ptr(), self.len) } {
-            eprintln!("ERROR WHEN UNMAPPING MEMORY: {e}");
+            log::error!("failed to unmap memory: {e}");
         } else {
             self.mmapped = false;
         }
@@ -313,7 +313,7 @@ impl<const UTF8: bool> Drop for Mmapped<UTF8> {
     fn drop(&mut self) {
         let len = self.len + self.ptr.as_ptr() as usize - self.base_ptr.as_ptr() as usize;
         if let Err(e) = unsafe { munmap(self.base_ptr.as_ptr(), len) } {
-            eprintln!("ERROR WHEN UNMAPPING MEMORY: {e}");
+            log::error!("failed to unmap memory: {e}");
         }
     }
 }

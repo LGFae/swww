@@ -159,9 +159,9 @@ pub fn load_animation_frames(
             let len = rustix::fs::seek(&fd, rustix::fs::SeekFrom::End(0))?;
             let mmap = Mmap::from_fd(fd, len as usize);
 
-            match std::panic::catch_unwind(|| Animation::deserialize(&mmap, mmap.slice())) {
-                Ok((frames, _)) => return Ok(Some(frames)),
-                Err(e) => eprintln!("Error loading animation frames: {e:?}"),
+            match Animation::deserialize(&mmap, mmap.slice()) {
+                Some((frames, _)) => return Ok(Some(frames)),
+                None => log::error!("failed to load cached animation frames"),
             }
         }
     }
@@ -235,7 +235,7 @@ fn clean_previous_versions() {
     let user_cache = match user_cache_dir() {
         Ok(path) => path,
         Err(e) => {
-            eprintln!("WARNING: failed to get user cache dir {e}");
+            log::warn!("failed to get user cache dir {e}");
             return;
         }
     };
@@ -243,7 +243,7 @@ fn clean_previous_versions() {
     let mut read_dir = match std::fs::read_dir(&user_cache) {
         Ok(read_dir) => read_dir,
         Err(_) => {
-            eprintln!("WARNING: failed to read cache dir {user_cache:?} entries");
+            log::warn!("failed to read cache dir {user_cache:?} entries");
             return;
         }
     };
@@ -256,10 +256,10 @@ fn clean_previous_versions() {
 
         if entry.path().is_dir() {
             if let Err(e) = std::fs::remove_dir_all(entry.path()) {
-                eprintln!("failed to remove old cache directory {entryname:?}: {e}");
+                log::warn!("failed to remove old cache directory {entryname:?}: {e}");
             }
         } else if let Err(e) = std::fs::remove_file(entry.path()) {
-            eprintln!("failed to remove old cache directory {entryname:?}: {e}");
+            log::warn!("failed to remove old cache directory {entryname:?}: {e}");
         }
     }
 }

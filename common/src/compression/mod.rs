@@ -72,20 +72,26 @@ impl BitPack {
     }
 
     #[must_use]
-    pub(crate) fn deserialize(map: &Mmap, bytes: &[u8]) -> (Self, usize) {
-        assert!(bytes.len() > 12);
-        let len = u32::from_ne_bytes(bytes[0..4].try_into().unwrap()) as usize;
-        let expected_buf_size = u32::from_ne_bytes(bytes[4..8].try_into().unwrap());
-        let compressed_size = i32::from_ne_bytes(bytes[8..12].try_into().unwrap());
-        let inner = Inner::Mmapped(MmappedBytes::new_with_len(map, &bytes[12..12 + len], len));
-        (
+    pub(crate) fn deserialize(map: &Mmap, bytes: &[u8]) -> Option<(Self, usize)> {
+        if bytes.len() <= 12 {
+            return None;
+        }
+        let len = u32::from_ne_bytes(bytes.get(0..4)?.try_into().unwrap()) as usize;
+        let expected_buf_size = u32::from_ne_bytes(bytes.get(4..8)?.try_into().unwrap());
+        let compressed_size = i32::from_ne_bytes(bytes.get(8..12)?.try_into().unwrap());
+        let inner = Inner::Mmapped(MmappedBytes::new_with_len(
+            map,
+            bytes.get(12..12 + len)?,
+            len,
+        ));
+        Some((
             Self {
                 inner,
                 expected_buf_size,
                 compressed_size,
             },
             12 + len,
-        )
+        ))
     }
 
     #[inline]
@@ -370,7 +376,8 @@ impl Decompressor {
             bitpack.compressed_size as c_int,
         );
 
-        let v = core::slice::from_raw_parts_mut(self.ptr.as_ptr(), bitpack.compressed_size as usize);
+        let v =
+            core::slice::from_raw_parts_mut(self.ptr.as_ptr(), bitpack.compressed_size as usize);
 
         if pixel_format.can_copy_directly_onto_wl_buffer() {
             decomp::unpack_unsafe_bytes_3channels(buf, v)

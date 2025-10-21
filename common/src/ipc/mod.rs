@@ -100,7 +100,7 @@ impl ImageRequestBuilder {
             if let Err(e) =
                 super::cache::CacheEntry::new(namespace, resize, filter, path).store(output)
             {
-                eprintln!("ERROR: failed to store cache: {e}");
+                log::error!("failed to store cache: {e}");
             }
         }
 
@@ -113,7 +113,7 @@ impl ImageRequestBuilder {
                 resize,
                 *format,
             ) {
-                eprintln!("Error storing cache for {}: {e}", path);
+                log::error!("failed storing cache for {}: {e}", path);
             }
         }
     }
