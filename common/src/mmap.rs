@@ -1,5 +1,5 @@
 use std::iter::repeat_with;
-use std::ptr::NonNull;
+use core::ptr::NonNull;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
@@ -20,7 +20,7 @@ use rustix::shm::OFlags;
 #[derive(Debug)]
 pub struct Mmap {
     fd: OwnedFd,
-    ptr: NonNull<std::ffi::c_void>,
+    ptr: NonNull<core::ffi::c_void>,
     len: usize,
     mmapped: bool,
 }
@@ -36,7 +36,7 @@ impl Mmap {
         rustix::io::retry_on_intr(|| rustix::fs::ftruncate(&fd, len as u64)).unwrap();
 
         let ptr = unsafe {
-            let ptr = mmap(std::ptr::null_mut(), len, Self::PROT, Self::FLAGS, &fd, 0).unwrap();
+            let ptr = mmap(core::ptr::null_mut(), len, Self::PROT, Self::FLAGS, &fd, 0).unwrap();
             // SAFETY: the function above will never return a null pointer if it succeeds
             // POSIX says that the implementation will never select an address at 0
             NonNull::new_unchecked(ptr)
@@ -124,7 +124,7 @@ impl Mmap {
             self.mmapped = true;
             self.ptr = unsafe {
                 let ptr = mmap(
-                    std::ptr::null_mut(),
+                    core::ptr::null_mut(),
                     self.len,
                     Self::PROT,
                     Self::FLAGS,
@@ -164,7 +164,7 @@ impl Mmap {
         self.len = new;
         self.ptr = unsafe {
             let ptr = mmap(
-                std::ptr::null_mut(),
+                core::ptr::null_mut(),
                 self.len,
                 Self::PROT,
                 Self::FLAGS,
@@ -182,7 +182,7 @@ impl Mmap {
     pub(crate) fn from_fd(fd: OwnedFd, len: usize) -> Self {
         let ptr = unsafe {
             let ptr = mmap(
-                std::ptr::null_mut(),
+                core::ptr::null_mut(),
                 len,
                 ProtFlags::READ,
                 Self::FLAGS,
@@ -205,13 +205,13 @@ impl Mmap {
     #[inline]
     #[must_use]
     pub fn slice_mut(&mut self) -> &mut [u8] {
-        unsafe { std::slice::from_raw_parts_mut(self.ptr.as_ptr().cast(), self.len) }
+        unsafe { core::slice::from_raw_parts_mut(self.ptr.as_ptr().cast(), self.len) }
     }
 
     #[inline]
     #[must_use]
     pub fn slice(&self) -> &[u8] {
-        unsafe { std::slice::from_raw_parts(self.ptr.as_ptr().cast(), self.len) }
+        unsafe { core::slice::from_raw_parts(self.ptr.as_ptr().cast(), self.len) }
     }
 
     #[inline]
@@ -238,8 +238,8 @@ impl Drop for Mmap {
 }
 
 pub struct Mmapped<const UTF8: bool> {
-    base_ptr: NonNull<std::ffi::c_void>,
-    ptr: NonNull<std::ffi::c_void>,
+    base_ptr: NonNull<core::ffi::c_void>,
+    ptr: NonNull<core::ffi::c_void>,
     len: usize,
 }
 
@@ -265,7 +265,7 @@ impl<const UTF8: bool> Mmapped<UTF8> {
 
         let base_ptr = unsafe {
             let ptr = mmap(
-                std::ptr::null_mut(),
+                core::ptr::null_mut(),
                 len + (offset - page_offset),
                 Self::PROT,
                 Self::FLAGS,
@@ -282,8 +282,8 @@ impl<const UTF8: bool> Mmapped<UTF8> {
 
         if UTF8 {
             // try to parse, panicking if we fail
-            let s = unsafe { std::slice::from_raw_parts(ptr.as_ptr().cast(), len) };
-            let _s = std::str::from_utf8(s).expect("received a non utf8 string from socket");
+            let s = unsafe { core::slice::from_raw_parts(ptr.as_ptr().cast(), len) };
+            let _s = core::str::from_utf8(s).expect("received a non utf8 string from socket");
         }
 
         Self { base_ptr, ptr, len }
@@ -292,7 +292,7 @@ impl<const UTF8: bool> Mmapped<UTF8> {
     #[inline]
     #[must_use]
     pub fn bytes(&self) -> &[u8] {
-        unsafe { std::slice::from_raw_parts(self.ptr.as_ptr().cast(), self.len) }
+        unsafe { core::slice::from_raw_parts(self.ptr.as_ptr().cast(), self.len) }
     }
 
     #[inline]
@@ -300,8 +300,8 @@ impl<const UTF8: bool> Mmapped<UTF8> {
     pub const fn str(&self) -> &str {
         if UTF8 {
             unsafe {
-                let slice = std::slice::from_raw_parts(self.ptr.as_ptr().cast(), self.len);
-                std::str::from_utf8_unchecked(slice)
+                let slice = core::slice::from_raw_parts(self.ptr.as_ptr().cast(), self.len);
+                core::str::from_utf8_unchecked(slice)
             }
         } else {
             panic!("trying to use a mmap that is not a utf8 as str")

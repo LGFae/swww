@@ -8,9 +8,9 @@ pub(crate) unsafe fn unpack_bytes_4channels(
     const MASK: u64 = 0b0111011101110111011101110111011101110111011101110111011101110111;
 
     #[cfg(target_arch = "x86")]
-    use std::arch::x86 as intr;
+    use core::arch::x86 as intr;
     #[cfg(target_arch = "x86_64")]
-    use std::arch::x86_64 as intr;
+    use core::arch::x86_64 as intr;
 
     let mut dst = buf.as_mut_ptr();
     let mut src = diff.as_ptr();
@@ -61,9 +61,9 @@ pub(crate) unsafe fn unpack_unsafe_bytes_4channels(buf: &mut [u8], diff: &[u8]) 
     const MASK: u64 = 0b0111011101110111011101110111011101110111011101110111011101110111;
 
     #[cfg(target_arch = "x86")]
-    use std::arch::x86 as intr;
+    use core::arch::x86 as intr;
     #[cfg(target_arch = "x86_64")]
-    use std::arch::x86_64 as intr;
+    use core::arch::x86_64 as intr;
 
     let mut dst = buf.as_mut_ptr();
     let mut src = diff.as_ptr();

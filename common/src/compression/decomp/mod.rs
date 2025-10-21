@@ -39,7 +39,7 @@ pub(crate) unsafe fn unpack_bytes_4channels(
         verify_copy::<4>(src, last_src, dst, last_dst, to_cpy)?;
 
         for _ in 0..to_cpy {
-            std::ptr::copy_nonoverlapping(src, dst, 4);
+            core::ptr::copy_nonoverlapping(src, dst, 4);
             dst.add(3).write(0xFF);
             src = src.add(3);
             dst = dst.add(4);
@@ -74,7 +74,7 @@ pub(super) unsafe fn unpack_unsafe_bytes_4channels(buf: &mut [u8], diff: &[u8]) 
         src = src.add(1);
 
         for _ in 0..to_cpy {
-            std::ptr::copy_nonoverlapping(src, dst, 4);
+            core::ptr::copy_nonoverlapping(src, dst, 4);
             dst.add(3).write(0xFF);
             src = src.add(3);
             dst = dst.add(4);
@@ -113,7 +113,7 @@ pub(super) unsafe fn unpack_bytes_3channels(
 
         verify_copy::<3>(src, last_src, dst, last_dst, to_cpy)?;
 
-        std::ptr::copy_nonoverlapping(src, dst, to_cpy * 3);
+        core::ptr::copy_nonoverlapping(src, dst, to_cpy * 3);
         dst = dst.add((to_cpy + 1) * 3);
         src = src.add(to_cpy * 3);
     }
@@ -145,7 +145,7 @@ pub(super) unsafe fn unpack_unsafe_bytes_3channels(buf: &mut [u8], diff: &[u8]) 
         to_cpy += src.read() as usize;
         src = src.add(1);
 
-        std::ptr::copy_nonoverlapping(src, dst, to_cpy * 3);
+        core::ptr::copy_nonoverlapping(src, dst, to_cpy * 3);
         dst = dst.add((to_cpy + 1) * 3);
         src = src.add(to_cpy * 3);
     }

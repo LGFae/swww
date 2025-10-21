@@ -1,11 +1,10 @@
-use std::mem::MaybeUninit;
-use std::thread;
-use std::time::Duration;
+use core::mem::MaybeUninit;
 
 use rustix::io;
 use rustix::io::Errno;
 use rustix::net;
 use rustix::net::RecvFlags;
+use rustix::thread;
 
 use super::Animation;
 use super::Answer;
@@ -268,7 +267,12 @@ impl<T> IpcSocket<T> {
             let iov = io::IoSliceMut::new(&mut buf);
             match net::recvmsg(self.as_fd(), &mut [iov], &mut control, RecvFlags::WAITALL) {
                 Ok(_) => break,
-                Err(Errno::WOULDBLOCK | Errno::INTR) => thread::sleep(Duration::from_millis(1)),
+                Err(Errno::WOULDBLOCK | Errno::INTR) => {
+                    _ = thread::nanosleep(&thread::Timespec {
+                        tv_sec: 0,
+                        tv_nsec: 1_000_000,
+                    })
+                }
                 Err(err) => return Err(err).context(IpcErrorKind::Read),
             }
         }

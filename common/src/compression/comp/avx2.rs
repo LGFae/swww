@@ -5,9 +5,9 @@
 #[target_feature(enable = "avx2")]
 unsafe fn count_equals(s1: &[u8], s2: &[u8], mut i: usize) -> usize {
     #[cfg(target_arch = "x86")]
-    use std::arch::x86 as intr;
+    use core::arch::x86 as intr;
     #[cfg(target_arch = "x86_64")]
-    use std::arch::x86_64 as intr;
+    use core::arch::x86_64 as intr;
     let mut equals = 0;
     while i + 31 < s1.len() {
         // SAFETY: we exit the while loop when there are less than 32 bytes left we read
@@ -43,9 +43,9 @@ unsafe fn count_equals(s1: &[u8], s2: &[u8], mut i: usize) -> usize {
 #[target_feature(enable = "avx2")]
 unsafe fn count_different(s1: &[u8], s2: &[u8], mut i: usize) -> usize {
     #[cfg(target_arch = "x86")]
-    use std::arch::x86 as intr;
+    use core::arch::x86 as intr;
     #[cfg(target_arch = "x86_64")]
-    use std::arch::x86_64 as intr;
+    use core::arch::x86_64 as intr;
     let mut diff = 0;
     while i + 31 < s1.len() {
         // SAFETY: we exit the while loop when there are less than 16 bytes left we read

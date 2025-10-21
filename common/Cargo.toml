@@ -17,6 +17,7 @@ rustix = { version = "1.0", default-features = false, features = [
   "mm",
   "param",
   "process",
+  "thread",
 ] }
 
 [build-dependencies]

@@ -2,7 +2,7 @@
 //!
 //! Our compression strategy is documented in `comp/mod.rs`
 
-use std::ffi::{c_char, c_int};
+use core::ffi::{c_char, c_int};
 
 use crate::ipc::ImageRequestBuilder;
 use crate::ipc::PixelFormat;
@@ -206,7 +206,7 @@ impl Compressor {
 pub struct Decompressor {
     /// this pointer stores an inner buffer we need to speed up decompression
     /// note we explicitly do not care about its length
-    ptr: std::ptr::NonNull<u8>,
+    ptr: core::ptr::NonNull<u8>,
     cap: usize,
     decomp_4channels: unsafe fn(&mut [u8], &[u8]) -> Result<(), DecompressionError>,
     decomp_4channels_unsafe: unsafe fn(&mut [u8], &[u8]),
@@ -261,7 +261,7 @@ impl Decompressor {
         };
 
         Self {
-            ptr: std::ptr::NonNull::dangling(),
+            ptr: core::ptr::NonNull::dangling(),
             cap: 0,
             decomp_4channels,
             decomp_4channels_unsafe,
@@ -276,7 +276,7 @@ impl Decompressor {
         let ptr = if self.cap == 0 {
             let layout = std::alloc::Layout::array::<u8>(goal).unwrap();
             let p = unsafe { std::alloc::alloc(layout) };
-            match std::ptr::NonNull::new(p) {
+            match core::ptr::NonNull::new(p) {
                 Some(p) => p,
                 None => std::alloc::handle_alloc_error(layout),
             }
@@ -285,7 +285,7 @@ impl Decompressor {
             let new_layout = std::alloc::Layout::array::<u8>(goal).unwrap();
             let p =
                 unsafe { std::alloc::realloc(self.ptr.as_ptr(), old_layout, new_layout.size()) };
-            match std::ptr::NonNull::new(p) {
+            match core::ptr::NonNull::new(p) {
                 Some(p) => p,
                 None => std::alloc::handle_alloc_error(new_layout),
             }
@@ -331,7 +331,7 @@ impl Decompressor {
         // SAFETY: the call to self.ensure_capacity guarantees the pointer has the necessary size
         // to hold all the data
         let v = unsafe {
-            std::slice::from_raw_parts_mut(self.ptr.as_ptr(), bitpack.compressed_size as usize)
+            core::slice::from_raw_parts_mut(self.ptr.as_ptr(), bitpack.compressed_size as usize)
         };
 
         if v[v.len() - 2..v.len()] != [0, 0] {
@@ -370,7 +370,7 @@ impl Decompressor {
             bitpack.compressed_size as c_int,
         );
 
-        let v = std::slice::from_raw_parts_mut(self.ptr.as_ptr(), bitpack.compressed_size as usize);
+        let v = core::slice::from_raw_parts_mut(self.ptr.as_ptr(), bitpack.compressed_size as usize);
 
         if pixel_format.can_copy_directly_onto_wl_buffer() {
             decomp::unpack_unsafe_bytes_3channels(buf, v)
@@ -389,7 +389,7 @@ pub enum DecompressionError {
 }
 
 impl core::fmt::Display for DecompressionError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             DecompressionError::WrongBufferLength(actual, expected) => write!(
                 f,

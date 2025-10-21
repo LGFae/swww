@@ -7,9 +7,9 @@ pub(crate) unsafe fn unpack_bytes_4channels(
     diff: &[u8],
 ) -> Result<(), DecompressionError> {
     #[cfg(target_arch = "x86")]
-    use std::arch::x86 as intr;
+    use core::arch::x86 as intr;
     #[cfg(target_arch = "x86_64")]
-    use std::arch::x86_64 as intr;
+    use core::arch::x86_64 as intr;
 
     let mut dst = buf.as_mut_ptr();
     let mut src = diff.as_ptr();
@@ -46,7 +46,7 @@ pub(crate) unsafe fn unpack_bytes_4channels(
             to_cpy -= 4;
         }
         for _ in 0..to_cpy {
-            std::ptr::copy_nonoverlapping(src, dst, 4);
+            core::ptr::copy_nonoverlapping(src, dst, 4);
             dst.add(3).write(0xFF);
             src = src.add(3);
             dst = dst.add(4);
@@ -61,9 +61,9 @@ pub(crate) unsafe fn unpack_bytes_4channels(
 #[target_feature(enable = "ssse3")]
 pub(crate) unsafe fn unpack_unsafe_bytes_4channels(buf: &mut [u8], diff: &[u8]) {
     #[cfg(target_arch = "x86")]
-    use std::arch::x86 as intr;
+    use core::arch::x86 as intr;
     #[cfg(target_arch = "x86_64")]
-    use std::arch::x86_64 as intr;
+    use core::arch::x86_64 as intr;
 
     let mut dst = buf.as_mut_ptr();
     let mut src = diff.as_ptr();
@@ -97,7 +97,7 @@ pub(crate) unsafe fn unpack_unsafe_bytes_4channels(buf: &mut [u8], diff: &[u8]) 
             to_cpy -= 4;
         }
         for _ in 0..to_cpy {
-            std::ptr::copy_nonoverlapping(src, dst, 4);
+            core::ptr::copy_nonoverlapping(src, dst, 4);
             dst.add(3).write(0xFF);
             src = src.add(3);
             dst = dst.add(4);

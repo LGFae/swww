@@ -1,8 +1,6 @@
-use std::{
-    fmt,
-    num::{NonZeroI32, NonZeroU8},
-    time::Duration,
-};
+use core::fmt;
+use core::num::{NonZeroI32, NonZeroU8};
+use core::time::Duration;
 
 use crate::compression::BitPack;
 use crate::mmap::Mmap;
@@ -629,7 +627,7 @@ pub struct ImageReq {
 
 fn deserialize_boxed_std(bytes: &[u8]) -> Box<str> {
     let size = u32::from_ne_bytes(bytes[0..4].try_into().unwrap()) as usize;
-    std::str::from_utf8(&bytes[4..4 + size])
+    core::str::from_utf8(&bytes[4..4 + size])
         .expect("received a non utf8 string from socket")
         .into()
 }

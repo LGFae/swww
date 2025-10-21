@@ -1,9 +1,9 @@
+use core::marker::PhantomData;
+use core::time::Duration;
 use std::env;
-use std::marker::PhantomData;
 use std::os::unix::ffi::OsStrExt;
 use std::path::PathBuf;
 use std::sync::OnceLock;
-use std::time::Duration;
 
 use rustix::fd::OwnedFd;
 use rustix::io::Errno;
@@ -108,7 +108,7 @@ impl<T> IpcSocket<T> {
             .into_iter()
             .flatten()
             .filter_map(|entry| {
-                std::str::from_utf8(
+                core::str::from_utf8(
                     entry
                         .file_name()
                         .as_encoded_bytes()
