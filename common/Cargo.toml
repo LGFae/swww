@@ -11,7 +11,7 @@ workspace = true
 
 [dependencies]
 log    = { version = "0.4", default-features = false, features = [] }
-rustix = { version = "1.0", default-features = false, features = [
+rustix = { version = "1.1", default-features = false, features = [
   "std",
   "alloc",
   "net",
