@@ -89,14 +89,14 @@ pub enum Effect {
 }
 
 impl Effect {
-    pub fn new(transition: &Transition, pixel_format: PixelFormat, dimensions: (u32, u32)) -> Self {
+    pub fn new(transition: &Transition, dimensions: (u32, u32)) -> Self {
         match transition.transition_type {
             TransitionType::Simple => Self::Simple(Simple::new(transition.step)),
             TransitionType::Fade => Self::Fade(Fade::new(transition)),
-            TransitionType::Outer => Self::Outer(Outer::new(transition, pixel_format, dimensions)),
-            TransitionType::Wipe => Self::Wipe(Wipe::new(transition, pixel_format, dimensions)),
-            TransitionType::Grow => Self::Grow(Grow::new(transition, pixel_format, dimensions)),
-            TransitionType::Wave => Self::Wave(Wave::new(transition, pixel_format, dimensions)),
+            TransitionType::Outer => Self::Outer(Outer::new(transition, dimensions)),
+            TransitionType::Wipe => Self::Wipe(Wipe::new(transition, dimensions)),
+            TransitionType::Grow => Self::Grow(Grow::new(transition, dimensions)),
+            TransitionType::Wave => Self::Wave(Wave::new(transition, dimensions)),
             TransitionType::None => Self::None(None::new()),
         }
     }
@@ -210,10 +210,7 @@ impl Fade {
 struct Wave {
     start: Instant,
     seq: AnimationSequence<f32>,
-    width: usize,
-    height: usize,
     center: (u32, u32),
-    stride: usize,
     sin: f64,
     cos: f64,
     scale_x: f64,
@@ -225,7 +222,7 @@ struct Wave {
 }
 
 impl Wave {
-    fn new(transition: &Transition, pixel_format: PixelFormat, dimensions: (u32, u32)) -> Self {
+    fn new(transition: &Transition, dimensions: (u32, u32)) -> Self {
         let width = dimensions.0;
         let height = dimensions.1;
         let center = (width / 2, height / 2);
@@ -241,20 +238,14 @@ impl Wave {
         let a = circle_radius * cos;
         let b = circle_radius * sin;
         let max_offset = circle_radius.pow(2) * 2.0;
-        let (width, height) = (width as usize, height as usize);
 
         let (seq, start) = bezier_seq(transition, offset as f32, max_offset as f32);
 
         let step = transition.step;
-        let channels = pixel_format.channels() as usize;
-        let stride = width * channels;
         Self {
             start,
             seq,
-            width,
-            height,
             center,
-            stride,
             a,
             b,
             sin,
@@ -274,10 +265,7 @@ impl Wave {
         img: &[u8],
     ) -> bool {
         let Self {
-            width,
-            height,
             center,
-            stride,
             sin,
             cos,
             scale_x,
@@ -307,52 +295,54 @@ impl Wave {
         self.seq.advance_to(self.start.elapsed().as_secs_f64());
 
         for wallpaper in wallpapers.iter() {
-            wallpaper
-                .borrow_mut()
-                .canvas_change(backend, objman, pixel_format, |canvas| {
-                    // divide in 3 sections: the one we know will not be drawn to, the one we know
-                    // WILL be drawn to, and the one we need to do a more expensive check on.
-                    // We do this by creating 2 lines: the first tangential to the wave's peaks,
-                    // the second to its valeys. In-between is where we have to do the more
-                    // expensive checks
-                    for line in 0..height {
-                        let y = ((height - line) as f64 - center.1 as f64 - scale_y * sin) * b;
-                        let x = (circle_radius.powi(2) - y - offset) / a
-                            + center.0 as f64
-                            + scale_y * cos;
-                        let x = x.min(width as f64);
-                        let (col_begin, col_end) = if a.is_sign_negative() {
-                            (0usize, x as usize * channels)
-                        } else {
-                            (x as usize * channels, stride)
-                        };
-                        for col in col_begin..col_end {
-                            let old = unsafe { canvas.get_unchecked_mut(line * stride + col) };
-                            let new = unsafe { img.get_unchecked(line * stride + col) };
-                            change_byte(step, old, new);
-                        }
-                        let old_x = x;
-                        let y = ((height - line) as f64 - center.1 as f64 + scale_y * sin) * b;
-                        let x = (circle_radius.powi(2) - y - offset) / a + center.0 as f64
-                            - scale_y * cos;
-                        let x = x.min(width as f64);
-                        let (col_begin, col_end) = if old_x < x {
-                            (old_x as usize, x as usize)
-                        } else {
-                            (x as usize, old_x as usize)
-                        };
-                        for col in col_begin..col_end {
-                            if is_low(col as f64, line as f64, offset) {
-                                let i = line * stride + col * channels;
-                                for j in 0..channels {
-                                    let old = unsafe { canvas.get_unchecked_mut(i + j) };
-                                    let new = unsafe { img.get_unchecked(i + j) };
-                                    change_byte(step, old, new);
-                                }
+            let mut wallpaper = wallpaper.borrow_mut();
+            let dim = wallpaper.get_dimensions();
+            let width = dim.0 as usize;
+            let height = dim.1 as usize;
+            let stride = width * pixel_format.channels() as usize;
+            wallpaper.canvas_change(backend, objman, pixel_format, |canvas| {
+                // divide in 3 sections: the one we know will not be drawn to, the one we know
+                // WILL be drawn to, and the one we need to do a more expensive check on.
+                // We do this by creating 2 lines: the first tangential to the wave's peaks,
+                // the second to its valeys. In-between is where we have to do the more
+                // expensive checks
+                for line in 0..height {
+                    let y = ((height - line) as f64 - center.1 as f64 - scale_y * sin) * b;
+                    let x =
+                        (circle_radius.powi(2) - y - offset) / a + center.0 as f64 + scale_y * cos;
+                    let x = x.min(width as f64);
+                    let (col_begin, col_end) = if a.is_sign_negative() {
+                        (0usize, x as usize * channels)
+                    } else {
+                        (x as usize * channels, stride)
+                    };
+                    for col in col_begin..col_end {
+                        let old = unsafe { canvas.get_unchecked_mut(line * stride + col) };
+                        let new = unsafe { img.get_unchecked(line * stride + col) };
+                        change_byte(step, old, new);
+                    }
+                    let old_x = x;
+                    let y = ((height - line) as f64 - center.1 as f64 + scale_y * sin) * b;
+                    let x =
+                        (circle_radius.powi(2) - y - offset) / a + center.0 as f64 - scale_y * cos;
+                    let x = x.min(width as f64);
+                    let (col_begin, col_end) = if old_x < x {
+                        (old_x as usize, x as usize)
+                    } else {
+                        (x as usize, old_x as usize)
+                    };
+                    for col in col_begin..col_end {
+                        if is_low(col as f64, line as f64, offset) {
+                            let i = line * stride + col * channels;
+                            for j in 0..channels {
+                                let old = unsafe { canvas.get_unchecked_mut(i + j) };
+                                let new = unsafe { img.get_unchecked(i + j) };
+                                change_byte(step, old, new);
                             }
                         }
                     }
-                });
+                }
+            });
         }
 
         self.start.elapsed().as_secs_f64() > self.seq.duration()
@@ -362,10 +352,7 @@ impl Wave {
 struct Wipe {
     start: Instant,
     seq: AnimationSequence<f32>,
-    width: usize,
-    height: usize,
     center: (u32, u32),
-    stride: usize,
     circle_radius: f64,
     a: f64,
     b: f64,
@@ -373,7 +360,7 @@ struct Wipe {
 }
 
 impl Wipe {
-    fn new(transition: &Transition, pixel_format: PixelFormat, dimensions: (u32, u32)) -> Self {
+    fn new(transition: &Transition, dimensions: (u32, u32)) -> Self {
         let width = dimensions.0;
         let height = dimensions.1;
         let center = (width / 2, height / 2);
@@ -392,19 +379,13 @@ impl Wipe {
         let a = circle_radius * angle.cos();
         let b = circle_radius * angle.sin();
 
-        let (width, height) = (width as usize, height as usize);
         let (seq, start) = bezier_seq(transition, offset as f32, max_offset as f32);
 
         let step = transition.step;
-        let channels = pixel_format.channels() as usize;
-        let stride = width * channels;
         Self {
             start,
             seq,
-            width,
-            height,
             center,
-            stride,
             circle_radius,
             a,
             b,
@@ -420,10 +401,7 @@ impl Wipe {
         img: &[u8],
     ) -> bool {
         let Self {
-            width,
-            height,
             center,
-            stride,
             circle_radius,
             a,
             b,
@@ -434,27 +412,30 @@ impl Wipe {
         let offset = self.seq.now() as f64;
         self.seq.advance_to(self.start.elapsed().as_secs_f64());
         for wallpaper in wallpapers.iter() {
-            wallpaper
-                .borrow_mut()
-                .canvas_change(backend, objman, pixel_format, |canvas| {
-                    // line formula: (x-h)*a + (y-k)*b + C = r^2
-                    // https://www.desmos.com/calculator/vpvzk12yar
-                    for line in 0..height {
-                        let y = ((height - line) as f64 - center.1 as f64) * b;
-                        let x = (circle_radius.powi(2) - y - offset) / a + center.0 as f64;
-                        let x = x.min(width as f64);
-                        let (col_begin, col_end) = if a.is_sign_negative() {
-                            (0usize, x as usize * channels)
-                        } else {
-                            (x as usize * channels, stride)
-                        };
-                        for col in col_begin..col_end {
-                            let old = unsafe { canvas.get_unchecked_mut(line * stride + col) };
-                            let new = unsafe { img.get_unchecked(line * stride + col) };
-                            change_byte(step, old, new);
-                        }
+            let mut wallpaper = wallpaper.borrow_mut();
+            let dim = wallpaper.get_dimensions();
+            let width = dim.0 as usize;
+            let height = dim.1 as usize;
+            let stride = width * pixel_format.channels() as usize;
+            wallpaper.canvas_change(backend, objman, pixel_format, |canvas| {
+                // line formula: (x-h)*a + (y-k)*b + C = r^2
+                // https://www.desmos.com/calculator/vpvzk12yar
+                for line in 0..height {
+                    let y = ((height - line) as f64 - center.1 as f64) * b;
+                    let x = (circle_radius.powi(2) - y - offset) / a + center.0 as f64;
+                    let x = x.min(width as f64);
+                    let (col_begin, col_end) = if a.is_sign_negative() {
+                        (0usize, x as usize * channels)
+                    } else {
+                        (x as usize * channels, stride)
+                    };
+                    for col in col_begin..col_end {
+                        let old = unsafe { canvas.get_unchecked_mut(line * stride + col) };
+                        let new = unsafe { img.get_unchecked(line * stride + col) };
+                        change_byte(step, old, new);
                     }
-                });
+                }
+            });
         }
         self.start.elapsed().as_secs_f64() > self.seq.duration()
     }
@@ -463,17 +444,14 @@ impl Wipe {
 struct Grow {
     start: Instant,
     seq: AnimationSequence<f32>,
-    width: usize,
-    height: usize,
     center_x: usize,
     center_y: usize,
-    stride: usize,
     dist_center: f32,
     step: NonZeroU8,
 }
 
 impl Grow {
-    fn new(transition: &Transition, pixel_format: PixelFormat, dimensions: (u32, u32)) -> Self {
+    fn new(transition: &Transition, dimensions: (u32, u32)) -> Self {
         let (width, height) = (dimensions.0 as f32, dimensions.1 as f32);
         let (center_x, center_y) = transition.pos.to_pixel(dimensions, transition.invert_y);
         let dist_center: f32 = 0.0;
@@ -489,21 +467,15 @@ impl Grow {
             f32::sqrt(x.pow(2) + y.pow(2))
         };
 
-        let (width, height) = (width as usize, height as usize);
         let (center_x, center_y) = (center_x as usize, center_y as usize);
 
         let step = transition.step;
-        let channels = pixel_format.channels() as usize;
-        let stride = width * channels;
         let (seq, start) = bezier_seq(transition, 0.0, dist_end);
         Self {
             start,
             seq,
-            width,
-            height,
             center_x,
             center_y,
-            stride,
             dist_center,
             step,
         }
@@ -517,11 +489,8 @@ impl Grow {
         img: &[u8],
     ) -> bool {
         let Self {
-            width,
-            height,
             center_x,
             center_y,
-            stride,
             dist_center,
             step,
             ..
@@ -529,25 +498,28 @@ impl Grow {
         let channels = pixel_format.channels() as usize;
 
         for wallpaper in wallpapers.iter() {
-            wallpaper
-                .borrow_mut()
-                .canvas_change(backend, objman, pixel_format, |canvas| {
-                    let line_begin = center_y.saturating_sub(dist_center as usize);
-                    let line_end = height.min(center_y + dist_center as usize);
+            let mut wallpaper = wallpaper.borrow_mut();
+            let dim = wallpaper.get_dimensions();
+            let width = dim.0 as usize;
+            let height = dim.1 as usize;
+            let stride = width * pixel_format.channels() as usize;
+            wallpaper.canvas_change(backend, objman, pixel_format, |canvas| {
+                let line_begin = center_y.saturating_sub(dist_center as usize);
+                let line_end = height.min(center_y + dist_center as usize);
 
-                    // to plot half a circle with radius r, we do sqrt(r^2 - x^2)
-                    for line in line_begin..line_end {
-                        let offset = (dist_center.powi(2) - (center_y as f32 - line as f32).powi(2))
-                            .sqrt() as usize;
-                        let col_begin = center_x.saturating_sub(offset) * channels;
-                        let col_end = width.min(center_x + offset) * channels;
-                        for col in col_begin..col_end {
-                            let old = unsafe { canvas.get_unchecked_mut(line * stride + col) };
-                            let new = unsafe { img.get_unchecked(line * stride + col) };
-                            change_byte(step, old, new);
-                        }
+                // to plot half a circle with radius r, we do sqrt(r^2 - x^2)
+                for line in line_begin..line_end {
+                    let offset = (dist_center.powi(2) - (center_y as f32 - line as f32).powi(2))
+                        .sqrt() as usize;
+                    let col_begin = center_x.saturating_sub(offset) * channels;
+                    let col_end = width.min(center_x + offset) * channels;
+                    for col in col_begin..col_end {
+                        let old = unsafe { canvas.get_unchecked_mut(line * stride + col) };
+                        let new = unsafe { img.get_unchecked(line * stride + col) };
+                        change_byte(step, old, new);
                     }
-                });
+                }
+            });
         }
 
         self.dist_center = self.seq.now();
@@ -559,17 +531,14 @@ impl Grow {
 struct Outer {
     start: Instant,
     seq: AnimationSequence<f32>,
-    width: usize,
-    height: usize,
     center_x: usize,
     center_y: usize,
-    stride: usize,
     dist_center: f32,
     step: NonZeroU8,
 }
 
 impl Outer {
-    fn new(transition: &Transition, pixel_format: PixelFormat, dimensions: (u32, u32)) -> Self {
+    fn new(transition: &Transition, dimensions: (u32, u32)) -> Self {
         let (width, height) = (dimensions.0 as f32, dimensions.1 as f32);
         let (center_x, center_y) = transition.pos.to_pixel(dimensions, transition.invert_y);
         let dist_center = {
@@ -583,22 +552,16 @@ impl Outer {
             }
             f32::sqrt(x.pow(2) + y.pow(2))
         };
-        let (width, height) = (width as usize, height as usize);
         let (center_x, center_y) = (center_x as usize, center_y as usize);
 
         let step = transition.step;
-        let channels = pixel_format.channels() as usize;
-        let stride = width * channels;
         let (seq, start) = bezier_seq(transition, dist_center, 0.0);
         Self {
             step,
             start,
             seq,
-            width,
-            height,
             center_x,
             center_y,
-            stride,
             dist_center,
         }
     }
@@ -611,38 +574,38 @@ impl Outer {
         img: &[u8],
     ) -> bool {
         let Self {
-            width,
-            height,
             center_x,
             center_y,
-            stride,
             dist_center,
             step,
             ..
         } = *self;
         let channels = pixel_format.channels() as usize;
         for wallpaper in wallpapers.iter() {
-            wallpaper
-                .borrow_mut()
-                .canvas_change(backend, objman, pixel_format, |canvas| {
-                    // to plot half a circle with radius r, we do sqrt(r^2 - x^2)
-                    for line in 0..height {
-                        let offset = (dist_center.powi(2) - (center_y as f32 - line as f32).powi(2))
-                            .sqrt() as usize;
-                        let col_begin = center_x.saturating_sub(offset) * channels;
-                        let col_end = width.min(center_x + offset) * channels;
-                        for col in 0..col_begin {
-                            let old = unsafe { canvas.get_unchecked_mut(line * stride + col) };
-                            let new = unsafe { img.get_unchecked(line * stride + col) };
-                            change_byte(step, old, new);
-                        }
-                        for col in col_end..stride {
-                            let old = unsafe { canvas.get_unchecked_mut(line * stride + col) };
-                            let new = unsafe { img.get_unchecked(line * stride + col) };
-                            change_byte(step, old, new);
-                        }
+            let mut wallpaper = wallpaper.borrow_mut();
+            let dim = wallpaper.get_dimensions();
+            let width = dim.0 as usize;
+            let height = dim.1 as usize;
+            let stride = width * pixel_format.channels() as usize;
+            wallpaper.canvas_change(backend, objman, pixel_format, |canvas| {
+                // to plot half a circle with radius r, we do sqrt(r^2 - x^2)
+                for line in 0..height {
+                    let offset = (dist_center.powi(2) - (center_y as f32 - line as f32).powi(2))
+                        .sqrt() as usize;
+                    let col_begin = center_x.saturating_sub(offset) * channels;
+                    let col_end = width.min(center_x + offset) * channels;
+                    for col in 0..col_begin {
+                        let old = unsafe { canvas.get_unchecked_mut(line * stride + col) };
+                        let new = unsafe { img.get_unchecked(line * stride + col) };
+                        change_byte(step, old, new);
                     }
-                });
+                    for col in col_end..stride {
+                        let old = unsafe { canvas.get_unchecked_mut(line * stride + col) };
+                        let new = unsafe { img.get_unchecked(line * stride + col) };
+                        change_byte(step, old, new);
+                    }
+                }
+            });
         }
         self.dist_center = self.seq.now();
         self.seq.advance_to(self.start.elapsed().as_secs_f64());

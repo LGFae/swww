@@ -201,7 +201,7 @@ impl Daemon {
                     let wallpapers = self.find_wallpapers_by_names(&names);
                     self.stop_animations(&wallpapers);
                     if let Some(mut animator) =
-                        Animator::new(wallpapers, &transition, self.pixel_format, img, animation)
+                        Animator::new(wallpapers, &transition, img, animation)
                     {
                         animator.frame(&mut self.backend, &mut self.objman, self.pixel_format);
                         self.animators.push(animator);

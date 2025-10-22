@@ -33,7 +33,6 @@ impl Animator {
     pub fn new(
         mut wallpapers: Vec<Rc<RefCell<Wallpaper>>>,
         transition: &ipc::Transition,
-        pixel_format: PixelFormat,
         img_req: ImgReq,
         animation: Option<ipc::Animation>,
     ) -> Option<Self> {
@@ -51,7 +50,7 @@ impl Animator {
             return None;
         }
         let fps = Duration::from_nanos(1_000_000_000 / transition.fps as u64);
-        let effect = Effect::new(transition, pixel_format, dim);
+        let effect = Effect::new(transition, dim);
         Some(Self {
             wallpapers,
             now: Instant::now(),
