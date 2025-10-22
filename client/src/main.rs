@@ -73,7 +73,7 @@ fn process_swww_args(args: &Swww, namespace: &str) -> Result<(), String> {
     let bytes = socket.recv().map_err(|err| err.to_string())?;
     drop(socket);
     match Answer::receive(bytes) {
-        Answer::Info(info) => info.iter().for_each(|i| println!("{namespace}: {}", i)),
+        Answer::Info(info) => info.iter().for_each(|i| println!("{namespace}: {i}")),
         Answer::Ok => {
             if let Swww::Kill(_) = args {
                 #[cfg(debug_assertions)]
@@ -89,7 +89,7 @@ fn process_swww_args(args: &Swww, namespace: &str) -> Result<(), String> {
                 }
                 return Err(format!(
                     "Could not confirm socket deletion at: {}",
-                    path.to_string_lossy()
+                    path.display()
                 ));
             }
         }
@@ -180,7 +180,7 @@ fn make_img_request(
 
                     for (&dim, outputs) in dims.iter().zip(outputs) {
                         let path = match img_path.canonicalize() {
-                            Ok(p) => p.to_string_lossy().to_string(),
+                            Ok(p) => p.display().to_string(),
                             Err(e) => {
                                 if let Some("-") = img_path.to_str() {
                                     "STDIN".to_string()
@@ -190,14 +190,15 @@ fn make_img_request(
                             }
                         };
 
-                        let animation = if !imgbuf.is_animated() {
-                            None
-                        } else {
+                        let animation = if imgbuf.is_animated() {
                             match cache::load_animation_frames(&path, dim, resize, pixel_format) {
                                 Ok(Some(animation)) => Some(animation),
                                 otherwise => {
                                     if let Err(e) = otherwise {
-                                        eprintln!("Error loading cache for {:?}: {e}", img_path);
+                                        eprintln!(
+                                            "Error loading cache for {}: {e}",
+                                            img_path.display()
+                                        );
                                     }
                                     Some({
                                         ipc::Animation {
@@ -205,30 +206,32 @@ fn make_img_request(
                                                 imgbuf.as_frames()?,
                                                 dim,
                                                 pixel_format,
-                                                make_filter(&img.filter),
+                                                make_filter(img.filter),
                                                 img.resize,
-                                                &img.fill_color,
+                                                img.fill_color,
                                             )?
                                             .into_boxed_slice(),
                                         }
                                     })
                                 }
                             }
+                        } else {
+                            None
                         };
 
                         let img = match img.resize {
-                            ResizeStrategy::No => img_pad(&img_raw, dim, &img.fill_color)?,
+                            ResizeStrategy::No => img_pad(&img_raw, dim, img.fill_color),
                             ResizeStrategy::Crop => {
-                                img_resize_crop(&img_raw, dim, make_filter(&img.filter))?
+                                img_resize_crop(&img_raw, dim, make_filter(img.filter))?
                             }
                             ResizeStrategy::Fit => img_resize_fit(
                                 &img_raw,
                                 dim,
-                                make_filter(&img.filter),
-                                &img.fill_color,
+                                make_filter(img.filter),
+                                img.fill_color,
                             )?,
                             ResizeStrategy::Stretch => {
-                                img_resize_stretch(&img_raw, dim, make_filter(&img.filter))?
+                                img_resize_stretch(&img_raw, dim, make_filter(img.filter))?
                             }
                         };
 
@@ -252,7 +255,7 @@ fn make_img_request(
                 DecodeBuffer::VectorImage(imgbuf) => {
                     for (&dim, outputs) in dims.iter().zip(outputs) {
                         let path = match img_path.canonicalize() {
-                            Ok(p) => p.to_string_lossy().to_string(),
+                            Ok(p) => p.display().to_string(),
                             Err(e) => {
                                 if let Some("-") = img_path.to_str() {
                                     "STDIN".to_string()
@@ -264,18 +267,18 @@ fn make_img_request(
                         let filter = img.filter.as_str();
                         let img_raw = imgbuf.decode(pixel_format, dim.0, dim.1)?;
                         let img = match img.resize {
-                            ResizeStrategy::No => img_pad(&img_raw, dim, &img.fill_color)?,
+                            ResizeStrategy::No => img_pad(&img_raw, dim, img.fill_color),
                             ResizeStrategy::Crop => {
-                                img_resize_crop(&img_raw, dim, make_filter(&img.filter))?
+                                img_resize_crop(&img_raw, dim, make_filter(img.filter))?
                             }
                             ResizeStrategy::Fit => img_resize_fit(
                                 &img_raw,
                                 dim,
-                                make_filter(&img.filter),
-                                &img.fill_color,
+                                make_filter(img.filter),
+                                img.fill_color,
                             )?,
                             ResizeStrategy::Stretch => {
-                                img_resize_stretch(&img_raw, dim, make_filter(&img.filter))?
+                                img_resize_stretch(&img_raw, dim, make_filter(img.filter))?
                             }
                         };
                         img_req_builder.push(
@@ -317,7 +320,7 @@ fn get_format_dims_and_outputs(
     match answer {
         Answer::Info(infos) => {
             let mut format = ipc::PixelFormat::Argb;
-            for info in infos.iter() {
+            for info in &infos {
                 format = info.pixel_format;
                 let info_img = &info.img;
                 let name = info.name.to_string();
@@ -351,7 +354,7 @@ fn get_format_dims_and_outputs(
 fn split_cmdline_outputs(outputs: &str) -> Box<[String]> {
     outputs
         .split(',')
-        .map(|s| s.to_owned())
+        .map(ToOwned::to_owned)
         .filter(|s| !s.is_empty())
         .collect()
 }

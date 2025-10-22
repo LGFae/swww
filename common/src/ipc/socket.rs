@@ -29,6 +29,7 @@ impl<T> IpcSocket<T> {
     /// Creates new [`IpcSocket`] from provided [`OwnedFd`]
     ///
     /// TODO: remove external ability to construct [`Self`] from random file descriptors
+    #[must_use]
     pub fn new(fd: OwnedFd) -> Self {
         Self {
             fd,
@@ -36,19 +37,21 @@ impl<T> IpcSocket<T> {
         }
     }
 
+    #[must_use]
     pub fn to_fd(self) -> OwnedFd {
         self.fd
     }
 
     fn socket_file() -> PathBuf {
-        let mut runtime = env::var("XDG_RUNTIME_DIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| {
+        let mut runtime = env::var("XDG_RUNTIME_DIR").map_or_else(
+            |_| {
                 let mut p = PathBuf::from_iter(&["run", "user"]);
                 let uid = rustix::process::getuid();
                 p.push(format!("{}", uid.as_raw()));
                 p
-            });
+            },
+            PathBuf::from,
+        );
 
         let display = if let Ok(wayland_socket) = std::env::var("WAYLAND_DISPLAY") {
             let mut i = 0;
@@ -115,7 +118,7 @@ impl<T> IpcSocket<T> {
                         .strip_suffix(b".sock")?
                         .strip_prefix(filename.as_encoded_bytes())?,
                 )
-                .map(|e| e.to_string())
+                .map(ToString::to_string)
                 .ok()
             })
             .collect())

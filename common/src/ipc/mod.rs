@@ -20,6 +20,7 @@ pub struct ImageRequestBuilder {
 
 impl ImageRequestBuilder {
     #[inline]
+    #[must_use]
     pub fn new(transition: Transition) -> Self {
         let memory = Mmap::create(1 << (20 + 3)); // start with 8 MB
         let len = 0;
@@ -49,7 +50,7 @@ impl ImageRequestBuilder {
             self.memory.remap(self.memory.len() + bytes.len() * 2);
         }
         self.memory.slice_mut()[self.len..self.len + bytes.len()].copy_from_slice(bytes);
-        self.len += bytes.len()
+        self.len += bytes.len();
     }
 
     fn grow(&mut self) {
@@ -81,7 +82,7 @@ impl ImageRequestBuilder {
         self.push_byte(*format as u8);
 
         self.push_byte(outputs.len() as u8);
-        for output in outputs.iter() {
+        for output in outputs {
             self.serialize_bytes(output.as_bytes());
         }
 
@@ -94,7 +95,7 @@ impl ImageRequestBuilder {
         }
 
         // cache the request
-        for output in outputs.iter() {
+        for output in outputs {
             if let Err(e) =
                 super::cache::CacheEntry::new(namespace, resize, filter, path).store(output)
             {
@@ -112,7 +113,7 @@ impl ImageRequestBuilder {
                 *format,
             )
         {
-            log::error!("failed storing cache for {}: {e}", path);
+            log::error!("failed storing cache for {path}: {e}");
         }
     }
 

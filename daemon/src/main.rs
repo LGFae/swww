@@ -134,7 +134,7 @@ impl Daemon {
             None => self.poll_time = Some(new_time),
             Some(t1) => {
                 if new_time < t1 {
-                    self.poll_time = Some(new_time)
+                    self.poll_time = Some(new_time);
                 }
             }
         }
@@ -287,7 +287,7 @@ impl Daemon {
 
     fn commit_pending_surface_changes(&mut self) {
         let mut to_stop = Vec::with_capacity(self.wallpapers.len());
-        for wallpaper in self.wallpapers.iter() {
+        for wallpaper in &self.wallpapers {
             if wallpaper.borrow_mut().commit_surface_changes(
                 &mut self.backend,
                 &mut self.objman,
@@ -301,7 +301,7 @@ impl Daemon {
     }
 
     fn stop_animations(&mut self, wallpapers: &[Rc<RefCell<Wallpaper>>]) {
-        for animator in self.animators.iter_mut() {
+        for animator in &mut self.animators {
             animator
                 .wallpapers
                 .retain(|w1| !wallpapers.iter().any(|w2| w1.as_ptr() == w2.as_ptr()));
@@ -437,14 +437,14 @@ impl wayland::wl_output::EvHandler for Daemon {
             }
         };
 
-        for info in self.pending_outputs.iter_mut() {
+        for info in &mut self.pending_outputs {
             if info.output == sender_id {
                 info.scale_factor = scale;
                 return;
             }
         }
 
-        for wallpaper in self.wallpapers.iter() {
+        for wallpaper in &self.wallpapers {
             let mut wallpaper = wallpaper.borrow_mut();
             if wallpaper.has_output(sender_id) {
                 wallpaper.set_scale(scale);
@@ -454,14 +454,14 @@ impl wayland::wl_output::EvHandler for Daemon {
     }
 
     fn name(&mut self, sender_id: ObjectId, name: &str) {
-        for info in self.pending_outputs.iter_mut() {
+        for info in &mut self.pending_outputs {
             if info.output == sender_id {
                 info.name = Some(name.into());
                 return;
             }
         }
 
-        for wallpaper in self.wallpapers.iter() {
+        for wallpaper in &self.wallpapers {
             let mut wallpaper = wallpaper.borrow_mut();
             if wallpaper.has_output(sender_id) {
                 wallpaper.set_name(name.into());
@@ -471,13 +471,13 @@ impl wayland::wl_output::EvHandler for Daemon {
     }
 
     fn description(&mut self, sender_id: ObjectId, description: &str) {
-        for info in self.pending_outputs.iter_mut() {
+        for info in &mut self.pending_outputs {
             if info.output == sender_id {
                 info.desc = Some(description.into());
                 return;
             }
         }
-        for wallpaper in self.wallpapers.iter() {
+        for wallpaper in &self.wallpapers {
             let mut wallpaper = wallpaper.borrow_mut();
             if wallpaper.has_output(sender_id) {
                 wallpaper.set_desc(description.into());
@@ -514,7 +514,7 @@ impl wayland::wl_region::EvHandler for Daemon {}
 impl wayland::wl_buffer::EvHandler for Daemon {
     fn release(&mut self, sender_id: ObjectId) {
         trace!("Releasing buffer {sender_id}");
-        for wallpaper in self.wallpapers.iter() {
+        for wallpaper in &self.wallpapers {
             let strong_count = Rc::strong_count(wallpaper);
             if wallpaper.borrow_mut().try_set_buffer_release_flag(
                 &mut self.backend,
@@ -530,7 +530,7 @@ impl wayland::wl_buffer::EvHandler for Daemon {
 
 impl wayland::wl_callback::EvHandler for Daemon {
     fn done(&mut self, sender_id: ObjectId, _callback_data: u32) {
-        for wallpaper in self.wallpapers.iter() {
+        for wallpaper in &self.wallpapers {
             if wallpaper.borrow().has_callback(sender_id) {
                 wallpaper.borrow_mut().frame_callback_completed();
                 break;
@@ -545,7 +545,7 @@ impl wayland::wl_shm_pool::EvHandler for Daemon {}
 impl wayland::zwlr_layer_shell_v1::EvHandler for Daemon {}
 impl wayland::zwlr_layer_surface_v1::EvHandler for Daemon {
     fn configure(&mut self, sender_id: ObjectId, serial: u32, width: u32, height: u32) {
-        for wallpaper in self.wallpapers.iter_mut() {
+        for wallpaper in &mut self.wallpapers {
             if wallpaper.borrow().has_layer_surface(sender_id) {
                 wallpaper
                     .borrow_mut()
@@ -571,7 +571,7 @@ impl wayland::zwlr_layer_surface_v1::EvHandler for Daemon {
 
 impl wayland::wp_fractional_scale_v1::EvHandler for Daemon {
     fn preferred_scale(&mut self, sender_id: ObjectId, scale: u32) {
-        for wallpaper in self.wallpapers.iter() {
+        for wallpaper in &self.wallpapers {
             if wallpaper.borrow().has_fractional_scale(sender_id) {
                 match NonZeroI32::new(scale as i32) {
                     Some(factor) => {
@@ -591,7 +591,7 @@ impl wayland::wp_fractional_scale_manager_v1::EvHandler for Daemon {}
 
 impl Drop for Daemon {
     fn drop(&mut self) {
-        for wallpaper in self.wallpapers.iter() {
+        for wallpaper in &self.wallpapers {
             let mut w = wallpaper.borrow_mut();
             w.destroy(&mut self.backend);
         }
@@ -780,10 +780,10 @@ fn setup_signals() {
         let ret =
             unsafe { libc::sigaction(signal, std::ptr::addr_of!(sigaction), std::ptr::null_mut()) };
         if ret != 0 {
-            error!("Failed to install signal handler!")
+            error!("Failed to install signal handler!");
         }
     }
-    debug!("Finished setting up signal handlers")
+    debug!("Finished setting up signal handlers");
 }
 
 /// This is a wrapper that makes sure to delete the socket when it is dropped
@@ -801,14 +801,13 @@ impl SocketWrapper {
                 return Err(
                     "There is an swww-daemon instance already running on this socket!".to_string(),
                 );
-            } else {
-                warn!(
-                    "socket file {} was not deleted when the previous daemon exited",
-                    addr.to_string_lossy()
-                );
-                if let Err(e) = fs::unlink(&addr) {
-                    return Err(format!("failed to delete previous socket: {e}"));
-                }
+            }
+            warn!(
+                "socket file {} was not deleted when the previous daemon exited",
+                addr.display()
+            );
+            if let Err(e) = fs::unlink(&addr) {
+                return Err(format!("failed to delete previous socket: {e}"));
             }
         }
 
@@ -826,7 +825,7 @@ impl SocketWrapper {
 
         let socket = IpcSocket::server(namespace).map_err(|err| err.to_string())?;
 
-        debug!("Created socket in {:?}", addr);
+        debug!("Created socket in {}", addr.display());
         Ok(Self {
             fd: socket.to_fd(),
             namespace: namespace.to_string(),
@@ -838,9 +837,9 @@ impl Drop for SocketWrapper {
     fn drop(&mut self) {
         let addr = IpcSocket::<Server>::path(&self.namespace);
         if let Err(e) = rustix::fs::unlink(&addr) {
-            error!("Failed to remove socket at {addr:?}: {e}");
+            error!("Failed to remove socket at {}: {e}", addr.display());
         }
-        info!("Removed socket at {addr:?}");
+        info!("Removed socket at {}", addr.display());
     }
 }
 

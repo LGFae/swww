@@ -71,7 +71,7 @@ impl<'a> CacheEntry<'a> {
                 resize,
                 filter,
                 img_path,
-            })
+            });
         }
 
         Ok(v)
@@ -133,10 +133,10 @@ pub(crate) fn store_animation_frames<P: AsRef<Path>>(
     let mut filepath = cache_dir()?;
     filepath.push(&filename);
 
-    if !filepath.is_file() {
-        File::create(filepath)?.write_all(animation)
-    } else {
+    if filepath.is_file() {
         Ok(())
+    } else {
+        File::create(filepath)?.write_all(animation)
     }
 }
 
@@ -243,7 +243,7 @@ fn clean_previous_versions() {
     let mut read_dir = match std::fs::read_dir(&user_cache) {
         Ok(read_dir) => read_dir,
         Err(_) => {
-            log::warn!("failed to read cache dir {user_cache:?} entries");
+            log::warn!("failed to read cache dir {} entries", user_cache.display());
             return;
         }
     };
@@ -256,19 +256,25 @@ fn clean_previous_versions() {
 
         if entry.path().is_dir() {
             if let Err(e) = std::fs::remove_dir_all(entry.path()) {
-                log::warn!("failed to remove old cache directory {entryname:?}: {e}");
+                log::warn!(
+                    "failed to remove old cache directory {}: {e}",
+                    entryname.display()
+                );
             }
         } else if let Err(e) = std::fs::remove_file(entry.path()) {
-            log::warn!("failed to remove old cache directory {entryname:?}: {e}");
+            log::warn!(
+                "failed to remove old cache directory {}: {e}",
+                entryname.display()
+            );
         }
     }
 }
 
 fn create_dir(p: &Path) -> io::Result<()> {
-    if !p.is_dir() {
-        std::fs::create_dir(p)
-    } else {
+    if p.is_dir() {
         Ok(())
+    } else {
+        std::fs::create_dir(p)
     }
 }
 
@@ -305,7 +311,7 @@ fn animation_filename<P: AsRef<Path>>(
 ) -> PathBuf {
     format!(
         "{}__{}x{}_{}_{:?}",
-        path.as_ref().to_string_lossy().replace('/', "_"),
+        path.as_ref().display().to_string().replace('/', "_"),
         dimensions.0,
         dimensions.1,
         resize,

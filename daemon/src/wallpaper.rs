@@ -416,7 +416,7 @@ impl Wallpaper {
             for pixel in canvas.chunks_exact_mut(channels) {
                 pixel[0..channels].copy_from_slice(&color[0..channels]);
             }
-        })
+        });
     }
 
     pub fn set_img_info(&mut self, img_info: BgImg) {

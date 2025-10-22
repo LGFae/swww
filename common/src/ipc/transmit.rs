@@ -58,17 +58,14 @@ impl From<Answer> for RawMsg {
         };
 
         let shm = if let Answer::Info(infos) = value {
-            let len = 1 + infos
-                .iter()
-                .map(|info| info.serialized_size())
-                .sum::<usize>();
+            let len = 1 + infos.iter().map(BgInfo::serialized_size).sum::<usize>();
             let mut mmap = Mmap::create(len);
             let bytes = mmap.slice_mut();
 
             bytes[0] = infos.len() as u8;
             let mut i = 1;
 
-            for info in infos.iter() {
+            for info in infos {
                 i += info.serialize(&mut bytes[i..]);
             }
 
@@ -272,7 +269,7 @@ impl<T> IpcSocket<T> {
                     _ = thread::nanosleep(&thread::Timespec {
                         tv_sec: 0,
                         tv_nsec: 1_000_000,
-                    })
+                    });
                 }
                 Err(err) => return Err(err).context(IpcErrorKind::Read),
             }
@@ -284,8 +281,7 @@ impl<T> IpcSocket<T> {
         let shm = if len == 0 {
             debug_assert!(
                 !matches!(code, Code::ReqImg | Code::ReqClear | Code::ResInfo),
-                "Received: Code {:?}, which should have sent a shm fd",
-                code
+                "Received: Code {code:?}, which should have sent a shm fd",
             );
             None
         } else {

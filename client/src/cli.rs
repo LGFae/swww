@@ -50,7 +50,8 @@ pub enum Filter {
 }
 
 impl Filter {
-    pub fn as_str(&self) -> &'static str {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
         match self {
             Self::Nearest => "Nearest",
             Self::Bilinear => "Bilinear",
@@ -136,6 +137,7 @@ pub struct CliPosition {
 }
 
 impl CliPosition {
+    #[must_use]
     pub fn new(x: CliCoord, y: CliCoord) -> Self {
         Self { x, y }
     }
@@ -293,7 +295,8 @@ pub enum ResizeStrategy {
 }
 
 impl ResizeStrategy {
-    pub fn as_str(&self) -> &'static str {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
         match self {
             ResizeStrategy::No => "no",
             ResizeStrategy::Crop => "crop",
@@ -549,12 +552,12 @@ pub fn parse_image(raw: &str) -> Result<CliImage, String> {
     {
         return Ok(CliImage::Color(color));
     }
-    Err(format!("Path '{}' does not exist", raw))
+    Err(format!("Path '{raw}' does not exist"))
 }
 
 // parses Percents and numbers in format of "<coord1>,<coord2>"
 fn parse_coords(raw: &str) -> Result<CliPosition, String> {
-    let coords = raw.split(',').map(|s| s.trim()).collect::<Vec<&str>>();
+    let coords = raw.split(',').map(str::trim).collect::<Vec<&str>>();
     if coords.len() != 2 {
         match coords[0] {
             "center" => {

@@ -130,7 +130,7 @@ impl ImgBuf {
 pub struct RasterImage<'a>((&'a ImgBuf, &'a ImageFormat));
 pub struct VectorImage<'a>(&'a Tree);
 
-impl<'a> RasterImage<'a> {
+impl RasterImage<'_> {
     pub fn decode(&self, format: PixelFormat) -> Result<Image, String> {
         let (imgbuf, image_format) = self.0;
         let mut reader = image::ImageReader::new(Cursor::new(&imgbuf.bytes));
@@ -160,8 +160,8 @@ impl<'a> RasterImage<'a> {
         Ok(Image {
             width,
             height,
-            bytes,
             format,
+            bytes,
         })
     }
 
@@ -174,7 +174,7 @@ impl<'a> RasterImage<'a> {
     }
 }
 
-impl<'a> VectorImage<'a> {
+impl VectorImage<'_> {
     pub fn decode(&self, format: PixelFormat, width: u32, height: u32) -> Result<Image, String> {
         use resvg::{tiny_skia::PixmapMut, usvg::Transform};
         let tree = self.0;
@@ -223,8 +223,8 @@ impl<'a> VectorImage<'a> {
         Ok(Image {
             width,
             height,
-            bytes,
             format,
+            bytes,
         })
     }
 }
@@ -303,7 +303,7 @@ pub fn compress_frames(
     format: PixelFormat,
     filter: FilterType,
     resize: ResizeStrategy,
-    color: &[u8; 4],
+    color: [u8; 4],
 ) -> Result<Vec<(BitPack, Duration)>, String> {
     let mut compressor = Compressor::new();
     let mut compressed_frames = Vec::new();
@@ -314,7 +314,7 @@ pub fn compress_frames(
     let mut first_duration = Duration::from_millis((first_duration.0 / first_duration.1).into());
     let first_img = Image::from_frame(first, format);
     let first_img = match resize {
-        ResizeStrategy::No => img_pad(&first_img, dim, color)?,
+        ResizeStrategy::No => img_pad(&first_img, dim, color),
         ResizeStrategy::Crop => img_resize_crop(&first_img, dim, filter)?,
         ResizeStrategy::Fit => img_resize_fit(&first_img, dim, filter, color)?,
         ResizeStrategy::Stretch => img_resize_stretch(&first_img, dim, filter)?,
@@ -327,7 +327,7 @@ pub fn compress_frames(
 
         let img = Image::from_frame(frame, format);
         let img = match resize {
-            ResizeStrategy::No => img_pad(&img, dim, color)?,
+            ResizeStrategy::No => img_pad(&img, dim, color),
             ResizeStrategy::Crop => img_resize_crop(&img, dim, filter)?,
             ResizeStrategy::Fit => img_resize_fit(&img, dim, filter, color)?,
             ResizeStrategy::Stretch => img_resize_stretch(&img, dim, filter)?,
@@ -364,7 +364,7 @@ pub fn compress_frames(
     Ok(compressed_frames)
 }
 
-pub fn make_filter(filter: &cli::Filter) -> fast_image_resize::FilterType {
+pub fn make_filter(filter: cli::Filter) -> fast_image_resize::FilterType {
     match filter {
         cli::Filter::Nearest => fast_image_resize::FilterType::Box,
         cli::Filter::Bilinear => fast_image_resize::FilterType::Bilinear,
@@ -374,7 +374,7 @@ pub fn make_filter(filter: &cli::Filter) -> fast_image_resize::FilterType {
     }
 }
 
-pub fn img_pad(img: &Image, dimensions: (u32, u32), color: &[u8; 4]) -> Result<Box<[u8]>, String> {
+pub fn img_pad(img: &Image, dimensions: (u32, u32), color: [u8; 4]) -> Box<[u8]> {
     let channels = img.format.channels() as usize;
 
     let mut color4 = color.to_owned();
@@ -432,7 +432,7 @@ pub fn img_pad(img: &Image, dimensions: (u32, u32), color: &[u8; 4]) -> Result<B
         padded.extend_from_slice(color);
     }
 
-    Ok(padded.into_boxed_slice())
+    padded.into_boxed_slice()
 }
 
 /// Resize an image to fit within the given dimensions, covering as much space as possible without
@@ -441,13 +441,15 @@ pub fn img_resize_fit(
     img: &Image,
     dimensions: (u32, u32),
     filter: FilterType,
-    padding_color: &[u8; 4],
+    padding_color: [u8; 4],
 ) -> Result<Box<[u8]>, String> {
     let (width, height) = dimensions;
-    if (img.width, img.height) != (width, height) {
+    if (img.width, img.height) == (width, height) {
+        Ok(img.bytes.clone())
+    } else {
         // if our image is already scaled to fit, skip resizing it and just pad it directly
         if img.width == width || img.height == height {
-            return img_pad(img, dimensions, padding_color);
+            return Ok(img_pad(img, dimensions, padding_color));
         }
 
         let ratio = width as f32 / height as f32;
@@ -490,9 +492,7 @@ pub fn img_resize_fit(
             format: img.format,
             bytes: dst.into_vec().into_boxed_slice(),
         };
-        img_pad(&img, dimensions, padding_color)
-    } else {
-        Ok(img.bytes.clone())
+        Ok(img_pad(&img, dimensions, padding_color))
     }
 }
 
@@ -502,7 +502,9 @@ pub fn img_resize_stretch(
     filter: FilterType,
 ) -> Result<Box<[u8]>, String> {
     let (width, height) = dimensions;
-    let resized_img = if (img.width, img.height) != (width, height) {
+    let resized_img = if (img.width, img.height) == (width, height) {
+        img.bytes.clone()
+    } else {
         let pixel_type = if img.format.channels() == 3 {
             PixelType::U8x3
         } else {
@@ -528,8 +530,6 @@ pub fn img_resize_stretch(
         }
 
         dst.into_vec().into_boxed_slice()
-    } else {
-        img.bytes.clone()
     };
 
     Ok(resized_img)
@@ -541,7 +541,9 @@ pub fn img_resize_crop(
     filter: FilterType,
 ) -> Result<Box<[u8]>, String> {
     let (width, height) = dimensions;
-    let resized_img = if (img.width, img.height) != (width, height) {
+    let resized_img = if (img.width, img.height) == (width, height) {
+        img.bytes.clone()
+    } else {
         let pixel_type = if img.format.channels() == 3 {
             PixelType::U8x3
         } else {
@@ -568,8 +570,6 @@ pub fn img_resize_crop(
         }
 
         dst.into_vec().into_boxed_slice()
-    } else {
-        img.bytes.clone()
     };
 
     Ok(resized_img)

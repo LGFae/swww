@@ -53,26 +53,20 @@ fn change_byte(step: NonZeroU8, old: &mut u8, new: &u8) {
 }
 
 struct None;
-
 impl None {
-    fn new() -> Self {
-        Self
-    }
-
     fn run(
-        &mut self,
         backend: &mut Waybackend,
         objman: &mut ObjectManager<WaylandObject>,
         pixel_format: PixelFormat,
         wallpapers: &mut [Rc<RefCell<Wallpaper>>],
         img: &[u8],
     ) -> bool {
-        wallpapers.iter().for_each(|w| {
+        for w in wallpapers.iter() {
             w.borrow_mut()
                 .canvas_change(backend, objman, pixel_format, |canvas| {
-                    canvas.copy_from_slice(img)
-                })
-        });
+                    canvas.copy_from_slice(img);
+                });
+        }
         true
     }
 }
@@ -97,7 +91,7 @@ impl Effect {
             TransitionType::Wipe => Self::Wipe(Wipe::new(transition, dimensions)),
             TransitionType::Grow => Self::Grow(Grow::new(transition, dimensions)),
             TransitionType::Wave => Self::Wave(Wave::new(transition, dimensions)),
-            TransitionType::None => Self::None(None::new()),
+            TransitionType::None => Self::None(None),
         }
     }
 
@@ -110,7 +104,7 @@ impl Effect {
         img: &[u8],
     ) -> bool {
         let done = match self {
-            Effect::None(effect) => effect.run(backend, objman, pixel_format, wallpapers, img),
+            Effect::None(_) => None::run(backend, objman, pixel_format, wallpapers, img),
             Effect::Simple(effect) => effect.run(backend, objman, pixel_format, wallpapers, img),
             Effect::Fade(effect) => effect.run(backend, objman, pixel_format, wallpapers, img),
             Effect::Wave(effect) => effect.run(backend, objman, pixel_format, wallpapers, img),
@@ -133,7 +127,7 @@ impl Effect {
                 Effect::Outer(t) => Effect::Simple(Simple::new(new_nonzero(t.step.get()))),
             };
             return false;
-        };
+        }
         done
     }
 }
@@ -246,13 +240,13 @@ impl Wave {
             start,
             seq,
             center,
-            a,
-            b,
             sin,
             cos,
             scale_x,
             scale_y,
             circle_radius,
+            a,
+            b,
             step,
         }
     }
@@ -557,12 +551,12 @@ impl Outer {
         let step = transition.step;
         let (seq, start) = bezier_seq(transition, dist_center, 0.0);
         Self {
-            step,
             start,
             seq,
             center_x,
             center_y,
             dist_center,
+            step,
         }
     }
     fn run(

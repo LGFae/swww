@@ -40,7 +40,7 @@ impl Animator {
         if wallpapers.is_empty() {
             return None;
         }
-        for w in wallpapers.iter_mut() {
+        for w in &mut wallpapers {
             w.borrow_mut().set_img_info(BgImg::Img(path.str().into()));
         }
 
@@ -196,7 +196,7 @@ impl Animation {
                 // errors in the previous loops. The only ones left should be those that can be
                 // decompressed correctly
                 borrow.canvas_change(backend, objman, pixel_format, |canvas| unsafe {
-                    decompressor.decompress_unchecked(frame, canvas, pixel_format)
+                    decompressor.decompress_unchecked(frame, canvas, pixel_format);
                 });
             }
         }

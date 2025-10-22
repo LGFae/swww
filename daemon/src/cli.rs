@@ -28,7 +28,7 @@ impl Cli {
                             "WARNING: xrgb is deprecated. Use `--format argb` instead.\n\
                             Note this is the default, so you can also just omit it."
                         );
-                        format = Some(PixelFormat::Argb)
+                        format = Some(PixelFormat::Argb);
                     }
                     Some("abgr") => format = Some(PixelFormat::Abgr),
                     Some("rgb") => format = Some(PixelFormat::Rgb),

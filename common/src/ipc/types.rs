@@ -96,7 +96,7 @@ impl fmt::Display for BgImg {
             BgImg::Color(color) => {
                 write!(f, "color: {:02X}{:02X}{:02X}", color[0], color[1], color[2])
             }
-            BgImg::Img(p) => write!(f, "image: {p}",),
+            BgImg::Img(p) => write!(f, "image: {p}"),
         }
     }
 }
@@ -120,10 +120,8 @@ impl PixelFormat {
     #[must_use]
     pub const fn channels(&self) -> u8 {
         match self {
-            Self::Rgb => 3,
-            Self::Bgr => 3,
-            Self::Abgr => 4,
-            Self::Argb => 4,
+            Self::Rgb | Self::Bgr => 3,
+            Self::Abgr | Self::Argb => 4,
         }
     }
 
@@ -131,10 +129,8 @@ impl PixelFormat {
     #[must_use]
     pub const fn must_swap_r_and_b_channels(&self) -> bool {
         match self {
-            Self::Bgr => false,
-            Self::Rgb => true,
-            Self::Abgr => false,
-            Self::Argb => true,
+            Self::Bgr | Self::Abgr => false,
+            Self::Rgb | Self::Argb => true,
         }
     }
 
@@ -142,10 +138,8 @@ impl PixelFormat {
     #[must_use]
     pub const fn can_copy_directly_onto_wl_buffer(&self) -> bool {
         match self {
-            Self::Bgr => true,
-            Self::Rgb => true,
-            Self::Abgr => false,
-            Self::Argb => false,
+            Self::Bgr | Self::Rgb => true,
+            Self::Abgr | Self::Argb => false,
         }
     }
 }
@@ -175,8 +169,7 @@ impl Scale {
     #[must_use]
     pub fn mul_dim(&self, width: i32, height: i32) -> (i32, i32) {
         match self {
-            Scale::Output(i) => (width * i.get(), height * i.get()),
-            Scale::Preferred(i) => (width * i.get(), height * i.get()),
+            Scale::Output(i) | Scale::Preferred(i) => (width * i.get(), height * i.get()),
             Scale::Fractional(f) => {
                 let width = (width * f.get() + 60) / 120;
                 let height = (height * f.get() + 60) / 120;
@@ -189,12 +182,10 @@ impl Scale {
 impl PartialEq for Scale {
     fn eq(&self, other: &Self) -> bool {
         (match self {
-            Self::Output(i) => i.get() * 120,
-            Self::Preferred(i) => i.get() * 120,
+            Self::Output(i) | Self::Preferred(i) => i.get() * 120,
             Self::Fractional(f) => f.get(),
         }) == (match other {
-            Self::Output(i) => i.get() * 120,
-            Self::Preferred(i) => i.get() * 120,
+            Self::Output(i) | Self::Preferred(i) => i.get() * 120,
             Self::Fractional(f) => f.get(),
         })
     }
@@ -206,8 +197,7 @@ impl fmt::Display for Scale {
             f,
             "{}",
             match self {
-                Scale::Output(i) => i.get() as f32,
-                Scale::Preferred(i) => i.get() as f32,
+                Scale::Output(i) | Scale::Preferred(i) => i.get() as f32,
                 Scale::Fractional(f) => f.get() as f32 / 120.0,
             }
         )
@@ -504,6 +494,7 @@ pub struct ClearSend {
 }
 
 impl ClearSend {
+    #[must_use]
     pub fn create_request(self) -> Mmap {
         // 1 - output length
         // 4 - color bytes
@@ -515,7 +506,7 @@ impl ClearSend {
         // 255 monitors. Seems reasonable
         bytes[0] = self.outputs.len() as u8;
         let mut i = 1;
-        for output in self.outputs.iter() {
+        for output in self.outputs {
             let len = output.len() as u32;
             bytes[i..i + 4].copy_from_slice(&len.to_ne_bytes());
             bytes[i + 4..i + 4 + len as usize].copy_from_slice(output.as_bytes());
@@ -589,9 +580,9 @@ impl Animation {
         let Self { animation } = self;
 
         buf.extend(&(animation.len() as u32).to_ne_bytes());
-        for (bitpack, duration) in animation.iter() {
+        for (bitpack, duration) in animation {
             bitpack.serialize(buf);
-            buf.extend(&duration.as_secs_f64().to_ne_bytes())
+            buf.extend(&duration.as_secs_f64().to_ne_bytes());
         }
     }
 

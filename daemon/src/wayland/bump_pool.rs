@@ -107,7 +107,7 @@ impl BumpPool {
     ) -> bool {
         if let Some(b) = self.buffers.iter_mut().find(|b| b.object_id == buffer_id) {
             b.set_released();
-            if !is_animating && self.buffers.iter().all(|b| b.is_released()) {
+            if !is_animating && self.buffers.iter().all(Buffer::is_released) {
                 for buffer in self.buffers.drain(..) {
                     buffer.destroy(backend);
                 }
@@ -150,11 +150,10 @@ impl BumpPool {
         self.mmap.ensure_mapped();
 
         if new_len > self.mmap.len() {
-            if new_len > i32::MAX as usize {
-                panic!("Buffers have grown too big. We cannot allocate any more.")
-            }
+            let new_len_i32 = i32::try_from(new_len)
+                .expect("Buffers have grown too big. We cannot allocate any more.");
             self.mmap.remap(new_len);
-            super::wl_shm_pool::req::resize(backend, self.pool_id, new_len as i32).unwrap();
+            super::wl_shm_pool::req::resize(backend, self.pool_id, new_len_i32).unwrap();
         }
 
         let new_buffer_index = self.buffers.len();
@@ -264,7 +263,7 @@ impl BumpPool {
 }
 
 fn destroy_buffer(buffer: ObjectId, backend: &mut Waybackend) {
-    log::debug!("Destroying buffer with id: {}", buffer);
+    log::debug!("Destroying buffer with id: {buffer}");
     if let Err(e) = super::wl_buffer::req::destroy(backend, buffer) {
         log::error!("failed to destroy wl_buffer: {e:?}");
     }

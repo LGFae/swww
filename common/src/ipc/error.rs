@@ -50,7 +50,7 @@ impl IpcErrorKind {
                 format!(
                     "Socket file '{}' not found. Make sure swww-daemon is running, \
                     and that the --namespace argument matches for the client and the daemon",
-                    path.to_string_lossy()
+                    path.display()
                 )
             }
             Self::SetTimeout => "failed to set read timeout for socket".to_string(),
