@@ -516,7 +516,7 @@ impl wayland::wl_output::EvHandler for Daemon {
     fn name(&mut self, sender_id: ObjectId, name: &str) {
         for info in self.pending_outputs.iter_mut() {
             if info.output == sender_id {
-                info.name = Some(name.to_string());
+                info.name = Some(name.into());
                 return;
             }
         }
@@ -524,7 +524,7 @@ impl wayland::wl_output::EvHandler for Daemon {
         for wallpaper in self.wallpapers.iter() {
             let mut wallpaper = wallpaper.borrow_mut();
             if wallpaper.has_output(sender_id) {
-                wallpaper.set_name(name.to_string());
+                wallpaper.set_name(name.into());
                 return;
             }
         }
@@ -533,14 +533,14 @@ impl wayland::wl_output::EvHandler for Daemon {
     fn description(&mut self, sender_id: ObjectId, description: &str) {
         for info in self.pending_outputs.iter_mut() {
             if info.output == sender_id {
-                info.desc = Some(description.to_string());
+                info.desc = Some(description.into());
                 return;
             }
         }
         for wallpaper in self.wallpapers.iter() {
             let mut wallpaper = wallpaper.borrow_mut();
             if wallpaper.has_output(sender_id) {
-                wallpaper.set_desc(description.to_string());
+                wallpaper.set_desc(description.into());
                 return;
             }
         }

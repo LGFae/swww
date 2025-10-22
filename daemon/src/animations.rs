@@ -41,8 +41,7 @@ impl TransitionAnimator {
             return None;
         }
         for w in wallpapers.iter_mut() {
-            w.borrow_mut()
-                .set_img_info(BgImg::Img(path.str().to_string()));
+            w.borrow_mut().set_img_info(BgImg::Img(path.str().into()));
         }
 
         let expect = wallpapers[0].borrow().get_dimensions();

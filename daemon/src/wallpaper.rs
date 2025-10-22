@@ -45,8 +45,8 @@ impl FrameCallbackHandler {
 }
 
 pub struct OutputInfo {
-    pub name: Option<String>,
-    pub desc: Option<String>,
+    pub name: Option<Box<str>>,
+    pub desc: Option<Box<str>>,
     pub scale_factor: Scale,
 
     pub output: ObjectId,
@@ -81,8 +81,8 @@ impl OutputInfo {
 }
 
 pub struct Wallpaper {
-    name: Option<String>,
-    desc: Option<String>,
+    name: Option<Box<str>>,
+    desc: Option<Box<str>>,
 
     output: ObjectId,
     output_name: u32,
@@ -215,7 +215,7 @@ impl Wallpaper {
 
     pub fn get_bg_info(&self, pixel_format: PixelFormat) -> BgInfo {
         BgInfo {
-            name: self.name.clone().unwrap_or("?".to_string()),
+            name: self.name.as_deref().unwrap_or("?").into(),
             dim: (self.width.get() as u32, self.height.get() as u32),
             scale_factor: self.scale_factor,
             img: match &self.img {
@@ -232,12 +232,12 @@ impl Wallpaper {
         }
     }
 
-    pub fn set_name(&mut self, name: String) {
+    pub fn set_name(&mut self, name: Box<str>) {
         debug!("Output {} name: {name}", self.output_name);
         self.name = Some(name);
     }
 
-    pub fn set_desc(&mut self, desc: String) {
+    pub fn set_desc(&mut self, desc: Box<str>) {
         debug!("Output {} description: {desc}", self.output_name);
         self.desc = Some(desc);
     }
@@ -309,7 +309,7 @@ impl Wallpaper {
         self.dirty = false;
 
         if (!self.configured && use_cache) || self.img.is_set() {
-            let name = self.name.clone().unwrap_or("".to_string());
+            let name: String = self.name.as_deref().unwrap_or("?").into();
             let namespace = namespace.to_string();
             std::thread::Builder::new()
                 .name("cache loader".to_string())
@@ -343,7 +343,7 @@ impl Wallpaper {
     }
 
     pub fn has_name(&self, name: &str) -> bool {
-        self.name.as_ref().is_some_and(|s| s.eq(name))
+        self.name.as_ref().is_some_and(|s| s.as_ref() == name)
     }
 
     pub fn has_output(&self, output: ObjectId) -> bool {
@@ -445,8 +445,8 @@ impl Wallpaper {
 
         debug!(
             "Destroyed output {} - {}",
-            self.name.as_ref().unwrap_or(&"?".to_string()),
-            self.desc.as_ref().unwrap_or(&"?".to_string())
+            self.name.as_deref().unwrap_or("?"),
+            self.desc.as_deref().unwrap_or("?")
         );
     }
 
