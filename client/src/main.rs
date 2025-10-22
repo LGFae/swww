@@ -89,7 +89,7 @@ fn process_swww_args(args: &Swww, namespace: &str) -> Result<(), String> {
                 }
                 return Err(format!(
                     "Could not confirm socket deletion at: {}",
-                    String::from_utf8_lossy(&path)
+                    path.to_string_lossy()
                 ));
             }
         }
