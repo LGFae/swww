@@ -46,10 +46,7 @@ impl Buffer {
     }
 
     fn destroy(self, backend: &mut Waybackend) {
-        log::debug!("Destroying buffer with id: {}", self.object_id);
-        if let Err(e) = super::wl_buffer::req::destroy(backend, self.object_id) {
-            log::error!("failed to destroy wl_buffer: {e:?}");
-        }
+        destroy_buffer(self.object_id, backend);
     }
 }
 
@@ -66,7 +63,7 @@ pub struct BumpPool {
     buffers: Vec<Buffer>,
     /// This for when resizes happen, where we cannot delete a buffer before it was released by the
     /// compositor, least undefined behavior happens
-    dead_buffers: Vec<Buffer>,
+    dead_buffers: Vec<ObjectId>,
     width: i32,
     height: i32,
     last_used_buffer: usize,
@@ -87,12 +84,10 @@ impl BumpPool {
         let pool_id = objman.create(WaylandObject::ShmPool);
         super::wl_shm::req::create_pool(backend, shm, pool_id, &mmap.fd(), len as i32)
             .expect("failed to create WlShmPool object");
-        let buffers = Vec::with_capacity(2);
-
         Self {
             pool_id,
             mmap,
-            buffers,
+            buffers: Vec::with_capacity(2),
             dead_buffers: Vec::with_capacity(1),
             width,
             height,
@@ -119,13 +114,9 @@ impl BumpPool {
                 self.mmap.unmap();
             }
             true
-        } else if let Some(i) = self
-            .dead_buffers
-            .iter()
-            .position(|b| b.object_id == buffer_id)
-        {
+        } else if let Some(i) = self.dead_buffers.iter().position(|b| *b == buffer_id) {
             let buffer = self.dead_buffers.swap_remove(i);
-            buffer.destroy(backend);
+            destroy_buffer(buffer, backend);
             true
         } else {
             false
@@ -240,7 +231,7 @@ impl BumpPool {
                 if buffer.is_released() {
                     buffer.destroy(backend);
                 } else {
-                    self.dead_buffers.push(buffer);
+                    self.dead_buffers.push(buffer.object_id);
                 }
             }
             self.width = width;
@@ -255,7 +246,7 @@ impl BumpPool {
         }
 
         for buffer in self.dead_buffers.drain(..) {
-            buffer.destroy(backend);
+            destroy_buffer(buffer, backend);
         }
 
         if let Err(e) = super::wl_shm_pool::req::destroy(backend, self.pool_id) {
@@ -269,6 +260,13 @@ impl BumpPool {
 
     pub fn height(&self) -> i32 {
         self.height
+    }
+}
+
+fn destroy_buffer(buffer: ObjectId, backend: &mut Waybackend) {
+    log::debug!("Destroying buffer with id: {}", buffer);
+    if let Err(e) = super::wl_buffer::req::destroy(backend, buffer) {
+        log::error!("failed to destroy wl_buffer: {e:?}");
     }
 }
 
