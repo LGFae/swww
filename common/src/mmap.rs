@@ -1,7 +1,4 @@
 use core::ptr::NonNull;
-use std::iter::repeat_with;
-use std::time::SystemTime;
-use std::time::UNIX_EPOCH;
 
 use rustix::fd::AsFd;
 use rustix::fd::BorrowedFd;
@@ -65,17 +62,23 @@ impl Mmap {
     }
 
     fn shm() -> io::Result<OwnedFd> {
-        let mut filenames = repeat_with(SystemTime::now)
-            .map(|time| time.duration_since(UNIX_EPOCH).unwrap().subsec_nanos())
-            .map(|stamp| format!("/swww-ipc-{stamp}",));
+        use rustix::time::{ClockId, clock_gettime};
 
-        let flags = OFlags::CREATE | OFlags::EXCL | OFlags::RDWR;
-        let mode = Mode::RUSR | Mode::WUSR;
+        const PREFIX: &[u8] = b"/swww-ipc-";
+        const FLAGS: OFlags = OFlags::CREATE.union(OFlags::EXCL).union(OFlags::RDWR);
+        const MODE: Mode = Mode::RUSR.union(Mode::WUSR);
+
+        let mut write_buf = Vec::from(PREFIX);
 
         loop {
-            let filename = filenames.next().expect("infinite generator");
-            match shm::open(filename.as_str(), flags, mode) {
-                Ok(fd) => return shm::unlink(filename.as_str()).map(|()| fd),
+            let filename = {
+                let time = clock_gettime(ClockId::Monotonic);
+                write_buf.truncate(PREFIX.len());
+                write_buf.extend_from_slice(rustix::path::DecInt::new(time.tv_nsec).as_bytes());
+                write_buf.as_slice()
+            };
+            match shm::open(filename, FLAGS, MODE) {
+                Ok(fd) => return shm::unlink(filename).map(|()| fd),
                 Err(Errno::EXIST | Errno::INTR) => continue,
                 Err(err) => return Err(err),
             }
