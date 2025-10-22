@@ -1,4 +1,4 @@
-use std::{path::Path, str::FromStr, time::Duration};
+use std::{str::FromStr, time::Duration};
 
 use clap::Parser;
 use common::cache;
@@ -81,14 +81,16 @@ fn process_swww_args(args: &Swww, namespace: &str) -> Result<(), String> {
                 #[cfg(not(debug_assertions))]
                 let tries = 10;
                 let path = IpcSocket::<Client>::path(namespace);
-                let path = Path::new(&path);
                 for _ in 0..tries {
-                    if !path.exists() {
+                    if rustix::fs::access(&path, rustix::fs::Access::EXISTS).is_err() {
                         return Ok(());
                     }
                     std::thread::sleep(Duration::from_millis(100));
                 }
-                return Err(format!("Could not confirm socket deletion at: {path:?}"));
+                return Err(format!(
+                    "Could not confirm socket deletion at: {}",
+                    String::from_utf8_lossy(&path)
+                ));
             }
         }
         Answer::Ping(_) => {
@@ -191,12 +193,7 @@ fn make_img_request(
                         let animation = if !imgbuf.is_animated() {
                             None
                         } else {
-                            match cache::load_animation_frames(
-                                path.as_ref(),
-                                dim,
-                                resize,
-                                pixel_format,
-                            ) {
+                            match cache::load_animation_frames(&path, dim, resize, pixel_format) {
                                 Ok(Some(animation)) => Some(animation),
                                 otherwise => {
                                     if let Err(e) = otherwise {

@@ -1104,6 +1104,7 @@ dependencies = [
  "fastrand",
  "image",
  "resvg",
+ "rustix",
 ]
 
 [[package]]

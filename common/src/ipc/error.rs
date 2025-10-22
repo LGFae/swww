@@ -48,9 +48,9 @@ impl IpcErrorKind {
             Self::Listen => "failed to listen on socket".to_string(),
             Self::NoSocketFile(path) => {
                 format!(
-                    "Socket file '{:?}' not found. Make sure swww-daemon is running, \
+                    "Socket file '{}' not found. Make sure swww-daemon is running, \
                     and that the --namespace argument matches for the client and the daemon",
-                    path
+                    path.to_string_lossy()
                 )
             }
             Self::SetTimeout => "failed to set read timeout for socket".to_string(),

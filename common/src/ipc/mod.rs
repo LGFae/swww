@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use transmit::RawMsg;
 
 mod error;
@@ -104,17 +102,17 @@ impl ImageRequestBuilder {
             }
         }
 
-        if animation.is_some() && path != "-" {
-            let p = PathBuf::from(&path);
-            if let Err(e) = cache::store_animation_frames(
+        if animation.is_some()
+            && path != "-"
+            && let Err(e) = cache::store_animation_frames(
                 &self.memory.slice()[animation_start..],
-                &p,
+                &path,
                 *dims,
                 resize,
                 *format,
-            ) {
-                log::error!("failed storing cache for {}: {e}", path);
-            }
+            )
+        {
+            log::error!("failed storing cache for {}: {e}", path);
         }
     }
 

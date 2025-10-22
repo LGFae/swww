@@ -122,9 +122,9 @@ impl<'a> CacheEntry<'a> {
     }
 }
 
-pub(crate) fn store_animation_frames(
+pub(crate) fn store_animation_frames<P: AsRef<Path>>(
     animation: &[u8],
-    path: &Path,
+    path: &P,
     dimensions: (u32, u32),
     resize: &str,
     pixel_format: PixelFormat,
@@ -140,8 +140,8 @@ pub(crate) fn store_animation_frames(
     }
 }
 
-pub fn load_animation_frames(
-    path: &Path,
+pub fn load_animation_frames<P: AsRef<Path>>(
+    path: &P,
     dimensions: (u32, u32),
     resize: &str,
     pixel_format: PixelFormat,
@@ -297,15 +297,15 @@ fn cache_dir() -> io::Result<PathBuf> {
 }
 
 #[must_use]
-fn animation_filename(
-    path: &Path,
+fn animation_filename<P: AsRef<Path>>(
+    path: &P,
     dimensions: (u32, u32),
     resize: &str,
     pixel_format: PixelFormat,
 ) -> PathBuf {
     format!(
         "{}__{}x{}_{}_{:?}",
-        path.to_string_lossy().replace('/', "_"),
+        path.as_ref().to_string_lossy().replace('/', "_"),
         dimensions.0,
         dimensions.1,
         resize,
