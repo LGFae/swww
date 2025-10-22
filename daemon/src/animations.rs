@@ -49,17 +49,15 @@ impl Animator {
             error!("image has wrong dimensions! Expect {expect:?}, actual {dim:?}");
             return None;
         }
-        let fps = Duration::from_nanos(1_000_000_000 / transition.fps as u64);
-        let effect = Effect::new(transition, dim);
+        let effect = Some(Effect::new(transition, dim));
         Some(Self {
             wallpapers,
             now: Instant::now(),
             animator: AnimatorKind::Transition(Transition {
                 effect,
-                fps,
+                fps_nanos: 1_000_000_000 / transition.fps as u64,
                 img,
                 animation,
-                over: false,
             }),
         })
     }
@@ -114,16 +112,15 @@ impl Animator {
 }
 
 struct Transition {
-    fps: Duration,
-    effect: Effect,
+    fps_nanos: u64,
+    effect: Option<Effect>,
     img: MmappedBytes,
     animation: Option<ipc::Animation>,
-    over: bool,
 }
 
 impl Transition {
     fn time_to_draw(&self, now: &Instant) -> std::time::Duration {
-        self.fps.saturating_sub(now.elapsed())
+        Duration::from_nanos(self.fps_nanos).saturating_sub(now.elapsed())
     }
 
     fn frame(
@@ -133,14 +130,16 @@ impl Transition {
         wallpapers: &mut [Rc<RefCell<Wallpaper>>],
         pixel_format: PixelFormat,
     ) -> bool {
-        let Self {
-            effect, img, over, ..
-        } = self;
-        if !*over {
-            *over = effect.execute(backend, objman, pixel_format, wallpapers, img.bytes());
-            false
-        } else {
-            true
+        let Self { effect, img, .. } = self;
+        match effect.as_mut() {
+            Some(e) => {
+                let over = e.execute(backend, objman, pixel_format, wallpapers, img.bytes());
+                if over {
+                    *effect = None;
+                }
+                false
+            }
+            None => true,
         }
     }
 }
