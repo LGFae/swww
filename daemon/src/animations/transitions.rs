@@ -1,6 +1,6 @@
-use std::{cell::RefCell, num::NonZeroU8, rc::Rc, time::Instant};
+use std::{num::NonZeroU8, time::Instant};
 
-use crate::{WaylandObject, wallpaper::Wallpaper};
+use crate::{WaylandObject, wallpaper::WallpaperCell};
 use common::ipc::{PixelFormat, Transition, TransitionType};
 
 use keyframe::{
@@ -58,7 +58,7 @@ impl None {
         backend: &mut Waybackend,
         objman: &mut ObjectManager<WaylandObject>,
         pixel_format: PixelFormat,
-        wallpapers: &mut [Rc<RefCell<Wallpaper>>],
+        wallpapers: &mut [WallpaperCell],
         img: &[u8],
     ) -> bool {
         for w in wallpapers.iter() {
@@ -100,7 +100,7 @@ impl Effect {
         backend: &mut Waybackend,
         objman: &mut ObjectManager<WaylandObject>,
         pixel_format: PixelFormat,
-        wallpapers: &mut [Rc<RefCell<Wallpaper>>],
+        wallpapers: &mut [WallpaperCell],
         img: &[u8],
     ) -> bool {
         let done = match self {
@@ -145,7 +145,7 @@ impl Simple {
         backend: &mut Waybackend,
         objman: &mut ObjectManager<WaylandObject>,
         pixel_format: PixelFormat,
-        wallpapers: &mut [Rc<RefCell<Wallpaper>>],
+        wallpapers: &mut [WallpaperCell],
         img: &[u8],
     ) -> bool {
         let step = self.step;
@@ -181,7 +181,7 @@ impl Fade {
         backend: &mut Waybackend,
         objman: &mut ObjectManager<WaylandObject>,
         pixel_format: PixelFormat,
-        wallpapers: &mut [Rc<RefCell<Wallpaper>>],
+        wallpapers: &mut [WallpaperCell],
         img: &[u8],
     ) -> bool {
         for wallpaper in wallpapers.iter() {
@@ -255,7 +255,7 @@ impl Wave {
         backend: &mut Waybackend,
         objman: &mut ObjectManager<WaylandObject>,
         pixel_format: PixelFormat,
-        wallpapers: &mut [Rc<RefCell<Wallpaper>>],
+        wallpapers: &mut [WallpaperCell],
         img: &[u8],
     ) -> bool {
         let Self {
@@ -391,7 +391,7 @@ impl Wipe {
         backend: &mut Waybackend,
         objman: &mut ObjectManager<WaylandObject>,
         pixel_format: PixelFormat,
-        wallpapers: &mut [Rc<RefCell<Wallpaper>>],
+        wallpapers: &mut [WallpaperCell],
         img: &[u8],
     ) -> bool {
         let Self {
@@ -479,7 +479,7 @@ impl Grow {
         backend: &mut Waybackend,
         objman: &mut ObjectManager<WaylandObject>,
         pixel_format: PixelFormat,
-        wallpapers: &mut [Rc<RefCell<Wallpaper>>],
+        wallpapers: &mut [WallpaperCell],
         img: &[u8],
     ) -> bool {
         let Self {
@@ -564,7 +564,7 @@ impl Outer {
         backend: &mut Waybackend,
         objman: &mut ObjectManager<WaylandObject>,
         pixel_format: PixelFormat,
-        wallpapers: &mut [Rc<RefCell<Wallpaper>>],
+        wallpapers: &mut [WallpaperCell],
         img: &[u8],
     ) -> bool {
         let Self {

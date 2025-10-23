@@ -4,6 +4,7 @@
 
 mod animations;
 mod cli;
+mod output_info;
 mod wallpaper;
 mod wayland;
 use log::{LevelFilter, debug, error, info, trace, warn};
@@ -13,16 +14,14 @@ use rustix::{
     fs::Timespec,
 };
 
-use wallpaper::Wallpaper;
+use wallpaper::WallpaperCell;
 
 use waybackend::{Global, objman, types::ObjectId};
 use wayland::zwlr_layer_shell_v1::Layer;
 
 use std::{
-    cell::RefCell,
     io::{IsTerminal, Write},
     num::NonZeroI32,
-    rc::Rc,
     sync::atomic::{AtomicBool, Ordering},
     time::Duration,
 };
@@ -32,8 +31,7 @@ use common::ipc::{
     Answer, BgInfo, ImageReq, IpcSocket, PixelFormat, RequestRecv, RequestSend, Scale, Server,
 };
 use common::mmap::MmappedStr;
-
-use crate::wallpaper::OutputInfo;
+use output_info::OutputInfo;
 
 // We need this because this might be set by signals, so we can't keep it in the daemon
 static EXIT: AtomicBool = AtomicBool::new(false);
@@ -60,7 +58,7 @@ struct Daemon {
     layer_shell: ObjectId,
     layer: Layer,
     pixel_format: PixelFormat,
-    wallpapers: Vec<Rc<RefCell<Wallpaper>>>,
+    wallpapers: Vec<WallpaperCell>,
     animators: Vec<Animator>,
     namespace: String,
     use_cache: bool,
@@ -226,12 +224,12 @@ impl Daemon {
             .collect()
     }
 
-    fn find_wallpapers_by_names(&self, names: &[MmappedStr]) -> Vec<Rc<RefCell<Wallpaper>>> {
+    fn find_wallpapers_by_names(&self, names: &[MmappedStr]) -> Vec<WallpaperCell> {
         self.wallpapers
             .iter()
             .filter_map(|wallpaper| {
                 if names.is_empty() || names.iter().any(|n| wallpaper.borrow().has_name(n.str())) {
-                    return Some(Rc::clone(wallpaper));
+                    return Some(wallpaper.clone());
                 }
                 None
             })
@@ -290,21 +288,20 @@ impl Daemon {
         for wallpaper in &self.wallpapers {
             if wallpaper.borrow_mut().commit_surface_changes(
                 &mut self.backend,
-                &mut self.objman,
                 &self.namespace,
                 self.use_cache,
             ) {
-                to_stop.push(Rc::clone(wallpaper));
+                to_stop.push(wallpaper.clone());
             }
         }
         self.stop_animations(&to_stop);
     }
 
-    fn stop_animations(&mut self, wallpapers: &[Rc<RefCell<Wallpaper>>]) {
+    fn stop_animations(&mut self, wallpapers: &[WallpaperCell]) {
         for animator in &mut self.animators {
             animator
                 .wallpapers
-                .retain(|w1| !wallpapers.iter().any(|w2| w1.as_ptr() == w2.as_ptr()));
+                .retain(|w1| !wallpapers.iter().any(|w2| w1 == w2));
         }
         self.animators.retain(|a| !a.wallpapers.is_empty());
     }
@@ -423,7 +420,7 @@ impl wayland::wl_output::EvHandler for Daemon {
             .position(|o| o.output == sender_id)
         {
             let output_info = self.pending_outputs.swap_remove(i);
-            let wallpaper = Rc::new(RefCell::new(Wallpaper::new(self, output_info)));
+            let wallpaper = WallpaperCell::new(self, output_info);
             self.wallpapers.push(wallpaper);
         }
     }
@@ -515,12 +512,10 @@ impl wayland::wl_buffer::EvHandler for Daemon {
     fn release(&mut self, sender_id: ObjectId) {
         trace!("Releasing buffer {sender_id}");
         for wallpaper in &self.wallpapers {
-            let strong_count = Rc::strong_count(wallpaper);
-            if wallpaper.borrow_mut().try_set_buffer_release_flag(
-                &mut self.backend,
-                sender_id,
-                strong_count,
-            ) {
+            if wallpaper
+                .borrow_mut()
+                .try_set_buffer_release_flag(&mut self.backend, sender_id)
+            {
                 return;
             }
         }

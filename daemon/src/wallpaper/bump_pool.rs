@@ -1,6 +1,8 @@
 use common::{ipc::PixelFormat, mmap::Mmap};
 use waybackend::{Waybackend, objman::ObjectManager, types::ObjectId};
 
+use crate::wayland::{wl_shm, wl_shm_pool};
+
 use crate::WaylandObject;
 
 #[derive(Debug)]
@@ -19,11 +21,11 @@ impl Buffer {
         width: i32,
         height: i32,
         stride: i32,
-        format: super::wl_shm::Format,
+        format: wl_shm::Format,
     ) -> Self {
         let object_id = objman.create(WaylandObject::Buffer);
         log::debug!("Creating buffer with id: {object_id}");
-        super::wl_shm_pool::req::create_buffer(
+        wl_shm_pool::req::create_buffer(
             backend, pool_id, object_id, offset, width, height, stride, format,
         )
         .expect("WlShmPool failed to create buffer");
@@ -82,7 +84,7 @@ impl BumpPool {
         let len = width as usize * height as usize * pixel_format.channels() as usize;
         let mmap = Mmap::create(len);
         let pool_id = objman.create(WaylandObject::ShmPool);
-        super::wl_shm::req::create_pool(backend, shm, pool_id, &mmap.fd(), len as i32)
+        wl_shm::req::create_pool(backend, shm, pool_id, &mmap.fd(), len as i32)
             .expect("failed to create WlShmPool object");
         Self {
             pool_id,
@@ -153,7 +155,7 @@ impl BumpPool {
             let new_len_i32 = i32::try_from(new_len)
                 .expect("Buffers have grown too big. We cannot allocate any more.");
             self.mmap.remap(new_len);
-            super::wl_shm_pool::req::resize(backend, self.pool_id, new_len_i32).unwrap();
+            wl_shm_pool::req::resize(backend, self.pool_id, new_len_i32).unwrap();
         }
 
         let new_buffer_index = self.buffers.len();
@@ -248,7 +250,7 @@ impl BumpPool {
             destroy_buffer(buffer, backend);
         }
 
-        if let Err(e) = super::wl_shm_pool::req::destroy(backend, self.pool_id) {
+        if let Err(e) = wl_shm_pool::req::destroy(backend, self.pool_id) {
             log::error!("failed to destroy wl_shm_pool: {e}");
         }
     }
@@ -264,13 +266,13 @@ impl BumpPool {
 
 fn destroy_buffer(buffer: ObjectId, backend: &mut Waybackend) {
     log::debug!("Destroying buffer with id: {buffer}");
-    if let Err(e) = super::wl_buffer::req::destroy(backend, buffer) {
+    if let Err(e) = crate::wayland::wl_buffer::req::destroy(backend, buffer) {
         log::error!("failed to destroy wl_buffer: {e:?}");
     }
 }
 
-const fn wl_shm_format(pixel_format: PixelFormat) -> super::wl_shm::Format {
-    use super::wl_shm::Format;
+const fn wl_shm_format(pixel_format: PixelFormat) -> wl_shm::Format {
+    use wl_shm::Format;
     match pixel_format {
         PixelFormat::Bgr => Format::bgr888,
         PixelFormat::Rgb => Format::rgb888,

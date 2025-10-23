@@ -2,34 +2,31 @@ use common::ipc::{BgImg, BgInfo, PixelFormat, Scale};
 use log::{debug, error, warn};
 use waybackend::{Waybackend, objman::ObjectManager, types::ObjectId};
 
-use std::{cell::RefCell, num::NonZeroI32, rc::Rc};
+use std::num::NonZeroI32;
+
+mod bump_pool;
+mod cell;
+
+use crate::output_info::OutputInfo;
+pub use cell::WallpaperCell;
 
 use crate::{
     WaylandObject,
     wayland::{
-        bump_pool::BumpPool, wl_compositor, wl_region, wl_surface, wp_fractional_scale_manager_v1,
+        wl_compositor, wl_region, wl_surface, wp_fractional_scale_manager_v1,
         wp_fractional_scale_v1, wp_viewport, wp_viewporter, zwlr_layer_shell_v1,
         zwlr_layer_surface_v1,
     },
 };
+use bump_pool::BumpPool;
 
 struct FrameCallbackHandler {
-    done: bool,
-    callback: ObjectId,
+    callback: Option<ObjectId>,
 }
 
 impl FrameCallbackHandler {
-    fn new(
-        backend: &mut Waybackend,
-        objman: &mut ObjectManager<WaylandObject>,
-        surface: ObjectId,
-    ) -> Self {
-        let callback = objman.create(WaylandObject::Callback);
-        wl_surface::req::frame(backend, surface, callback).unwrap();
-        FrameCallbackHandler {
-            done: true, // we do not have to wait for the first frame
-            callback,
-        }
+    fn new() -> Self {
+        FrameCallbackHandler { callback: None }
     }
 
     fn request_frame_callback(
@@ -40,46 +37,11 @@ impl FrameCallbackHandler {
     ) {
         let callback = objman.create(WaylandObject::Callback);
         wl_surface::req::frame(backend, surface, callback).unwrap();
-        self.callback = callback;
+        self.callback = Some(callback);
     }
 }
 
-pub struct OutputInfo {
-    pub name: Option<Box<str>>,
-    pub desc: Option<Box<str>>,
-    pub scale_factor: Scale,
-
-    pub output: ObjectId,
-    pub output_name: u32,
-}
-
-impl OutputInfo {
-    pub fn new(
-        backend: &mut Waybackend,
-        objman: &mut ObjectManager<WaylandObject>,
-        registry: ObjectId,
-        output_name: u32,
-    ) -> Self {
-        let output = objman.create(WaylandObject::Output);
-        crate::wayland::wl_registry::req::bind(
-            backend,
-            registry,
-            output_name,
-            output,
-            "wl_output",
-            4,
-        )
-        .unwrap();
-        Self {
-            name: None,
-            desc: None,
-            scale_factor: Scale::Output(NonZeroI32::new(1).unwrap()),
-            output,
-            output_name,
-        }
-    }
-}
-
+/// NOTE: this type cannot be created directly. Create a [WallpaperCell] instead.
 pub struct Wallpaper {
     name: Option<Box<str>>,
     desc: Option<Box<str>>,
@@ -101,13 +63,18 @@ pub struct Wallpaper {
     pub configured: bool,
     dirty: bool,
 
+    /// we only allow one single borrow at a time, regardless of whether it is mutable or immutable
+    is_borrowed: bool,
+    /// we only have a maximum of 3 clones active at a time
+    clones: u8,
+
     frame_callback_handler: FrameCallbackHandler,
     img: BgImg,
     pool: BumpPool,
 }
 
 impl Wallpaper {
-    pub fn new(daemon: &mut crate::Daemon, output_info: OutputInfo) -> Self {
+    fn new(daemon: &mut crate::Daemon, output_info: OutputInfo) -> Self {
         let crate::Daemon {
             objman,
             backend,
@@ -184,7 +151,7 @@ impl Wallpaper {
         .unwrap();
         zwlr_layer_surface_v1::req::set_size(backend, layer_surface, 0, 0).unwrap();
 
-        let frame_callback_handler = FrameCallbackHandler::new(backend, objman, wl_surface);
+        let frame_callback_handler = FrameCallbackHandler::new();
         // commit so that the compositor send the initial configuration
         wl_surface::req::commit(backend, wl_surface).unwrap();
 
@@ -207,6 +174,8 @@ impl Wallpaper {
             needs_ack: false,
             configured: false,
             dirty: false,
+            clones: 0,
+            is_borrowed: false,
             frame_callback_handler,
             img: BgImg::Color([0, 0, 0, 0]),
             pool,
@@ -289,7 +258,6 @@ impl Wallpaper {
     pub fn commit_surface_changes(
         &mut self,
         backend: &mut Waybackend,
-        objman: &mut ObjectManager<WaylandObject>,
         namespace: &str,
         use_cache: bool,
     ) -> bool {
@@ -334,8 +302,7 @@ impl Wallpaper {
         let (w, h) = self.scale_factor.mul_dim(width, height);
         self.pool.resize(backend, w, h);
 
-        self.frame_callback_handler
-            .request_frame_callback(backend, objman, self.wl_surface);
+        self.frame_callback_handler.callback = None;
 
         wl_surface::req::commit(backend, self.wl_surface).unwrap();
         self.configured = true;
@@ -362,18 +329,17 @@ impl Wallpaper {
         &mut self,
         backend: &mut Waybackend,
         buffer: ObjectId,
-        rc_strong_count: usize,
     ) -> bool {
         self.pool
-            .set_buffer_release_flag(backend, buffer, rc_strong_count != 1)
+            .set_buffer_release_flag(backend, buffer, self.clones > 0)
     }
 
     pub fn is_draw_ready(&self) -> bool {
-        self.frame_callback_handler.done
+        self.frame_callback_handler.callback.is_none()
     }
 
     pub fn has_callback(&self, callback: ObjectId) -> bool {
-        self.frame_callback_handler.callback == callback
+        self.frame_callback_handler.callback == Some(callback)
     }
 
     pub fn has_fractional_scale(&self, fractional_scale: ObjectId) -> bool {
@@ -401,7 +367,7 @@ impl Wallpaper {
     }
 
     pub fn frame_callback_completed(&mut self) {
-        self.frame_callback_handler.done = true;
+        self.frame_callback_handler.callback = None;
     }
 
     pub fn clear(
@@ -470,7 +436,7 @@ impl Wallpaper {
 pub fn attach_buffers_and_damage_surfaces(
     backend: &mut Waybackend,
     objman: &mut ObjectManager<WaylandObject>,
-    wallpapers: &[Rc<RefCell<Wallpaper>>],
+    wallpapers: &[WallpaperCell],
 ) {
     for wallpaper in wallpapers {
         wallpaper
@@ -480,7 +446,7 @@ pub fn attach_buffers_and_damage_surfaces(
 }
 
 /// commits multiple wallpapers at once with a single message through the socket
-pub fn commit_wallpapers(backend: &mut Waybackend, wallpapers: &[Rc<RefCell<Wallpaper>>]) {
+pub fn commit_wallpapers(backend: &mut Waybackend, wallpapers: &[WallpaperCell]) {
     for wallpaper in wallpapers {
         let wallpaper = wallpaper.borrow();
         wl_surface::req::commit(backend, wallpaper.wl_surface).unwrap();

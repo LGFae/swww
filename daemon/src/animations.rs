@@ -1,11 +1,7 @@
 use log::error;
 use waybackend::{Waybackend, objman::ObjectManager};
 
-use std::{
-    cell::RefCell,
-    rc::Rc,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 use common::{
     compression::Decompressor,
@@ -13,13 +9,13 @@ use common::{
     mmap::MmappedBytes,
 };
 
-use crate::{WaylandObject, wallpaper::Wallpaper};
+use crate::{WaylandObject, wallpaper::WallpaperCell};
 
 mod transitions;
 use transitions::Effect;
 
 pub struct Animator {
-    pub wallpapers: Vec<Rc<RefCell<Wallpaper>>>,
+    pub wallpapers: Vec<WallpaperCell>,
     now: Instant,
     animator: AnimatorKind,
 }
@@ -31,7 +27,7 @@ enum AnimatorKind {
 
 impl Animator {
     pub fn new(
-        mut wallpapers: Vec<Rc<RefCell<Wallpaper>>>,
+        mut wallpapers: Vec<WallpaperCell>,
         transition: &ipc::Transition,
         img_req: ImgReq,
         animation: Option<ipc::Animation>,
@@ -127,7 +123,7 @@ impl Transition {
         &mut self,
         backend: &mut Waybackend,
         objman: &mut ObjectManager<WaylandObject>,
-        wallpapers: &mut [Rc<RefCell<Wallpaper>>],
+        wallpapers: &mut [WallpaperCell],
         pixel_format: PixelFormat,
     ) -> bool {
         let Self { effect, img, .. } = self;
@@ -161,7 +157,7 @@ impl Animation {
         &mut self,
         backend: &mut Waybackend,
         objman: &mut ObjectManager<WaylandObject>,
-        wallpapers: &mut Vec<Rc<RefCell<Wallpaper>>>,
+        wallpapers: &mut Vec<WallpaperCell>,
         pixel_format: PixelFormat,
     ) {
         let Self {
