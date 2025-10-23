@@ -14,6 +14,7 @@ use rustix::{
     fs::Timespec,
 };
 
+use smallvec::SmallVec;
 use wallpaper::WallpaperCell;
 
 use waybackend::{Global, objman, types::ObjectId};
@@ -58,7 +59,7 @@ struct Daemon {
     layer_shell: ObjectId,
     layer: Layer,
     pixel_format: PixelFormat,
-    wallpapers: Vec<WallpaperCell>,
+    wallpapers: SmallVec<[WallpaperCell; 2]>,
     animators: Vec<Animator>,
     namespace: String,
     use_cache: bool,
@@ -115,7 +116,7 @@ impl Daemon {
             layer_shell,
             layer: args.layer,
             pixel_format: args.format.unwrap_or(PixelFormat::Argb),
-            wallpapers: Vec::with_capacity(1),
+            wallpapers: SmallVec::new(),
             animators: Vec::with_capacity(1),
             namespace: args.namespace,
             use_cache: !args.no_cache,
@@ -224,7 +225,7 @@ impl Daemon {
             .collect()
     }
 
-    fn find_wallpapers_by_names(&self, names: &[MmappedStr]) -> Vec<WallpaperCell> {
+    fn find_wallpapers_by_names(&self, names: &[MmappedStr]) -> SmallVec<[WallpaperCell; 2]> {
         self.wallpapers
             .iter()
             .filter_map(|wallpaper| {
@@ -284,7 +285,7 @@ impl Daemon {
     }
 
     fn commit_pending_surface_changes(&mut self) {
-        let mut to_stop = Vec::with_capacity(self.wallpapers.len());
+        let mut to_stop = SmallVec::<[WallpaperCell; 2]>::with_capacity(self.wallpapers.len());
         for wallpaper in &self.wallpapers {
             if wallpaper.borrow_mut().commit_surface_changes(
                 &mut self.backend,

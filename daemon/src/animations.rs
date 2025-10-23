@@ -1,4 +1,5 @@
 use log::error;
+use smallvec::SmallVec;
 use waybackend::{Waybackend, objman::ObjectManager};
 
 use std::time::{Duration, Instant};
@@ -15,7 +16,7 @@ mod transitions;
 use transitions::Effect;
 
 pub struct Animator {
-    pub wallpapers: Vec<WallpaperCell>,
+    pub wallpapers: SmallVec<[WallpaperCell; 2]>,
     now: Instant,
     animator: AnimatorKind,
 }
@@ -27,7 +28,7 @@ enum AnimatorKind {
 
 impl Animator {
     pub fn new(
-        mut wallpapers: Vec<WallpaperCell>,
+        mut wallpapers: SmallVec<[WallpaperCell; 2]>,
         transition: &ipc::Transition,
         img_req: ImgReq,
         animation: Option<ipc::Animation>,
@@ -157,7 +158,7 @@ impl Animation {
         &mut self,
         backend: &mut Waybackend,
         objman: &mut ObjectManager<WaylandObject>,
-        wallpapers: &mut Vec<WallpaperCell>,
+        wallpapers: &mut SmallVec<[WallpaperCell; 2]>,
         pixel_format: PixelFormat,
     ) {
         let Self {

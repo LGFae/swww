@@ -1,4 +1,5 @@
 use common::{ipc::PixelFormat, mmap::Mmap};
+use smallvec::SmallVec;
 use waybackend::{Waybackend, objman::ObjectManager, types::ObjectId};
 
 use crate::wayland::{wl_shm, wl_shm_pool};
@@ -62,10 +63,10 @@ impl Buffer {
 pub struct BumpPool {
     pool_id: ObjectId,
     mmap: Mmap,
-    buffers: Vec<Buffer>,
+    buffers: SmallVec<[Buffer; 2]>,
     /// This for when resizes happen, where we cannot delete a buffer before it was released by the
     /// compositor, least undefined behavior happens
-    dead_buffers: Vec<ObjectId>,
+    dead_buffers: SmallVec<[ObjectId; 4]>,
     width: i32,
     height: i32,
     last_used_buffer: usize,
@@ -89,8 +90,8 @@ impl BumpPool {
         Self {
             pool_id,
             mmap,
-            buffers: Vec::with_capacity(2),
-            dead_buffers: Vec::with_capacity(1),
+            buffers: SmallVec::new(),
+            dead_buffers: SmallVec::new(),
             width,
             height,
             last_used_buffer: 0,
