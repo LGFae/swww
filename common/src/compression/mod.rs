@@ -182,18 +182,20 @@ impl Compressor {
 
         // SAFETY: the above assertion ensures this will never fail
         let size = unsafe { LZ4_compressBound(self.buf.len() as c_int) } as usize;
-        let mut v = vec![0; size];
+        let mut v: Vec<u8> = Vec::with_capacity(size);
         // SAFETY: we've ensured above that size >= LZ4_compressBound, so this should always work
-        let n = unsafe {
-            LZ4_compress_HC(
+        unsafe {
+            let n = LZ4_compress_HC(
                 self.buf.as_ptr().cast(),
-                v.as_mut_ptr() as _,
+                v.as_mut_ptr().cast(),
                 self.buf.len() as c_int,
                 size as c_int,
                 9,
-            ) as usize
+            );
+            // this should always be true, but we check in debug builds anyway
+            debug_assert!(n > 0);
+            v.set_len(n as usize);
         };
-        v.truncate(n);
 
         let expected_buf_size = if pixel_format.channels() == 3 {
             cur.len() as u32
@@ -323,8 +325,8 @@ impl Decompressor {
         let size = unsafe {
             let bytes = bitpack.bytes();
             LZ4_decompress_safe(
-                bytes.as_ptr() as _,
-                self.ptr.as_ptr() as _,
+                bytes.as_ptr().cast(),
+                self.ptr.as_ptr().cast(),
                 bytes.len() as c_int,
                 bitpack.compressed_size as c_int,
             )
