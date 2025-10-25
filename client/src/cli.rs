@@ -261,7 +261,7 @@ pub struct Kill {
 
 #[derive(Parser)]
 pub struct Query {
-    /// Kill all swww-daemon instances (all namespaces)
+    /// Query all swww-daemon instances (all namespaces)
     #[arg(short, long, default_value = "false")]
     pub all: bool,
 
