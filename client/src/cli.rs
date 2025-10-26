@@ -265,6 +265,10 @@ pub struct Query {
     #[arg(short, long, default_value = "false")]
     pub all: bool,
 
+    /// Print the information in `json` format
+    #[arg(short, long, default_value = "false")]
+    pub json: bool,
+
     /// The daemon's namespace.
     ///
     /// The resulting namespace will be 'swww-daemon' appended to what you pass in this argument.

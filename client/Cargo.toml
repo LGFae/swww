@@ -29,6 +29,7 @@ image = { version = "0.25", default-features = false, features = [
   "tiff",
   "webp",
 ] }
+jzon  = { version = "0.12", default-features = false }
 resvg = { version = "0.45" }
 rustix = { version = "1.1", default-features = false, features = [ "fs" ] }
 fast_image_resize = "5.3"
