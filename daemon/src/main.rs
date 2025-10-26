@@ -21,7 +21,6 @@ use waybackend::{Global, objman, types::ObjectId};
 use wayland::zwlr_layer_shell_v1::Layer;
 
 use std::{
-    io::{IsTerminal, Write},
     num::NonZeroI32,
     sync::atomic::{AtomicBool, Ordering},
     time::Duration,
@@ -885,7 +884,19 @@ impl log::Log for Logger {
             };
 
             let msg = record.args();
-            let _ = std::io::stderr().write_fmt(format_args!("{level} {msg}\n"));
+            let msg = match msg.as_str() {
+                Some(s) => std::borrow::Cow::Borrowed(s),
+                None => std::borrow::Cow::Owned(msg.to_string()),
+            };
+
+            let stderr = rustix::stdio::stderr();
+            let bufs = [
+                rustix::io::IoSlice::new(level.as_bytes()),
+                rustix::io::IoSlice::new(b" "),
+                rustix::io::IoSlice::new(msg.as_bytes()),
+                rustix::io::IoSlice::new(b"\n"),
+            ];
+            _ = rustix::io::writev(stderr, &bufs);
         }
     }
 
@@ -903,7 +914,7 @@ fn make_logger(quiet: bool) {
 
     log::set_boxed_logger(Box::new(Logger {
         level_filter,
-        is_term: std::io::stderr().is_terminal(),
+        is_term: rustix::termios::isatty(rustix::stdio::stderr()),
     }))
     .map(|()| log::set_max_level(level_filter))
     .unwrap();
