@@ -204,11 +204,6 @@ impl Wallpaper {
         }
     }
 
-    pub fn set_name(&mut self, name: Box<str>) {
-        debug!("Output {} name: {name}", self.output_name);
-        self.name = Some(name);
-    }
-
     pub fn set_desc(&mut self, desc: Box<str>) {
         debug!("Output {} description: {desc}", self.output_name);
         self.desc = Some(desc);
@@ -281,11 +276,7 @@ impl Wallpaper {
 
         if (!self.configured && use_cache) || self.img.is_set() {
             'brk: {
-                let output_name = match self.name.as_deref() {
-                    Some(name) => name,
-                    None => break 'brk,
-                };
-
+                let output_name = self.name.as_deref().unwrap_or("?");
                 let cache_data = match read_cache_file(output_name) {
                     Ok(cache_data) => cache_data,
                     Err(e) => {

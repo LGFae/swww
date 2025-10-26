@@ -452,23 +452,21 @@ impl wayland::wl_output::EvHandler for Daemon {
     }
 
     fn name(&mut self, sender_id: ObjectId, name: &str) {
+        // According to the protocol:
+        // 'names are sent once per output object, and the name does not change over the
+        // lifetime of the wl_output global'. So we need only set the name for the pending
+        // outputs.
         for info in &mut self.pending_outputs {
             if info.output == sender_id {
                 info.name = Some(name.into());
                 return;
             }
         }
-
-        for wallpaper in &self.wallpapers {
-            let mut wallpaper = wallpaper.borrow_mut();
-            if wallpaper.has_output(sender_id) {
-                wallpaper.set_name(name.into());
-                return;
-            }
-        }
     }
 
     fn description(&mut self, sender_id: ObjectId, description: &str) {
+        // unlike the `name` event, the `descriptor` event can be sent multiple times, whenever the
+        // description changes, so we must have two for loops here
         for info in &mut self.pending_outputs {
             if info.output == sender_id {
                 info.desc = Some(description.into());
