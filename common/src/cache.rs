@@ -16,6 +16,11 @@ use crate::mmap::Mmap;
 
 const CACHE_DIRNAME: &str = env!("CARGO_PKG_VERSION");
 
+/// Create this with [read_cache_file] and use it with [get_previous_image_cache]. It is its own
+/// type just for sake of preventing errors with sending generic buffers to
+/// [get_previous_image_cache].
+pub struct CacheData(Vec<u8>);
+
 pub struct CacheEntry<'a> {
     pub namespace: &'a str,
     pub resize: &'a str,
@@ -168,62 +173,25 @@ pub fn load_animation_frames<P: AsRef<Path>>(
     Ok(None)
 }
 
-pub fn read_cache_file(output_name: &str) -> io::Result<Vec<u8>> {
+pub fn read_cache_file(output_name: &str) -> io::Result<CacheData> {
     clean_previous_versions();
 
     let mut filepath = cache_dir()?;
 
     filepath.push(output_name);
-    std::fs::read(filepath)
+    Ok(CacheData(std::fs::read(filepath)?))
 }
 
 pub fn get_previous_image_cache<'a>(
     output_name: &str,
     namespace: &str,
-    cache_data: &'a [u8],
+    cache_data: &'a CacheData,
 ) -> io::Result<Option<CacheEntry<'a>>> {
-    let entries = CacheEntry::parse_file(output_name, cache_data)?;
+    let entries = CacheEntry::parse_file(output_name, &cache_data.0)?;
 
     Ok(entries
         .into_iter()
         .find(|entry| entry.namespace == namespace))
-}
-
-pub fn load(output_name: &str, namespace: &str) -> io::Result<()> {
-    let cache_data = read_cache_file(output_name)?;
-
-    let cache = match get_previous_image_cache(output_name, namespace, &cache_data)? {
-        Some(cache) => cache,
-        None => return Ok(()),
-    };
-
-    if let Ok(mut child) = std::process::Command::new("pidof").arg("swww").spawn()
-        && let Ok(status) = child.wait()
-        && status.success()
-    {
-        return Err(std::io::Error::other(
-            "there is already another swww process running",
-        ));
-    }
-
-    std::process::Command::new("swww")
-        .arg("img")
-        .args([
-            "--outputs",
-            output_name,
-            "--resize",
-            cache.resize,
-            "--filter",
-            cache.filter,
-            // namespace needs a format because the empty namespace is valid, so we need to use the
-            // `=` format
-            &format!("--namespace={namespace}"),
-            "--transition-type=none",
-            cache.img_path,
-        ])
-        .spawn()?
-        .wait()?;
-    Ok(())
 }
 
 pub fn clean() -> io::Result<()> {

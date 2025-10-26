@@ -1,4 +1,7 @@
-use common::ipc::{BgImg, BgInfo, PixelFormat, Scale};
+use common::{
+    cache::{get_previous_image_cache, read_cache_file},
+    ipc::{BgImg, BgInfo, PixelFormat, Scale},
+};
 use log::{debug, error, warn};
 use waybackend::{Waybackend, objman::ObjectManager, types::ObjectId};
 
@@ -277,17 +280,52 @@ impl Wallpaper {
         self.dirty = false;
 
         if (!self.configured && use_cache) || self.img.is_set() {
-            let name: String = self.name.as_deref().unwrap_or("?").into();
-            let namespace = namespace.to_string();
-            std::thread::Builder::new()
-                .name("cache loader".to_string())
-                .stack_size(1 << 14)
-                .spawn(move || {
-                    if let Err(e) = common::cache::load(&name, &namespace) {
-                        warn!("failed to load cache: {e}");
+            'brk: {
+                let output_name = match self.name.as_deref() {
+                    Some(name) => name,
+                    None => break 'brk,
+                };
+
+                let cache_data = match read_cache_file(output_name) {
+                    Ok(cache_data) => cache_data,
+                    Err(e) => {
+                        warn!("failed to read cache file: {e}");
+                        break 'brk;
                     }
-                })
-                .unwrap(); // builder only fails if `name` contains null bytes
+                };
+
+                match get_previous_image_cache(output_name, namespace, &cache_data) {
+                    Ok(Some(cache)) => {
+                        // Note: we do not need to wait for this command because we set SIGCHLD to
+                        // SIG_IGN, and posix says that does not generate a zombie process (see
+                        // `man 3p _EXIT`
+                        let ret = std::process::Command::new("swww")
+                            .arg("img")
+                            .args([
+                                "--outputs",
+                                output_name,
+                                "--resize",
+                                cache.resize,
+                                "--filter",
+                                cache.filter,
+                                // namespace needs a format because the empty namespace is valid, so we need to use the
+                                // `=` format
+                                &format!("--namespace={namespace}"),
+                                "--transition-type=none",
+                                cache.img_path,
+                            ])
+                            .spawn();
+                        if let Err(e) = ret {
+                            error!("failed to spawn child swww process to load the cache: {e}");
+                        }
+                    }
+                    Ok(None) => break 'brk,
+                    Err(e) => {
+                        warn!("failed get previous image cache: {e}");
+                        break 'brk;
+                    }
+                };
+            }
         }
 
         let (width, height) = (self.width.get(), self.height.get());

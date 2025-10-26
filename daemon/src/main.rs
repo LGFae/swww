@@ -779,6 +779,23 @@ fn setup_signals() {
             error!("Failed to install signal handler!");
         }
     }
+
+    #[cfg(not(target_os = "aix"))]
+    {
+        sigaction.sa_sigaction = libc::SIG_IGN;
+    }
+    #[cfg(target_os = "aix")]
+    {
+        sigaction.sa_union.__su_sigaction = libc::SIG_IGN;
+    }
+
+    let signal = libc::SIGCHLD;
+    let ret =
+        unsafe { libc::sigaction(signal, std::ptr::addr_of!(sigaction), std::ptr::null_mut()) };
+    if ret != 0 {
+        error!("Failed to install signal handler!");
+    }
+
     debug!("Finished setting up signal handlers");
 }
 
