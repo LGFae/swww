@@ -1,6 +1,5 @@
 use core::fmt;
 use core::num::{NonZeroI32, NonZeroU8};
-use core::time::Duration;
 
 use crate::compression::BitPack;
 use crate::mmap::Mmap;
@@ -571,8 +570,40 @@ impl ImgReq {
     }
 }
 
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy)]
+pub struct Nanos(u64);
+
+impl Nanos {
+    #[inline]
+    pub fn from_nanos(nanos: u64) -> Self {
+        Self(nanos)
+    }
+
+    #[inline]
+    pub fn from_millis(millis: u64) -> Self {
+        Self(millis * 1000)
+    }
+
+    #[inline]
+    pub fn into_timespec(self) -> rustix::time::Timespec {
+        let secs = (self.0 / 1_000_000_000) as rustix::time::Secs;
+        let nsecs = (self.0 % 1_000_000_000) as rustix::time::Nsecs;
+        rustix::time::Timespec {
+            tv_sec: secs,
+            tv_nsec: nsecs,
+        }
+    }
+}
+
+impl core::ops::AddAssign for Nanos {
+    fn add_assign(&mut self, rhs: Self) {
+        self.0 = self.0 + rhs.0;
+    }
+}
+
 pub struct Animation {
-    pub animation: Box<[(BitPack, Duration)]>,
+    pub animation: Box<[(BitPack, Nanos)]>,
 }
 
 impl Animation {
@@ -582,7 +613,7 @@ impl Animation {
         buf.extend(&(animation.len() as u32).to_ne_bytes());
         for (bitpack, duration) in animation {
             bitpack.serialize(buf);
-            buf.extend(&duration.as_secs_f64().to_ne_bytes());
+            buf.extend(&duration.0.to_ne_bytes());
         }
     }
 
@@ -594,9 +625,7 @@ impl Animation {
         for _ in 0..animation_len {
             let (anim, offset) = BitPack::deserialize(mmap, bytes.get(i..)?)?;
             i += offset;
-            let duration = Duration::from_secs_f64(f64::from_ne_bytes(
-                bytes.get(i..i + 8)?.try_into().unwrap(),
-            ));
+            let duration = Nanos(u64::from_ne_bytes(bytes.get(i..i + 8)?.try_into().unwrap()));
             i += 8;
             animation.push((anim, duration));
         }

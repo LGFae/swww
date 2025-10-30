@@ -8,12 +8,11 @@ use resvg::usvg::{Options, Tree};
 use std::{
     io::{Cursor, Read, stdin},
     path::Path,
-    time::Duration,
 };
 
 use common::{
     compression::{BitPack, Compressor},
-    ipc::{self, Coord, PixelFormat, Position},
+    ipc::{self, Coord, Nanos, PixelFormat, Position},
 };
 
 use crate::cli::ResizeStrategy;
@@ -304,14 +303,14 @@ pub fn compress_frames(
     filter: FilterType,
     resize: ResizeStrategy,
     color: [u8; 4],
-) -> Result<Vec<(BitPack, Duration)>, String> {
+) -> Result<Vec<(BitPack, Nanos)>, String> {
     let mut compressor = Compressor::new();
     let mut compressed_frames = Vec::new();
 
     // The first frame should always exist
     let first = frames.next().unwrap().unwrap();
     let first_duration = first.delay().numer_denom_ms();
-    let mut first_duration = Duration::from_millis((first_duration.0 / first_duration.1).into());
+    let mut first_duration = Nanos::from_millis((first_duration.0 / first_duration.1).into());
     let first_img = Image::from_frame(first, format);
     let first_img = match resize {
         ResizeStrategy::No => img_pad(&first_img, dim, color),
@@ -323,7 +322,7 @@ pub fn compress_frames(
     let mut canvas: Option<Box<[u8]>> = None;
     while let Some(Ok(frame)) = frames.next() {
         let (dur_num, dur_div) = frame.delay().numer_denom_ms();
-        let duration = Duration::from_millis((dur_num / dur_div).into());
+        let duration = Nanos::from_millis((dur_num / dur_div).into());
 
         let img = Image::from_frame(frame, format);
         let img = match resize {

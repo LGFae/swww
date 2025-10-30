@@ -8,6 +8,7 @@ use std::sync::OnceLock;
 use rustix::fd::OwnedFd;
 use rustix::io::Errno;
 use rustix::net;
+use rustix::time::Timespec;
 
 use super::ErrnoExt;
 use super::IpcError;
@@ -133,9 +134,11 @@ impl<T> IpcSocket<T> {
 impl IpcSocket<Client> {
     /// Connects to already running `Daemon`, if there is one.
     pub fn connect(namespace: &str) -> Result<Self, IpcError> {
-        // these were hardcoded everywhere, no point in passing them around
-        let tries = 5;
-        let interval = 100;
+        const ATTEMPTS: usize = 5;
+        const INTERVAL: Timespec = Timespec {
+            tv_sec: 0,
+            tv_nsec: 100_000_000,
+        };
 
         let socket = net::socket_with(
             net::AddressFamily::UNIX,
@@ -150,7 +153,7 @@ impl IpcSocket<Client> {
 
         // this will be overwritten, Rust just doesn't know it
         let mut error = Errno::INVAL;
-        for _ in 0..tries {
+        for _ in 0..ATTEMPTS {
             match net::connect(&socket, &addr) {
                 Ok(()) => {
                     #[cfg(debug_assertions)]
@@ -167,7 +170,7 @@ impl IpcSocket<Client> {
                 }
                 Err(e) => error = e,
             }
-            std::thread::sleep(Duration::from_millis(interval));
+            let _ = rustix::thread::nanosleep(&INTERVAL);
         }
 
         let kind = if error.kind() == std::io::ErrorKind::NotFound {

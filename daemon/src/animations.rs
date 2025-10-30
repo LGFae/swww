@@ -2,11 +2,11 @@ use log::error;
 use smallvec::SmallVec;
 use waybackend::{Waybackend, objman::ObjectManager};
 
-use std::time::{Duration, Instant};
+use rustix::time::{ClockId, Timespec, clock_gettime};
 
 use common::{
     compression::Decompressor,
-    ipc::{self, BgImg, ImgReq, PixelFormat},
+    ipc::{self, BgImg, ImgReq, Nanos, PixelFormat},
     mmap::MmappedBytes,
 };
 
@@ -17,7 +17,7 @@ use transitions::Effect;
 
 pub struct Animator {
     pub wallpapers: SmallVec<[WallpaperCell; 2]>,
-    now: Instant,
+    now: Timespec,
     animator: AnimatorKind,
 }
 
@@ -49,17 +49,17 @@ impl Animator {
         let effect = Some(Effect::new(transition, dim));
         Some(Self {
             wallpapers,
-            now: Instant::now(),
+            now: clock_gettime(ClockId::Monotonic),
             animator: AnimatorKind::Transition(Transition {
                 effect,
-                fps_nanos: 1_000_000_000 / transition.fps as u64,
+                fps_nanos: Nanos::from_nanos(1_000_000_000 / transition.fps as u64),
                 img,
                 animation,
             }),
         })
     }
 
-    pub fn time_to_draw(&self) -> std::time::Duration {
+    pub fn time_to_draw(&self) -> Timespec {
         match &self.animator {
             AnimatorKind::Transition(transition) => transition.time_to_draw(&self.now),
             AnimatorKind::Animation(animation) => animation.time_to_draw(&self.now),
@@ -67,7 +67,7 @@ impl Animator {
     }
 
     pub fn updt_time(&mut self) {
-        self.now = Instant::now();
+        self.now = clock_gettime(ClockId::Monotonic);
     }
 
     pub fn frame(
@@ -109,15 +109,17 @@ impl Animator {
 }
 
 struct Transition {
-    fps_nanos: u64,
+    fps_nanos: Nanos,
     effect: Option<Effect>,
     img: MmappedBytes,
     animation: Option<ipc::Animation>,
 }
 
 impl Transition {
-    fn time_to_draw(&self, now: &Instant) -> std::time::Duration {
-        Duration::from_nanos(self.fps_nanos).saturating_sub(now.elapsed())
+    fn time_to_draw(&self, start: &Timespec) -> Timespec {
+        let now = clock_gettime(ClockId::Monotonic);
+        let elapsed = now - *start;
+        timespec_saturating_sub(self.fps_nanos.into_timespec(), elapsed)
     }
 
     fn frame(
@@ -148,10 +150,15 @@ struct Animation {
 }
 
 impl Animation {
-    fn time_to_draw(&self, now: &Instant) -> std::time::Duration {
-        self.animation.animation[self.i % self.animation.animation.len()]
-            .1
-            .saturating_sub(now.elapsed())
+    fn time_to_draw(&self, start: &Timespec) -> Timespec {
+        let now = clock_gettime(ClockId::Monotonic);
+        let elapsed = now - *start;
+        timespec_saturating_sub(
+            self.animation.animation[self.i % self.animation.animation.len()]
+                .1
+                .into_timespec(),
+            elapsed,
+        )
     }
 
     fn frame(
@@ -200,4 +207,28 @@ impl Animation {
 
         *i += 1;
     }
+}
+
+/// inspired by the std Duration implementation
+fn timespec_saturating_sub(a: Timespec, b: Timespec) -> Timespec {
+    let mut res = Timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+
+    if a.tv_sec >= b.tv_sec {
+        let mut secs = a.tv_sec - b.tv_sec;
+        let nanos = if a.tv_nsec >= b.tv_nsec {
+            a.tv_nsec - b.tv_nsec
+        } else if secs > 0 {
+            secs -= 1;
+            a.tv_nsec + 1_000_000_000 - b.tv_nsec
+        } else {
+            return res;
+        };
+        res.tv_sec = secs;
+        res.tv_nsec = nanos;
+    }
+
+    res
 }

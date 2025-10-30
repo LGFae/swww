@@ -8,11 +8,7 @@ mod output_info;
 mod wallpaper;
 mod wayland;
 use log::{LevelFilter, debug, error, info, trace, warn};
-use rustix::{
-    event::{Nsecs, Secs},
-    fd::OwnedFd,
-    fs::Timespec,
-};
+use rustix::{fd::OwnedFd, fs::Timespec};
 
 use smallvec::SmallVec;
 use wallpaper::WallpaperCell;
@@ -20,10 +16,9 @@ use wallpaper::WallpaperCell;
 use waybackend::{Global, objman, types::ObjectId};
 use wayland::zwlr_layer_shell_v1::Layer;
 
-use std::{
+use core::{
     num::NonZeroI32,
     sync::atomic::{AtomicBool, Ordering},
-    time::Duration,
 };
 
 use animations::Animator;
@@ -237,6 +232,10 @@ impl Daemon {
     }
 
     fn draw(&mut self) {
+        const THRESHOLD: Timespec = Timespec {
+            tv_sec: 0,
+            tv_nsec: 1_000_000,
+        };
         self.poll_time = None;
 
         let mut i = 0;
@@ -248,16 +247,13 @@ impl Daemon {
                 .all(|w| w.borrow().is_draw_ready())
             {
                 let time = animator.time_to_draw();
-                if time > Duration::from_micros(1000) {
-                    self.set_poll_time(Timespec {
-                        tv_sec: time.as_secs() as Secs,
-                        tv_nsec: time.subsec_nanos().saturating_sub(500_000) as Nsecs,
-                    });
+                if time > THRESHOLD {
+                    self.set_poll_time(time);
                     i += 1;
                     continue;
                 }
 
-                if !time.is_zero() {
+                if !(time.tv_sec == 0 && time.tv_nsec == 0) {
                     spin_sleep(time);
                 }
 
@@ -275,10 +271,7 @@ impl Daemon {
                 }
             }
             let time = animator.time_to_draw();
-            self.set_poll_time(Timespec {
-                tv_sec: time.as_secs() as Secs,
-                tv_nsec: time.subsec_nanos().saturating_sub(500_000) as Nsecs,
-            });
+            self.set_poll_time(time);
             i += 1;
         }
     }
@@ -940,14 +933,24 @@ pub fn is_daemon_running(namespace: &str) -> Result<bool, String> {
 ///
 /// This will sleep for an amount of time we can roughly expected the OS to still be precise enough
 /// for frame timing (125 us, currently).
-fn spin_sleep(duration: std::time::Duration) {
-    const ACCURACY: std::time::Duration = std::time::Duration::new(0, 125_000);
-    let start = std::time::Instant::now();
+fn spin_sleep(duration: Timespec) {
+    const ACCURACY: Timespec = Timespec {
+        tv_sec: 0,
+        tv_nsec: 125_000,
+    };
+
+    let start = rustix::time::clock_gettime(rustix::time::ClockId::Monotonic);
+
     if duration > ACCURACY {
-        std::thread::sleep(duration - ACCURACY);
+        let d = duration - ACCURACY;
+        _ = rustix::thread::nanosleep(&d);
     }
 
-    while start.elapsed() < duration {
-        std::thread::yield_now();
+    loop {
+        let now = rustix::time::clock_gettime(rustix::time::ClockId::Monotonic);
+        if now - start >= duration {
+            break;
+        }
+        rustix::thread::sched_yield();
     }
 }
