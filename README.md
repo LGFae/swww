@@ -1,3 +1,7 @@
+# ATTENTION: This project has been renamed `awww` and moved to [Codeberg](https://codeberg.org/LGFae/awww)
+
+If you are interested, you can read the reasons behind it [in my blog](https://www.lgfae.com/posts/2025-10-29-RenamingSwww.html).
+
 # A Solution to your Wayland Wallpaper Woes
 ### Efficient animated wallpaper daemon for wayland, controlled at runtime
 
