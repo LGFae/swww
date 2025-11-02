@@ -2,7 +2,7 @@ use std::{str::FromStr, time::Duration};
 
 use clap::Parser;
 use common::cache;
-use common::ipc::{self, Answer, Client, IpcSocket, RequestSend};
+use common::ipc::{self, Answer, BgInfo, Client, IpcSocket, RequestSend};
 use common::mmap::Mmap;
 
 mod imgproc;
@@ -42,8 +42,9 @@ fn main() -> Result<(), String> {
         }
     };
 
-    for namespace in namespaces {
-        let socket = IpcSocket::connect(&namespace).map_err(|err| err.to_string())?;
+    let mut infos = Vec::new();
+    for namespace in &namespaces {
+        let socket = IpcSocket::connect(namespace).map_err(|err| err.to_string())?;
         loop {
             RequestSend::Ping.send(&socket)?;
             let bytes = socket.recv().map_err(|err| err.to_string())?;
@@ -58,22 +59,66 @@ fn main() -> Result<(), String> {
             std::thread::sleep(Duration::from_millis(1));
         }
 
-        process_swww_args(&swww, &namespace)?;
+        if let Some(info) = process_swww_args(&swww, namespace)? {
+            infos.push(info);
+        }
+    }
+
+    if !infos.is_empty() {
+        if let Swww::Query(query) = swww
+            && query.json
+        {
+            use jzon::{JsonValue, object, stringify_pretty};
+            let mut buf = String::new();
+            for (namespace, infos) in namespaces.iter().zip(infos) {
+                let mut arr = JsonValue::new_array();
+                for info in infos {
+                    let displaying = match info.img {
+                        ipc::BgImg::Color(color) => {
+                            object! { color: format!("#{:x}", u32::from_ne_bytes(color)) }
+                        }
+                        ipc::BgImg::Img(img) => {
+                            object! { image: img.as_ref() }
+                        }
+                    };
+                    _ = arr.push(object! {
+                        name: info.name.as_ref(),
+                        width: info.dim.0,
+                        height: info.dim.1,
+                        scale: info.scale_factor.to_f32(),
+                        displaying: displaying
+                    });
+                }
+                buf = format!("{buf}\n\"{namespace}\": {},", stringify_pretty(arr, 4));
+            }
+            buf.pop(); // delete trailing comma
+            println!("{{{buf}\n}}");
+        } else {
+            for (namespace, infos) in namespaces.iter().zip(infos) {
+                for info in infos {
+                    println!("{namespace}: {info}");
+                }
+            }
+        }
     }
     Ok(())
 }
 
-fn process_swww_args(args: &Swww, namespace: &str) -> Result<(), String> {
+fn process_swww_args(args: &Swww, namespace: &str) -> Result<Option<Box<[BgInfo]>>, String> {
     let request = match make_request(args, namespace)? {
         Some(request) => request,
-        None => return Ok(()),
+        None => return Ok(None),
     };
     let socket = IpcSocket::connect(namespace).map_err(|err| err.to_string())?;
     request.send(&socket)?;
     let bytes = socket.recv().map_err(|err| err.to_string())?;
     drop(socket);
     match Answer::receive(bytes) {
-        Answer::Info(info) => info.iter().for_each(|i| println!("{namespace}: {i}")),
+        Answer::Info(infos) => {
+            if let Swww::Query(_) = args {
+                return Ok(Some(infos));
+            }
+        }
         Answer::Ok => {
             if let Swww::Kill(_) = args {
                 #[cfg(debug_assertions)]
@@ -83,7 +128,7 @@ fn process_swww_args(args: &Swww, namespace: &str) -> Result<(), String> {
                 let path = IpcSocket::<Client>::path(namespace);
                 for _ in 0..tries {
                     if rustix::fs::access(&path, rustix::fs::Access::EXISTS).is_err() {
-                        return Ok(());
+                        return Ok(None);
                     }
                     std::thread::sleep(Duration::from_millis(100));
                 }
@@ -94,10 +139,10 @@ fn process_swww_args(args: &Swww, namespace: &str) -> Result<(), String> {
             }
         }
         Answer::Ping(_) => {
-            return Ok(());
+            return Ok(None);
         }
     }
-    Ok(())
+    Ok(None)
 }
 
 fn make_request(args: &Swww, namespace: &str) -> Result<Option<RequestSend>, String> {
@@ -405,5 +450,6 @@ fn restore_output(output: &str, namespace: &str) -> Result<(), String> {
             transition_wave: (0.0, 0.0),
         }),
         namespace,
-    )
+    )?;
+    Ok(())
 }
